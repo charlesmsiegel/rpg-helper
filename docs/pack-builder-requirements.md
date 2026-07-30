@@ -97,6 +97,35 @@ minor annoyance, a paraphrased rule is a correctness bug.
 
 ---
 
+## Query Expansion (offline HyDE)
+
+Players ask in table slang; books are written in rules jargon. Someone asks how to
+"wrestle" a goblin and the rule is called "grapple". Lexical search misses entirely
+and dense search is unreliable across that gap.
+
+The fix runs at build time rather than query time. For each verbatim-class chunk the
+builder generates:
+
+- **Question paraphrases** — the ways a player would actually ask for this rule,
+  including colloquialisms, common misnamings, and table shorthand. Target ~5 per
+  chunk. These are embedded and stored in `vectors` as additional rows pointing at
+  the same `chunk_id`.
+- **Lexical aliases** — synonym terms written into `entities` as aliases, so BM25
+  query expansion catches the same mismatch on the keyword side.
+
+This is HyDE inverted: instead of generating a hypothetical document per query on a
+phone, generate hypothetical queries per document on a desktop. Retrieval stays pure
+lookup, expansions are inspectable and testable, and nothing is regenerated at
+runtime.
+
+Budget roughly 5x vector rows for verbatim-class chunks. At float16/384-dim this is
+about 19 MB on a 300-page book — acceptable.
+
+Expansions are derived content and must obey the rules below: they are never
+presented to the user as text, only used as retrieval surface.
+
+---
+
 ## Derived Content
 
 The builder may generate content that does not exist in the source — summaries,
