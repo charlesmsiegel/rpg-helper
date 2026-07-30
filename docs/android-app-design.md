@@ -66,22 +66,46 @@ itself say what to do when the top results are mixed — and they routinely are,
 real questions are mixed. *How does grappling work, and do the Underdark rules change
 it?* pulls a rule and a lore passage in one query.
 
-The policy is a partition, not a choice:
+The policy is a partition into **three** routes, not two:
 
-1. Split the results into **verbatim-class** and **everything else**.
-2. Every verbatim-class result above the answer threshold renders as its own quote
-   card, ranked first. Quotes are cheap, and a rules answer is what the user most
-   likely came for.
-3. Generation runs **only over the non-verbatim results**, and produces at most one
-   generated card, placed below the quotes.
-4. If only one class is present, only that kind of card appears. If neither clears the
-   threshold, the refusal card.
+1. **Verbatim-class** (`origin='source'`, eligible kind) → a quote card each, ranked
+   first. Quotes are cheap, and a rules answer is what the user most likely came for.
+2. **Derived** (`origin='derived'`, any kind) → rendered **directly from its stored
+   text**, as an attributed card citing through `chunk_derivation`. No model runs.
+   The builder already wrote this text on a desktop with a frontier model; regenerating
+   it on a phone would be slower, worse, and would put a second unverified generation
+   between the user and content that was already validated at build time.
+3. **`setting` with `origin='source'`** → the only input generation ever sees, and at
+   most one generated card, placed below the quotes.
 
-Step 3 carries the weight: **verbatim-class chunks never enter the generation
-context.** Not as background, not as supporting material. A rules chunk in the prompt
-is a rules chunk the model can paraphrase, and a paraphrased rule reaching the screen
-in a generated card is the precise failure this whole design exists to prevent. The
-model cannot restate a rule it was never shown.
+If only one route has results, only that card type appears. If nothing clears the
+threshold, the refusal card.
+
+Route 2 is easy to miss and matters: a `('glossary','derived')` definition or a
+builder-written statblock summary is *not* setting text and must not be fed to the
+model. It also is not quotable. It is stored prose with known provenance, and it
+renders as exactly that.
+
+### Generation sees neither rules text nor rules intent
+
+Two separate exclusions, and only having the first is a trap.
+
+**Verbatim-class chunks never enter the generation context.** Not as background, not
+as supporting material. A rules chunk in the prompt is a rules chunk the model can
+paraphrase.
+
+But withholding the chunk is not enough, because the *question* still carries the
+rules intent. Asked "how does grappling work, and do the Underdark rules change it?"
+with only lore chunks in context, a model that has read the internet will happily
+explain grappling from pretraining — the exact failure this document warns about two
+sections up, arriving beside an authoritative quote that makes it look corroborated.
+
+So the query is split too. When both routes fire, generation receives only the
+**residual intent** — the part of the question the quote cards did not answer —
+produced by the same normalization pass, and is instructed to answer solely from
+provided context and to decline any mechanical sub-question outright. The claim-support
+suite (§8) is what keeps this honest, since a prompt instruction is a request, not a
+guarantee.
 
 The user gets the rule quoted exactly and the lore explained, visibly separated,
 rather than one confident paragraph that blends the two and is authoritative about
@@ -118,6 +142,24 @@ thing standing between them and the app working.
 The app knows which `embedder_id`s it can serve. A pack naming an unknown one is
 refused at activation rather than retrieved against incorrectly.
 
+**Active packs may span more than one embedder contract.** They will in practice: a
+pack built two years ago and one built today can both be valid and name different
+embedders. One query embedding cannot serve both — the vectors live in different
+spaces, and for differing `embedder_dim` the cosine is not even computable.
+
+So the app groups active packs by embedder contract, embeds the query **once per
+distinct contract**, and scores each group in its own space. Groups are then combined
+at the chunk level by rank.
+
+This is the second time rank-based fusion pays for itself. Cosine scores from two
+different embedding spaces are not comparable numbers and averaging them is
+meaningless; their *rankings* are comparable, because a rank is a statement about one
+list. Reciprocal rank fusion was chosen to avoid calibrating BM25 against cosine, and
+it turns out to solve cross-space combination for free.
+
+The cost is one embedder inference per distinct contract per query. Keeping the
+number of supported contracts small is therefore a real constraint, not just tidiness.
+
 ### The generative model
 
 A small multimodal model, quantized to 4 bits, accepting image input — which is what
@@ -132,9 +174,12 @@ It has exactly three jobs, and **none of them is unconditional**:
 
 | Job | When |
 |---|---|
-| Query normalization | only for voice or camera input, or a follow-up containing an unresolved reference |
-| Setting answers | only over `setting` chunks, never over verbatim-class ones |
+| Query normalization | only for voice or camera input, a follow-up containing an unresolved reference, or splitting residual intent on a mixed result |
+| Setting answers | only over `('setting','source')` chunks — never verbatim-class, never derived |
 | Image understanding | only for camera queries, and only to produce a retrieval query |
+
+Derived chunks are absent from that table deliberately: their text was generated at
+build time and is rendered as stored, so they cost no inference at all.
 
 ### Normalization is conditional, or the guarantee is a lie
 
@@ -181,21 +226,31 @@ The pipeline:
 3. **Apply supersession.** Drop every chunk targeted by an active pack's
    `supersessions` rows, before either index is scored. Superseded text is not
    outranked, it is absent: it cannot be quoted, cited, or fed to generation.
-4. **Embed the query** with the on-device embedder, in the space named by the active
-   packs' `embedder_id`.
-5. **Search both indexes** over active packs only.
-6. **Fuse** the two ranked lists. Reciprocal rank fusion is the default — it needs no
-   score calibration between BM25 and cosine, which is the part that otherwise
-   requires per-pack tuning. Treat the fusion method as tunable; treat the
-   requirement that both signals contribute as not.
-7. **Resolve vectors to chunks**, taking each chunk's best-scoring vector.
+4. **Embed the query**, once per distinct embedder contract across the active packs
+   (§3).
+5. **Search both indexes** over active packs only — BM25 producing a ranked list of
+   chunks, dense search producing a ranked list of *vector rows*.
+6. **Collapse dense hits to chunks**, keeping each chunk's best-scoring vector.
    `expansion`-role vectors compete here on equal footing and are then discarded —
    they are retrieval surface and are never rendered.
+7. **Fuse** the two lists, now both ranked over chunks. Reciprocal rank fusion is the
+   default — it needs no score calibration between BM25 and cosine, which is the part
+   that otherwise requires per-pack tuning, and it is what makes multiple embedder
+   contracts combinable at all. Treat the fusion method as tunable; treat the
+   requirement that both signals contribute as not.
 8. **Deduplicate nesting**, class-aware: a verbatim-class parent wins over its child,
    but a **non-verbatim parent loses to a verbatim child**. Otherwise a rollable table
    inside a lore chapter would be delivered as generated prose despite the app holding
    a byte-exact copy of it.
 9. **Boost** chunks named by a matched alias with a non-NULL `chunk_id`.
+
+**Steps 6 and 7 are in that order for a reason.** BM25 ranks chunks; dense search
+ranks vector rows, and a long statblock may own a dozen of them between content
+windows and question expansions. Fusing first would either compare identifiers that
+never match, or let one chunk occupy a dozen consecutive dense ranks and crowd the
+fused list with itself. Either way the hybrid ranking is quietly distorted, worst
+for exactly the long, heavily-vectored chunks that matter most. Collapse to one hit
+per chunk, then fuse.
 
 Pack activation is the user's scoping tool: which books are live, and in what order.
 
@@ -205,7 +260,18 @@ unrelated sources both cover a topic — a preference. It cannot deliver "our er
 wins", because the corrected rule and the original almost never tie: they score
 differently, and the superseded text can simply win outright while priority never gets
 consulted. Errata therefore rides on `supersessions`, applied at step 3 as a filter
-before anything is scored. A correction removes what it corrects.
+before scoring.
+
+**Supersession must also reach everything rooted at the superseded chunk**, not just
+the retrieval indexes. Capabilities address chunks directly and never pass through
+this pipeline: a roller invokes a `tables` row by id. Filtering only the indexes would
+leave an erratum's corrected table unquotable-but-superseded in search while the
+*original* table stayed rollable — the app quietly rolling on obsolete rows, which is
+worse than the stale quote the filter was added to prevent. Deactivating a chunk
+therefore deactivates its capability manifests, its `tables` rows, and its `entities`
+rows together.
+
+A correction removes what it corrects, everywhere.
 
 If nothing clears the relevance floor, the app refuses. See §7.
 
@@ -260,6 +326,12 @@ embedded scripting language:
 - Constraints advise by default. A sheet that violates one is flagged, not rejected;
   house rules are the norm, and an app that refuses to store a legal-at-this-table
   character is an app that gets deleted.
+
+Constraints ship in the pack's `constraints` table, each row instantiating one
+predicate form and citing the chunk that states the rule — so a flagged violation can
+link to the passage behind it. Without that table the engine has nothing to load and
+every game's rules would end up compiled into the app, which is the outcome this whole
+mechanism exists to avoid.
 
 **Still to pin: the exact five predicate forms and their arguments.** These go in the
 schema spec alongside the DDL, since the builder and the app must agree on them
@@ -320,7 +392,8 @@ strategy is mostly about making the invariants falsifiable:
 | **Retrieval regression** | a labelled query set per test pack, measuring recall@k, gated in CI |
 | **Constraint engine** | unit and property tests over the closed predicate vocabulary |
 | **Dice grammar conformance** | shared expression/range/distribution vectors, run identically here and in the builder |
-| **Pack rejection** | one deliberately broken pack per rejection case — wrong endianness (caught by the probe vector, not by length), span violation, dimension mismatch, uncovered vector tiling, mid-character span offset |
+| **Pack rejection** | one deliberately broken pack per *on-device* rejection case — wrong endianness (caught by the probe vector, not by length), dimension mismatch, span length disagreeing with its text, derived chunk with no `chunk_derivation`, unknown `embedder_id`, unrecognized `schema_version` |
+| **Builder validation** | span boundaries, containment, sibling overlap, slice equality, `text_sha256` — run against the source, in the builder, not on the phone |
 | **On-device performance** | cold model load, tokens/sec, retrieval latency across increasing active-pack counts, tracked as a gate |
 
 ### Citation integrity is not grounding
@@ -346,9 +419,45 @@ So claim support is tested separately, and it is the harder half:
 - Scored as a regression threshold, not pass/fail on every claim. Entailment judgment
   is noisy, and a suite that flakes gets disabled, which is the real failure mode.
 
-The two tests catch different things and neither substitutes for the other. Membership
-catches plumbing bugs — a citation pointing at a chunk that was never retrieved.
-Support catches the model, which is the thing actually capable of lying.
+**The same check has to cover derived chunk text**, and testing only live generation
+misses it entirely. A derived chunk is model-written prose that the app renders with
+citations — the identical trust claim as a generated answer, made by a different
+model at a different time. Its `chunk_derivation` rows guarantee that the cited chunks
+exist, and nothing else. A builder-written summary that quietly invents a detail
+carries a well-formed citation, renders as attributed text, and passes every
+validation in this document, because the only entailment check runs against answers
+the phone generates and this text was never generated on a phone.
+
+Derived text is therefore claim-checked **in the builder**, against the chunks in its
+own `chunk_derivation`, as an enrichment validation: a summary that fails is dropped
+and recorded, not shipped. That is the natural home for it — the builder already has
+the frontier model, the source, and no latency budget.
+
+The tests catch different things and none substitutes for another. Membership catches
+plumbing bugs. On-device support catches the small model answering live. Builder-side
+support catches the large model that wrote the pack — the one nobody thinks to
+distrust, because its output looks like data by the time the app sees it.
+
+### What the phone can actually check
+
+The two rows above are split deliberately. Span validation — boundaries, containment,
+sibling overlap, and whether `text` equals its slice — requires the normalized source
+bytes, and the pack ships only their hash. The app cannot recompute `text_sha256`
+without the text it hashes, and it cannot tell that an offset lands mid-character
+without the character. Listing those as on-device rejection tests would have been a
+suite that could not be written.
+
+They are builder validations, and the builder is where they run: it has the source in
+hand and fails the build. What crosses to the device is the guarantee that they ran.
+
+The phone still gets one real span check that needs no source: `span_end -
+span_start` must equal the UTF-8 byte length of `text`. Cheap, and it catches
+truncation and offset drift — the corruptions most likely to survive a build and a
+transfer.
+
+If the normalized source text ever ships in the pack (still open — it roughly doubles
+text size), full span re-validation becomes possible on-device and these rows merge.
+Until then the split is the honest description.
 
 **Retrieval regression** deserves the same emphasis for a different reason: it catches
 what degrades silently and continuously. Retrieval quality has no symptom until

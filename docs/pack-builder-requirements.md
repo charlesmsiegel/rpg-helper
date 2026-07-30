@@ -155,8 +155,17 @@ Must be internally complete — no external asset references.
 | `tables` | structured random tables: dice expression + validated rows |
 | `capabilities` | declarative capability manifests shipped by this pack |
 | `chunk_derivation` | which source chunks each derived chunk was built from |
+| `constraints` | declared predicates over document trackers, from the closed vocabulary |
 | `supersessions` | chunks this pack replaces in another pack (errata) |
 | `build_report` | every enrichment that was dropped, and why |
+
+`constraints` is what lets a pack say *this game's spell slots cannot go negative* or
+*this Virtue excludes that Flaw* without the app hardcoding any game's rules. Rows
+instantiate the closed predicate vocabulary — packs choose forms and arguments, never
+compose expressions and never ship code — and cite the chunk stating the rule, so a
+flagged violation can link to the passage it came from. Without this table the app's
+constraint engine has nothing to load and every game's rules would have to be built
+into the binary.
 
 Exact DDL is pinned by the app's schema spec. The builder targets a
 `schema_version` and the app refuses packs it does not recognize.
@@ -532,6 +541,9 @@ means a capability is unavailable, never that output is wrong:
 - a generated expansion that fails its quality check → ship fewer expansions
 - an unresolvable alias → drop that alias
 - a capability manifest failing schema validation → ship the pack without it
+- a constraint declaration outside the closed predicate vocabulary → drop that
+  constraint
+- a derived chunk whose claims are not entailed by its cited chunks → drop the chunk
 
 ### The build report ships *inside* the pack
 
@@ -572,10 +584,24 @@ superseding:
 - When both the superseding pack and its target are active, the targeted chunks are
   **removed from the candidate set entirely**, before either index is scored. They
   cannot be retrieved, quoted, or fed to generation.
+- Removal extends to everything rooted at the targeted chunk: its `capabilities`
+  manifests, its `tables` rows, its `entities` rows. Capabilities address chunks by
+  id and never pass through retrieval, so an index-only filter would leave a
+  superseded table still rollable — the app quietly rolling obsolete outcomes while
+  the corrected text sits beside it.
 - When the target is not installed, the rows are inert. An errata pack is valid on its
   own and simply has nothing to amend.
-- A superseding chunk cites what it replaced, so the app can show "this replaces
-  [book, page]" rather than silently differing from the printed book the user owns.
+- Each row carries a **snapshot of the target's citation** — book title, edition,
+  heading path, and page labels — copied at build time.
+
+That last point exists because the obvious design fails in the standalone case. A
+superseding chunk should show "this replaces [book, page]", but those fields live in
+the target pack, and an errata pack is explicitly valid with its target absent. With
+only `(source_uid, stable_key)` to work from, the app could resolve nothing and the
+notice would be blank precisely when it is most needed — a user reading a correction
+without owning the book it corrects. The snapshot is denormalized on purpose; it is
+citation text, it never has to stay in sync with anything, and the alternative is a
+promise the format cannot keep.
 
 Priority keeps its narrower job: ordering genuine score ties, and deciding which pack
 answers first when two unrelated books both cover a topic. It is a preference.
@@ -587,11 +613,47 @@ which is what the previous framing did.
 ## Derived Content
 
 The builder may generate content that does not exist in the source — summaries,
-aliases, capability manifests, structured table rows. All such content:
+aliases, capability manifests, structured table rows, constraint declarations. All of
+it is *derived*, but it does not all live in `chunks`, and the provenance mechanism
+differs accordingly. Requiring an `origin` column and a `chunk_derivation` row for an
+alias is not a stricter rule, it is an unimplementable one: `origin` is a `chunks`
+column and `chunk_derivation` relates chunks to chunks.
 
-- carries `origin = 'derived'`
-- is never rendered as a quotation
-- cites the chunks it was derived from, through `chunk_derivation`
+**Derived chunks** — summaries, builder-written definitions, anything rendered as
+prose:
+
+- carry `origin = 'derived'`
+- are never rendered as a quotation
+- cite through `chunk_derivation`, non-empty, pointing only at source chunks
+- are **claim-checked against those cited chunks at build time** (see below)
+
+**Derived rows in other tables** — `entities`, `tables`, `capabilities`,
+`constraints`:
+
+- each carries its own reference to the source chunk it was produced from, in that
+  table, under that table's own column
+- are never rendered as prose at all; they are retrieval surface, executable
+  metadata, or declarations
+- are validated by the mechanism appropriate to their kind — round-trip for table
+  rows, schema validation for manifests and constraints, resolvability for aliases
+
+The shared rule is that everything the builder invents must point at what it came
+from. How it points depends on what it is.
+
+### Derived prose is claim-checked before it ships
+
+A derived chunk is model-written text that the app renders with citations. Verifying
+that its cited chunks *exist* is not verifying that they *support it*, and nothing
+downstream will catch the difference: on-device grounding tests only examine answers
+the phone generated, and this text was generated on a desktop months earlier. By the
+time the app reads it, model output has become data, and data does not look like
+something to distrust.
+
+So each derived chunk is checked for entailment against the chunks in its own
+`chunk_derivation` — claim by claim, with the frontier model the builder already has.
+A chunk whose claims are not supported is **dropped and recorded**, not shipped. This
+is an enrichment validation: losing a summary costs a convenience, shipping a
+fabricated one costs the guarantee.
 
 ---
 
@@ -604,4 +666,10 @@ aliases, capability manifests, structured table rows. All such content:
 - The exact form of `stable_key`, which decides whether supersession survives a
   rebuild of the pack being amended
 - Whether the normalized source text ships in the pack (enables span re-validation
-  on-device, roughly doubles text size) or stays builder-side with only the hash
+  on-device, roughly doubles text size) or stays builder-side with only the hash.
+  **Until this is settled, span validation is builder-only by definition** — boundary,
+  containment, overlap, and slice-equality checks all need the bytes, and the app has
+  only the hash. The app's own checks are limited to what a pack can prove about
+  itself: blob length, the probe vector, declared dimensions, and `span_end -
+  span_start` matching the UTF-8 byte length of `text`. Shipping the source would let
+  those merge into one suite run on both sides.
