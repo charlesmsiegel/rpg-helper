@@ -94,6 +94,19 @@ Two separate exclusions, and only having the first is a trap.
 as supporting material. A rules chunk in the prompt is a rules chunk the model can
 paraphrase.
 
+Excluding them as *results* is not enough, because a `setting` chunk can legally
+contain one. Nesting permits a lore chapter to hold a rollable table or a statblock,
+and that child's authoritative text sits inside the parent's stored text. Send the
+parent to generation whole and the rule goes with it — through the front door, past a
+rule written specifically to keep it out. A lore query that never retrieved the child
+at all is enough to trigger this.
+
+So **nested verbatim spans are redacted from the parent before it becomes context**,
+replaced by a marker noting that a table or statblock was omitted. The app knows the
+child's span exactly; excising it is arithmetic, not judgment. The child remains
+independently retrievable and quotable, which is how the user should have been getting
+it anyway.
+
 But withholding the chunk is not enough, because the *question* still carries the
 rules intent. Asked "how does grappling work, and do the Underdark rules change it?"
 with only lore chunks in context, a model that has read the internet will happily
@@ -115,10 +128,10 @@ neither.
 
 ## 3. Models and On-Device Inference
 
-There are **two** models on the device, with different sizes, different jobs, and
-crucially different lifecycles.
+There are **three** models on the device, in two lifecycle groups: two small ones that
+ship inside the app, and one large one that downloads.
 
-### The embedder
+### The embedder (bundled)
 
 A sentence-embedding model producing vectors in exactly the space named by
 `pack_meta.embedder_id`, at `embedder_dim` dimensions. Dense retrieval needs the
@@ -148,19 +161,47 @@ embedders. One query embedding cannot serve both — the vectors live in differe
 spaces, and for differing `embedder_dim` the cosine is not even computable.
 
 So the app groups active packs by embedder contract, embeds the query **once per
-distinct contract**, and scores each group in its own space. Groups are then combined
-at the chunk level by rank.
+distinct contract**, and scores each group in its own space.
 
-This is the second time rank-based fusion pays for itself. Cosine scores from two
-different embedding spaces are not comparable numbers and averaging them is
-meaningless; their *rankings* are comparable, because a rank is a statement about one
-list. Reciprocal rank fusion was chosen to avoid calibrating BM25 against cosine, and
-it turns out to solve cross-space combination for free.
+Rank-based fusion helps here — cosine scores from two different embedding spaces are
+not comparable numbers, while their rankings each describe one list — but **rank alone
+is not sufficient, and treating it as sufficient introduces a new bug**. Every group
+has a rank 1, including a group with nothing relevant in it. Fusing purely by rank
+hands that group's best-of-a-bad-lot the same dense contribution as a genuinely strong
+hit from the group that actually contains the answer, and it can ride that into the
+final list and over the answer floor.
+
+So each group is **gated before it is fused**: hits must clear a similarity threshold
+calibrated for that contract, and a group with nothing above its threshold contributes
+nothing. Thresholds are per-embedder because they are not transferable — a cosine of
+0.6 means different things in different spaces, which is the same reason the scores
+could not be pooled to begin with. They come from the labelled query sets in §8, the
+same way the global relevance floor does.
 
 The cost is one embedder inference per distinct contract per query. Keeping the
 number of supported contracts small is therefore a real constraint, not just tidiness.
 
-### The generative model
+### Speech recognition (bundled)
+
+Voice input needs audio turned into text before anything else in this document
+applies. The embedder takes text and the generative model takes text and images, so
+without a dedicated component the microphone button has nothing behind it.
+
+A compact ASR model ships with the app, in the same bundled tier as the embedder and
+for the same reason: voice is a play-table feature, and a feature that only works
+after a multi-gigabyte download is not available when it is most wanted.
+
+Platform speech recognition is **not** an acceptable substitute unless it can be
+pinned to on-device recognition. The default path may route audio to a server, and an
+app whose premise is that nothing leaves the device cannot ship a microphone that
+quietly uploads what people say at their table. If the platform can guarantee
+offline recognition it is a legitimate optimization; if it cannot, the bundled model
+is the only path.
+
+Transcription output feeds the normalization step, where the `entities` alias table
+fixes the proper nouns ASR reliably mangles.
+
+### The generative model (downloaded)
 
 A small multimodal model, quantized to 4 bits, accepting image input — which is what
 makes camera queries possible.
@@ -180,6 +221,25 @@ It has exactly three jobs, and **none of them is unconditional**:
 
 Derived chunks are absent from that table deliberately: their text was generated at
 build time and is rendered as stored, so they cost no inference at all.
+
+### When the generative model is absent
+
+Advertising that the app works before the download finishes creates a state the card
+set has to handle: a setting question that retrieves perfectly good
+`('setting','source')` chunks and has no model to turn them into prose. That is not
+empty retrieval and not a bad pack, and answering it with "not found in your active
+packs" would be a lie about the one thing the refusal card exists to tell the truth
+about.
+
+So there is a fourth card: **model unavailable**. It names what happened, lists the
+chunks that *would* have been used with their citations so the user can go read the
+pages themselves, and offers the download. The retrieval was not wasted; only the
+prose is missing.
+
+Mixed results degrade rather than fail. Quote cards render exactly as they always do —
+they never needed the model — and the generated card is replaced by this one. A user
+who declines the download permanently still has a complete, quoting rules reference,
+which is the larger half of the app.
 
 ### Normalization is conditional, or the guarantee is a lie
 
@@ -252,6 +312,25 @@ fused list with itself. Either way the hybrid ranking is quietly distorted, wors
 for exactly the long, heavily-vectored chunks that matter most. Collapse to one hit
 per chunk, then fuse.
 
+### Chunk identity is `(pack_id, chunk_id)` everywhere
+
+`chunk_id` is **pack-local**. Nothing in the pack contract makes it globally unique,
+and everything inside a pack — `parent_chunk_id`, `chunk_derivation`, `tables`,
+`constraints`, `entities` — treats it as local by construction. Two packs built by
+different people will both have a chunk 1.
+
+Retrieval spans packs, so every step that compares, groups, or joins on chunk identity
+must use the composite: collapsing dense hits, fusion, nesting dedup, alias boosts,
+capability targets, and citation resolution. Using the bare id merges unrelated chunks
+from different books — one inheriting another's score, the other vanishing from the
+results — and the symptom is a citation pointing at the wrong book, which reads as a
+retrieval quality problem rather than an identity bug and would be debugged for a long
+time.
+
+The one identity that deliberately crosses packs is supersession, and it does not use
+`chunk_id` at all: it targets `(source_uid, stable_key)` precisely because a
+pack-local id cannot survive the trip.
+
 Pack activation is the user's scoping tool: which books are live, and in what order.
 
 **Priority and supersession are different mechanisms and only one of them makes errata
@@ -268,8 +347,14 @@ this pipeline: a roller invokes a `tables` row by id. Filtering only the indexes
 leave an erratum's corrected table unquotable-but-superseded in search while the
 *original* table stayed rollable — the app quietly rolling on obsolete rows, which is
 worse than the stale quote the filter was added to prevent. Deactivating a chunk
-therefore deactivates its capability manifests, its `tables` rows, and its `entities`
-rows together.
+therefore deactivates its capability manifests, its `tables` rows, its `entities`
+rows, and its `constraints` rows together.
+
+`constraints` belongs in that list for the same reason as the rest: the engine loads
+those rows directly and never consults retrieval, so a superseded constraint keeps
+flagging characters under a rule the user can no longer even look up. A validation
+error citing a passage that has been corrected is worse than no validation, because
+the user cannot find the text to argue with.
 
 A correction removes what it corrects, everywhere.
 
@@ -352,8 +437,8 @@ Four surfaces:
 
 ### Answer cards
 
-Three kinds, and the visual distance between the first two is the most important
-design decision in the app:
+Five kinds, and the visual distance between the first two is the most important design
+decision in the app:
 
 - **Verbatim.** The stored string, in a distinct typeface on a distinct background,
   with a citation rule beneath it — book, printed page label, pack badge. Copy button.
@@ -361,6 +446,14 @@ design decision in the app:
 - **Generated.** Prose with inline citation chips that resolve to their chunks, and a
   "generated from N sources" footer. Typographically unmistakable against a verbatim
   card at a glance, across both themes, at every text size.
+- **Derived.** Builder-written text rendered as stored — a summary, a written-up
+  definition. Styled as generated, not as a quote, because that is what it is. Its
+  chips come from `chunk_derivation`, claim-scoped where the builder recorded which
+  source supports which sentence.
+- **Model unavailable.** The generative model has not been downloaded, but retrieval
+  succeeded. Lists the chunks that would have been used, with citations, and offers
+  the download. Distinct from *empty* on purpose: the app found the answer and cannot
+  currently phrase it, which is a different statement and a different remedy.
 - **Empty.** *Not found in your active packs* — with the list of what is active and an
   offer to search the inactive ones. This card is load-bearing, not a courtesy: it is
   the visible half of the refuse-rather-than-hallucinate rule, and the reason a user

@@ -207,6 +207,31 @@ Requirements:
   Derived-from-derived is not permitted; it makes provenance untraceable after two
   hops.
 
+#### Rows are claim-scoped where the builder can be specific
+
+An unordered set of source chunks supports a "generated from N sources" footer and
+nothing finer. But the app renders derived text with **inline** citation chips, and a
+summary drawn from three chapters has three different answers to *which source backs
+this sentence* — unanswerable from a bare set. The builder also now checks these
+chunks claim by claim, and discarding that result only to render an aggregate throws
+away work already done.
+
+So each `chunk_derivation` row may carry an optional span into the derived chunk's own
+text — the claim that this particular source supports:
+
+- **Claim-scoped row:** span present. The app anchors a citation chip to exactly that
+  text.
+- **Whole-chunk row:** span NULL. The source backs the chunk generally, and its
+  citation appears in the footer.
+
+Spans are into the derived `text`, in the same UTF-8 byte units as source spans, and
+may overlap freely — two sources can support the same sentence, which is corroboration
+rather than a conflict.
+
+A pack that records only whole-chunk rows is valid; its derived cards simply show
+footer citations. Precision here is an enrichment, and its absence costs nothing that
+was ever guaranteed.
+
 ---
 
 ## Rendering Is Decided by `kind` + `origin`
@@ -311,6 +336,30 @@ The probe works because it shares the encoding path with real vectors: it catche
 byte order, but also a builder that wrote float32, wrote NaN-boxed values, or padded
 its rows — a whole class of layout bugs that no per-vector inspection would find,
 since real embeddings have no expected value to compare against.
+
+#### Every vector must also be numerically usable
+
+Layout checks say the bytes were arranged correctly. They say nothing about whether
+the numbers mean anything. A row of float16 NaNs, an infinity from an overflowed
+conversion, or an all-zero vector from a failed embedding call has the right length,
+sits behind a probe that decodes perfectly, and is completely broken:
+
+- **NaN** propagates through the dot product, and comparisons against NaN are false —
+  so depending on the sort, the chunk either vanishes from retrieval permanently or
+  lands wherever the comparator happens to leave it.
+- **Infinity** produces a similarity that outranks every real result, for every query.
+- **Zero norm** makes cosine a division by zero — undefined, and typically either NaN
+  or a silent 0/1 depending on how the implementation guards it.
+
+None of these is a rare corruption; a zero vector is the ordinary result of an
+embedding call that failed and was not checked. So every vector's elements are
+validated at build time — all finite, norm above a small epsilon — and again on
+activation, which is cheap because it is one pass over data already being read.
+
+At build time a bad vector fails the build: it means the embedding step is broken, and
+shipping a pack with holes in its dense index is not a degraded capability but a
+silently worse one. On activation it rejects the pack, since by then the builder's
+guarantee has demonstrably not held.
 
 ---
 
@@ -520,6 +569,7 @@ something false as authoritative:
 - `sources.text_sha256` mismatch
 - vector byte length ≠ `embedder_dim * 2`, or a missing embedder declaration
 - a probe vector that does not decode to its pinned constant
+- a vector containing NaN or infinity, or whose norm is effectively zero
 - a `source` chunk missing `source_id`, `heading_path`, or page labels
 - a `derived` chunk with no `chunk_derivation` rows, or one citing a chunk that is
   itself derived
@@ -585,10 +635,11 @@ superseding:
   **removed from the candidate set entirely**, before either index is scored. They
   cannot be retrieved, quoted, or fed to generation.
 - Removal extends to everything rooted at the targeted chunk: its `capabilities`
-  manifests, its `tables` rows, its `entities` rows. Capabilities address chunks by
-  id and never pass through retrieval, so an index-only filter would leave a
-  superseded table still rollable — the app quietly rolling obsolete outcomes while
-  the corrected text sits beside it.
+  manifests, its `tables` rows, its `entities` rows, and its `constraints` rows.
+  Each of these is addressed by id and never passes through retrieval, so an
+  index-only filter would leave a superseded table still rollable and a superseded
+  constraint still flagging characters — the app enforcing and rolling on text the
+  user can no longer look up.
 - When the target is not installed, the rows are inert. An errata pack is valid on its
   own and simply has nothing to amend.
 - Each row carries a **snapshot of the target's citation** — book title, edition,
