@@ -70,9 +70,20 @@ So gaps live in their own relation, `source_gaps`: `source_id`, `span_start`,
 `advertising`, `art-only`, `other` with a note). They are not chunks, carry no
 vectors, are never retrieved, and never render.
 
-Coverage validation then reads plainly: for each sibling group, the spans of its
-chunks plus the declared gaps must tile the parent range exactly. Anything left over
-is an omission the builder did not intend, and it fails the build.
+Coverage validation applies **only to the top level** — chunks with
+`parent_chunk_id IS NULL`. For each source, those chunks plus the declared gaps must
+tile the whole document exactly. Anything left over is an omission the builder did not
+intend, and it fails the build.
+
+Nested children are exempt, and must be: a table inside a complete rule covers part of
+its parent by design. Demanding that a child sibling group tile its parent would force
+the surrounding rule prose to be declared a gap — text that is fully retrievable
+through the parent and is the opposite of what a gap means. The pack would carry
+metadata asserting that its own rules text was deliberately omitted.
+
+Children are therefore checked for containment and non-overlap only. Nothing is lost:
+the parent's own span is already covered at the top level, so no source text escapes
+validation.
 
 Chunks with `origin = 'derived'` have no spans. `span_start` / `span_end` are NULL,
 and the chunk instead references the source chunks it was produced from through the
@@ -249,6 +260,18 @@ Spans are into the derived `text`, in the same UTF-8 byte units as source spans,
 may overlap freely — two sources can support the same sentence, which is corroboration
 rather than a conflict.
 
+They get the **same validation as source spans**, which the earlier rules do not cover
+because those were scoped to `origin='source'`:
+
+- within the bounds of the derived chunk's own `text`
+- non-empty, and `start < end`
+- both offsets on a UTF-8 sequence boundary
+
+Overlap is the only rule that relaxes. Skipping the rest would leave the app anchoring
+an inline citation chip to byte offsets that are out of range or land mid-character —
+a chip in the wrong place, or a crash converting the offset for display, from a pack
+that passed every documented check.
+
 A pack that records only whole-chunk rows is valid; its derived cards simply show
 footer citations. Precision here is an enrichment, and its absence costs nothing that
 was ever guaranteed.
@@ -315,6 +338,30 @@ These are therefore separate concerns:
 
 - `content` — an embedding of some window of the chunk's own text
 - `expansion` — an embedding of a generated question paraphrase (see below)
+
+### Vectors carry the span they came from
+
+A `content` row stores `window_start` / `window_end`: the span of the chunk's text that
+window embedded, in the same UTF-8 byte units as everything else.
+
+This is not bookkeeping. The app's nesting deduplication has to decide whether a parent
+matched *because of* its nested child or independently of it — a `setting` chapter that
+matches only through the statblock inside it should yield to that statblock, while one
+that also matches on its own lore should survive alongside it. Without window offsets,
+a dense hit says only "this chunk scored"; there is no way to ask which part of it did,
+and the rule cannot be implemented. The builder computes these windows anyway, so
+storing their bounds costs two integers per row.
+
+For `expansion` rows the offsets are NULL, and a stronger rule takes their place:
+**expansions for a chunk with verbatim children are generated from the redacted text**
+— the parent with its children's spans removed. A question paraphrase written from the
+embedded table would otherwise let the parent match on the child's content while
+carrying no evidence of having done so.
+
+That rule is worth having for its own sake. Expansions exist so a player's phrasing
+finds the right passage, and an expansion generated from a nested table is a question
+whose real answer is the child chunk. Generating it for the parent points the query one
+level too high regardless of what deduplication later does with it.
 
 Retrieval scores vectors, then resolves to distinct `chunk_id` values, taking each
 chunk's best-scoring vector. The user always sees the whole unit.
@@ -494,8 +541,12 @@ each implementation:
   a table needing them ships quotable and not rollable.
 - `d%` is defined as exactly 1–100. Books printing `00` map to 100 at build time, and
   the mapping is recorded rather than assumed.
-- The expression's outcome range and its distribution are both part of the definition,
-  so `2d6` and `d6+d6` are distinguishable and only one of them is what the book meant.
+- The expression's outcome range and its **distribution** are both part of the
+  definition. `2d6` and `d11+1` share the range 2–12 and are not interchangeable: the
+  first is triangular and peaks at 7, the second is flat. A table validated for
+  coverage against a range would accept either, while a roller that picked the wrong
+  one would return outcomes at wrong frequencies forever — a bug no coverage check can
+  see, because every outcome is reachable.
 - The grammar is versioned with `schema_version`. Adding a form is a version bump, so
   an older app never silently mis-parses a newer expression — it refuses the pack.
 - Builder and app ship the **same** conformance vectors: a fixed list of expressions
@@ -638,7 +689,9 @@ something false as authoritative:
 - a `derived` chunk with no `chunk_derivation` rows, or one citing a chunk that is
   itself derived
 - an atomic unit exceeding the configured maximum size
-- a content-vector tiling that leaves part of a verbatim-class chunk uncovered
+- a content-vector tiling that leaves part of **any retrievable chunk** uncovered —
+  `setting` and derived included, not verbatim-class only
+- a claim span that is out of range, empty, inverted, or off a UTF-8 boundary
 
 There is deliberately no check for "a verbatim-class chunk with `origin = 'derived'`".
 Verbatim-class is *defined* as `origin='source'` plus an eligible kind, so the
@@ -696,8 +749,32 @@ superseding:
   form of `stable_key` is pinned in the schema spec; it must survive a rebuild of the
   target pack, which rules out `chunk_id`.
 - When both the superseding pack and its target are active, the targeted chunks are
-  **removed from the candidate set entirely**, before either index is scored. They
-  cannot be retrieved, quoted, or fed to generation.
+  **removed from the candidate set entirely**. They cannot be retrieved, quoted, fed
+  to generation, rolled on, or cited.
+
+#### What "removed" can and cannot mean for BM25
+
+Packs are read-only files, and `chunks_fts` is built into them. Filtering superseded
+rows out of the returned candidates does not remove them from the index's corpus
+statistics — document count, average document length, and term frequencies all still
+include them, so `bm25()` scores for the *surviving* chunks shift slightly, and a
+chunk near the per-pack relevance gate could cross it in either direction.
+
+Saying the row is "absent before scoring" was therefore too strong, and the honest
+version is worth stating precisely because the residual is small:
+
+- The guarantee that matters holds exactly. A superseded chunk never reaches the
+  user through any route. That is a candidate-level filter and it is absolute.
+- The scoring perturbation is real but bounded. Supersession sets are errata: tens of
+  chunks against a corpus of thousands, so the effect on any surviving chunk's score
+  is far below the noise the relevance gate is calibrated against.
+- It becomes wrong at scale. A pack superseding a large fraction of its target is no
+  longer errata but a replacement edition, and should be modelled as one — deactivate
+  the old pack rather than supersede half of it.
+
+If a future distribution mechanism ever needs exact scoring under heavy supersession,
+the fix is an app-side index over the active set, not a change to the pack format.
+That cost is not worth paying for errata.
 - Removal extends to everything rooted at the targeted chunk: its `capabilities`
   manifests, its `tables` rows, its `entities` rows, and its `constraints` rows.
   Each of these is addressed by id and never passes through retrieval, so an

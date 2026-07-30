@@ -24,8 +24,22 @@ An offline reference and play assistant for tabletop roleplaying games. Three th
 Everything happens on the device. No account, no server, no network at play time.
 
 Explicit non-goals: this is not a virtual tabletop, there is no shared session or
-multiplayer state, there is no cloud sync, and the app never ships game content
-itself — packs come from elsewhere.
+multiplayer state, and there is no cloud sync.
+
+**On content: the app ships no material it does not have the right to distribute.**
+Commercial books are always user-supplied — built into packs from what the user owns,
+never bundled, never redistributed, never fetched from a catalog the app operates. One
+deliberate exception: an **openly-licensed SRD starter pack is bundled**, complete with
+its license text and required attribution notices.
+
+That exception earns its keep. A new install otherwise has a working rules engine and
+nothing to point it at, which makes the first-run experience a file-import chore before
+anything can be demonstrated. The same pack is the test corpus (§8), so the content
+that proves the app works in CI is the content that proves it works to a new user.
+
+The earlier phrasing — "the app never ships game content" — was the wrong rule. What
+matters is licensing, not content: bundling text the developer may freely redistribute
+carries none of the risk that bundling a commercial book would.
 
 ---
 
@@ -305,8 +319,10 @@ The pipeline:
    term — the user's and the pack's alike — is quoted as an FTS5 string literal
    before it reaches `MATCH`.
 3. **Apply supersession.** Drop every chunk targeted by an active pack's
-   `supersessions` rows, before either index is scored. Superseded text is not
-   outranked, it is absent: it cannot be quoted, cited, or fed to generation.
+   `supersessions` rows from the candidate set. Superseded text is not outranked, it
+   is unreachable: it cannot be retrieved, quoted, cited, rolled on, or fed to
+   generation. (It still contributes to its pack's BM25 corpus statistics, which the
+   pack contract addresses — the residual is bounded and errata-sized.)
 4. **Embed the query**, once per distinct embedder contract across the active packs
    (§3).
 5. **Search both indexes** over active packs only — BM25 producing a ranked list of
@@ -335,6 +351,22 @@ The third dedup case exists because the unconditional version threw away the set
 evidence. A query hitting both the lore of a region and a rumor table inside it would
 have dropped the parent, leaving the mixed-result partition with nothing to generate
 from and the user with a bare table where they asked about a place.
+
+**Deciding "matched independently" needs evidence, not inference.** Both signals
+supply it:
+
+- **Dense.** `content` vectors carry `window_start`/`window_end`. A parent's hit is
+  independent when its best-scoring window overlaps text outside the child's span.
+  `expansion` hits count as independent by construction, because the builder generates
+  a parent's expansions from its redacted text (see the pack contract).
+- **Lexical.** Re-run the query against the parent's redacted text. It is one string
+  already in memory and one match test — cheap, and it answers the question directly
+  rather than by proxy.
+
+Without those, "independent match" would be a rule an implementer could only guess at,
+and the guess would fall one way or the other: discard lore that was genuinely
+relevant, or keep a parent whose entire contribution gets redacted before generation
+and which therefore contributes an empty context.
 
 ### BM25 does not federate across packs either
 
