@@ -16,9 +16,14 @@ Status: accumulating. Nothing here is implemented.
 **The builder may classify, bound, and annotate chunks. It may never rewrite the text
 of a verbatim-class chunk.**
 
-Verbatim-class kinds are `rules`, `table`, `statblock`, `readaloud`. Their `text`
-column must be byte-exact source text. The app copies these strings directly to the
-screen as authoritative quotes; it has no way to detect tampering.
+The **verbatim-eligible set** is defined once, here, and referenced everywhere else:
+
+> `rules`, `table`, `statblock`, `readaloud`, `glossary`
+
+A chunk is **verbatim-class** when its `kind` is in that set **and** its `origin` is
+`source` (see *Rendering* below). Verbatim-class `text` must be byte-exact source
+text. The app copies these strings directly to the screen as authoritative quotes; it
+has no way to detect tampering.
 
 This rule exists because it is exactly what a capable model will violate. Asked to
 extract a rules passage, a frontier model will fix the grammar, expand an
@@ -37,16 +42,41 @@ in the source, still passes the check, and still renders as an authoritative quo
 now missing the part that changes its meaning. Substring matching proves the text
 appeared somewhere, not that the passage is complete.
 
-Requirements:
+Requirements, applying **only to chunks with `origin = 'source'`**:
 
 - Each source document is normalized once and hashed; `sources.text_sha256` pins it.
-- Every chunk stores `span_start` / `span_end` into that normalized text.
+- Every source chunk stores `span_start` / `span_end` into that normalized text.
 - `text` is produced by slicing, never by a model writing it out.
 - Boundary validation: spans must begin and end at structural boundaries recovered
   from the document (heading, paragraph, list item, table, or statblock edges).
   A span ending mid-sentence, or starting mid-list, is rejected.
-- Sibling spans under one heading must not overlap, and must not leave unassigned
-  text between them without an explicit gap marker.
+- **Sibling** spans — chunks with the same `parent_chunk_id` — must not overlap, and
+  must not leave unassigned text between them without an explicit gap marker.
+
+Chunks with `origin = 'derived'` have no spans. `span_start` / `span_end` are NULL,
+and the chunk instead carries `derived_from`: the list of source `chunk_id`s it was
+produced from, which must be non-empty. Requiring spans of derived text would force
+the builder to either fabricate misleading offsets or violate the slicing rule.
+
+### Nesting is explicit and legal
+
+A complete rule may contain a rollable table. The rule must stay one display chunk to
+be quotable in full; the table needs its own `table` chunk so its structured rows can
+round-trip against a canonical table render. Those two spans necessarily overlap.
+
+So overlap is permitted **only** as parent/child nesting, declared via
+`parent_chunk_id`:
+
+- A child's span must be **fully contained** within its parent's span.
+- A child's `kind` must be verbatim-eligible if its parent's is.
+- Nesting is at most one level deep. Deeper structures are a signal the parent was
+  chunked too coarsely.
+- Round-trip validation for a child runs against the child's span, not the parent's.
+
+Retrieval deduplicates: when a parent and its child both match a query, only the
+parent is returned, so the user always sees the complete rule. A capability may
+target a child directly by kind — this is how the roller reaches a table embedded in
+a rule without the app ever quoting the table stripped of its surrounding rule.
 
 `setting` chunks are also stored as sliced source text (generation happens on-device
 from them), but drift there degrades quality rather than breaking a guarantee.
@@ -74,6 +104,21 @@ Must be internally complete — no external asset references.
 Exact DDL is pinned by the app's schema spec. The builder targets a
 `schema_version` and the app refuses packs it does not recognize.
 
+### `chunks` columns introduced by this document
+
+Collected here because they are established piecemeal above:
+
+| column | notes |
+|---|---|
+| `kind` | see taxonomy |
+| `origin` | `source` \| `derived` |
+| `text` | sliced for `source`, generated for `derived` |
+| `source_id`, `heading_path` | citation, required |
+| `page_label_start`, `page_label_end` | **text**, printed labels, required |
+| `span_start`, `span_end` | required iff `origin='source'`, else NULL |
+| `parent_chunk_id` | NULL unless nested; at most one level |
+| `derived_from` | required non-empty iff `origin='derived'`, else NULL |
+
 ---
 
 ## Rendering Is Decided by `kind` + `origin`
@@ -85,8 +130,8 @@ values:
 - `derived` — produced by the builder (summaries, definitions, expansions)
 
 **A chunk renders verbatim if and only if `origin = 'source'` AND `kind` is in the
-verbatim set.** Everything else renders as generated text, attributed but never
-quoted.
+verbatim-eligible set defined above.** Everything else renders as generated text,
+attributed but never quoted.
 
 This resolves the `glossary` ambiguity: a glossary entry lifted from the book's own
 glossary is `('glossary', 'source')` and quotes; a builder-written definition is
@@ -95,14 +140,17 @@ definition cannot be laundered into an authoritative quotation by its `kind`.
 
 ### Chunk `kind` taxonomy
 
-| kind | Verbatim-eligible | Notes |
+Every kind below is verbatim-eligible except `setting`. Eligibility is necessary but
+not sufficient — `origin` must also be `source`.
+
+| kind | In verbatim-eligible set | Notes |
 |---|---|---|
 | `rules` | yes | mechanics, procedures, resolution |
 | `table` | yes | also gets validated rows in `tables` |
 | `statblock` | yes | indivisible; creature/NPC/item stats |
 | `readaloud` | yes | boxed text intended to be read at the table |
-| `setting` | no | lore, history, geography, culture, factions |
-| `glossary` | yes, if `origin='source'` | term definitions; feeds entity resolution |
+| `glossary` | yes | term definitions; feeds entity resolution |
+| `setting` | **no** | lore, history, geography, culture, factions |
 
 Classification quality is the builder's core value. Misfiling a rule as `setting`
 means it gets paraphrased — the exact failure the design prevents everywhere else.
@@ -195,6 +243,10 @@ A table that cannot pass validation is shipped as a verbatim chunk with **no**
 structured rows. It stays quotable and simply is not rollable. Degrading a capability
 is acceptable; rolling a wrong result is not.
 
+This is an **enrichment validation**, and is a deliberate exemption from the
+build-failure rule below — see *Two Classes of Validation*. Dropping the rows must be
+recorded in the build report; silently omitting them is not permitted.
+
 ---
 
 ## Query Expansion (offline HyDE)
@@ -209,8 +261,8 @@ builder generates:
 - **Question paraphrases** — the ways a player would actually ask for this rule,
   including colloquialisms, common misnamings, and table shorthand. Target ~5 per
   chunk, stored in `vectors` with `role='expansion'`.
-- **Lexical aliases** — synonym terms written into `entities` as aliases, so BM25
-  query expansion catches the same mismatch on the keyword side.
+- **Lexical aliases** — synonym terms recorded in `entities`, used to rewrite the
+  query before it reaches FTS (see below).
 
 This is HyDE inverted: instead of generating a hypothetical document per query on a
 phone, generate hypothetical queries per document on a desktop. Retrieval stays pure
@@ -221,6 +273,38 @@ Budget roughly 5x vector rows for verbatim-class chunks — about 19 MB on a 300
 book at 384 dims.
 
 Expansions are retrieval surface only. They are never rendered.
+
+### How aliases actually reach BM25
+
+`chunks_fts` indexes only `text` and `heading_path`, so an alias sitting in `entities`
+has no effect on lexical search by itself. Someone typing "wrestle" still misses the
+grapple rule, which is the entire case this feature exists to handle. The join has to
+be specified, not assumed.
+
+`entities` therefore carries:
+
+| column | meaning |
+|---|---|
+| `canonical` | the term as the book writes it (`grapple`) |
+| `alias` | one surface form per row (`wrestle`, `wrestling`, `pin`) |
+| `kind` | `rules-term`, `proper-noun`, `place`, `creature`, … |
+| `chunk_id` | the chunk this term is defined or governed by; may be NULL |
+
+Query-time behavior, which the app must implement and the builder must assume:
+
+1. Tokenize the query and match token n-grams (longest first) against `alias`.
+2. For each match, OR the `canonical` term into the FTS query alongside the original
+   token. The user's own wording is never dropped — expansion only widens.
+3. Where a matched alias has a non-NULL `chunk_id`, apply that chunk the same rank
+   boost an exact entity hit receives.
+
+Aliases are therefore a **query rewrite plus a rank signal**, not an index-time
+injection. Writing aliases into `chunks_fts` was the alternative; it was rejected
+because it pollutes BM25 term statistics with text that does not appear in the book,
+and makes alias changes require an FTS rebuild.
+
+Proper-noun aliases serve double duty here: the same table that turns "wrestle" into
+`grapple` for retrieval also supplies the entity list that normalizes spoken input.
 
 ---
 
@@ -242,8 +326,42 @@ Expansions are retrieval surface only. They are never rendered.
 5. **Packs are read-only at runtime.** The app stores activation state, entitlement,
    and user data in its own database.
 
-6. **Failing loudly beats degrading silently.** Every validation in this document
-   fails the build rather than shipping a questionable pack.
+6. **Failing loudly beats degrading silently** — see the two validation classes
+   below for which failures stop a build and which drop a feature.
+
+---
+
+## Two Classes of Validation
+
+Not every check can carry the same penalty. Refusing to build a 300-page book because
+one random table has a malformed dice range is not caution, it is a builder nobody
+can use. But the distinction has to be stated, or two builders will handle the same
+invalid table differently.
+
+**Correctness validations — fail the build.** Violating one means the pack can render
+something false as authoritative:
+
+- span boundary / containment / sibling-overlap violations
+- verbatim text not matching its span slice
+- `sources.text_sha256` mismatch
+- vector byte length ≠ `embedder_dim * 2`, or a missing embedder declaration
+- a verbatim-class chunk with `origin = 'derived'`
+- a derived chunk with an empty `derived_from`
+- an atomic unit exceeding the configured maximum size
+- a content-vector tiling that leaves part of a verbatim-class chunk uncovered
+
+**Enrichment validations — drop the feature, record it, continue.** Violating one
+means a capability is unavailable, never that output is wrong:
+
+- structured table rows failing coverage, span, or round-trip checks → ship the table
+  quotable but not rollable
+- a generated expansion that fails its quality check → ship fewer expansions
+- an unresolvable alias → drop that alias
+- a capability manifest failing schema validation → ship the pack without it
+
+Every enrichment failure is written to a build report that ships alongside the pack.
+The rule is that a *missing* capability is acceptable and a *wrong* answer is not —
+but the user is never left guessing which they got.
 
 ---
 
