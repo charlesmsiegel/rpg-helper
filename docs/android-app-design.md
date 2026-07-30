@@ -152,16 +152,25 @@ connection at a game table gets a working rules reference immediately, and the
 multi-gigabyte download becomes the thing that unlocks *setting answers*, not the
 thing standing between them and the app working.
 
-The app knows which `embedder_id`s it can serve. A pack naming an unknown one is
-refused at activation rather than retrieved against incorrectly.
+**Supporting an `embedder_id` means bundling its weights.** There is no way to embed a
+query in a space whose model you do not have, so the set of contracts the app can
+serve is exactly the set of embedders shipped in the binary — enumerated, versioned
+with the app, and small. Adding one is an app release, not a pack decision. A pack
+naming a contract that is not bundled is refused at activation rather than retrieved
+against incorrectly.
 
-**Active packs may span more than one embedder contract.** They will in practice: a
+**Active packs may span more than one bundled contract.** They will in practice: a
 pack built two years ago and one built today can both be valid and name different
-embedders. One query embedding cannot serve both — the vectors live in different
+embedders, and the older one must keep working — packs are files people own, not
+subscriptions. One query embedding cannot serve both; the vectors live in different
 spaces, and for differing `embedder_dim` the cosine is not even computable.
 
 So the app groups active packs by embedder contract, embeds the query **once per
 distinct contract**, and scores each group in its own space.
+
+Retiring a contract is therefore a real cost — it strands every pack built against it
+— which is the argument for keeping the supported set small and changing it rarely,
+not for pretending one embedder will last forever.
 
 Rank-based fusion helps here — cosine scores from two different embedding spaces are
 not comparable numbers, while their rankings each describe one list — but **rank alone
@@ -200,6 +209,18 @@ is the only path.
 
 Transcription output feeds the normalization step, where the `entities` alias table
 fixes the proper nouns ASR reliably mangles.
+
+**Voice must not require the generative model.** Bundling ASR to keep voice available
+before the download would be pointless if the transcript then had to pass through a
+model that is not there. Generative normalization is an *improvement* to a voice
+query, not a precondition: the transcript is already text, and deterministic
+normalization plus the alias rewrite handles the failure mode that actually matters,
+which is a mangled proper noun.
+
+So voice degrades the same way everything else does. With the generative model
+present, a transcript gets the full normalization pass. Without it, the transcript
+goes to retrieval deterministically, and the query still finds the rule. What the user
+loses is disfluency cleanup and pronoun resolution on follow-ups — not the feature.
 
 ### The generative model (downloaded)
 
@@ -298,11 +319,47 @@ The pipeline:
    that otherwise requires per-pack tuning, and it is what makes multiple embedder
    contracts combinable at all. Treat the fusion method as tunable; treat the
    requirement that both signals contribute as not.
-8. **Deduplicate nesting**, class-aware: a verbatim-class parent wins over its child,
-   but a **non-verbatim parent loses to a verbatim child**. Otherwise a rollable table
-   inside a lore chapter would be delivered as generated prose despite the app holding
-   a byte-exact copy of it.
-9. **Boost** chunks named by a matched alias with a non-NULL `chunk_id`.
+8. **Deduplicate nesting**, class-aware and match-aware:
+   - Verbatim-class parent, matching child → the **parent** wins; the user sees the
+     complete rule rather than a table torn out of it.
+   - Non-verbatim parent whose match comes **only** from its child's text → the
+     **child** wins. Otherwise a rollable table inside a lore chapter would be
+     delivered as generated prose despite the app holding a byte-exact copy of it.
+   - Non-verbatim parent that **independently matches** outside the child's span →
+     **both survive**, and each takes its own route. Redaction (§2) is what makes this
+     safe: the parent goes to generation with the child's span excised, so the lore is
+     explained and the table is quoted, from one query.
+9. **Boost** chunks named by a matched alias with a non-NULL `(pack_id, chunk_id)`.
+
+The third dedup case exists because the unconditional version threw away the setting
+evidence. A query hitting both the lore of a region and a rumor table inside it would
+have dropped the parent, leaving the mixed-result partition with nothing to generate
+from and the user with a bare table where they asked about a place.
+
+### BM25 does not federate across packs either
+
+Step 5 says "search both indexes", which for the lexical side is not one search. Each
+pack is a separate SQLite file with its own `chunks_fts`, so BM25 scores come from
+**pack-local corpus statistics** — its own document count, its own average length, its
+own term frequencies. A term that is rare in a slim adventure and common in a core
+rulebook scores differently in each, and the numbers were never on a shared scale.
+
+This is the same defect the dense path had, and it needs the same fix rather than
+being waved through because BM25 feels more objective than cosine:
+
+- Each pack's lexical results are gated by a per-pack relevance threshold before
+  fusion. A pack with nothing genuinely matching contributes nothing.
+- Without the gate, every active pack donates a rank-1 hit — best-of-an-irrelevant-pack
+  arriving with the same fused weight as the real answer. Activating more books would
+  make results *worse*, which is precisely backwards.
+- Pack size is the other distortion: a large pack has more chances to place something
+  high on rank alone. The gate is on score, not rank, so a big pack cannot buy
+  position with volume.
+
+Cross-pack lexical calibration is the least settled part of retrieval and the labelled
+query sets in §8 are what will set these thresholds. Naming it here as an unsolved
+calibration problem is better than the previous phrasing, which quietly implied one
+BM25 ranking existed.
 
 **Steps 6 and 7 are in that order for a reason.** BM25 ranks chunks; dense search
 ranks vector rows, and a long statblock may own a dozen of them between content
@@ -355,6 +412,19 @@ those rows directly and never consults retrieval, so a superseded constraint kee
 flagging characters under a rule the user can no longer even look up. A validation
 error citing a passage that has been corrected is worse than no validation, because
 the user cannot find the text to argue with.
+
+**The cascade also follows `chunk_derivation`.** A derived summary's entire claim to
+authority is the source chunks it cites. When an erratum supersedes one of them, that
+summary is prose about a rule that no longer reads the way the summary says it does —
+and unlike a superseded quote, it is still retrievable, still renderable, and still
+carries citations that now point at text the app has agreed not to show. It is stale
+content wearing a valid-looking provenance.
+
+So a derived chunk is deactivated when **any** chunk it derives from is superseded.
+Not only when all of them are: a summary of three rules, one of which was corrected,
+is wrong in exactly the place someone would rely on it. Losing a summary is cheap and
+the source chunks remain individually retrievable; keeping a stale one costs the
+guarantee that a correction actually corrects.
 
 A correction removes what it corrects, everywhere.
 
@@ -417,6 +487,33 @@ predicate form and citing the chunk that states the rule — so a flagged violat
 link to the passage behind it. Without that table the engine has nothing to load and
 every game's rules would end up compiled into the app, which is the outcome this whole
 mechanism exists to avoid.
+
+### A document declares which rules govern it
+
+Constraints cannot simply apply because a pack is active. Someone runs two games; both
+packs are installed; a fantasy character gets flagged for violating a cyberpunk
+edition's rules. Applying every active constraint to every document is not strict, it
+is nonsense — and the opposite default, applying constraints only to documents created
+from a pack, silently abandons every character typed in by hand, which is the exact
+population release sequencing (§9) says ships first.
+
+So the binding is explicit and lives on the document: each one names the **ruleset**
+it is played under. Constraints load only from packs matching that binding.
+
+The consequences follow from treating the document as the durable thing and the pack
+as the removable one:
+
+- A document created from a pack inherits its binding. One entered by hand is asked
+  once, and *unbound* is a legitimate answer — trackers work, nothing is validated.
+- Deactivating or uninstalling a pack **never modifies a document**. Its constraints
+  stop loading and the document shows as unvalidated rather than as suddenly legal or
+  suddenly broken. Reinstalling restores validation exactly.
+- Rebinding is a user action with a visible diff of what newly passes and fails, not
+  something that happens implicitly because a pack appeared.
+
+The rule underneath: a character sheet outlives the software that checks it. Losing a
+validator is an inconvenience; losing or silently rewriting a character is not
+recoverable.
 
 **Still to pin: the exact five predicate forms and their arguments.** These go in the
 schema spec alongside the DDL, since the builder and the app must agree on them
@@ -485,7 +582,7 @@ strategy is mostly about making the invariants falsifiable:
 | **Retrieval regression** | a labelled query set per test pack, measuring recall@k, gated in CI |
 | **Constraint engine** | unit and property tests over the closed predicate vocabulary |
 | **Dice grammar conformance** | shared expression/range/distribution vectors, run identically here and in the builder |
-| **Pack rejection** | one deliberately broken pack per *on-device* rejection case — wrong endianness (caught by the probe vector, not by length), dimension mismatch, span length disagreeing with its text, derived chunk with no `chunk_derivation`, unknown `embedder_id`, unrecognized `schema_version` |
+| **Pack rejection** | one deliberately broken pack per *on-device* rejection case — wrong endianness (caught by the probe vector, not by length), non-finite or zero-norm vectors, dimension mismatch, span length disagreeing with its text, derivation that is empty or does not terminate at a `source` chunk, unknown `embedder_id`, unrecognized `schema_version` |
 | **Builder validation** | span boundaries, containment, sibling overlap, slice equality, `text_sha256` — run against the source, in the builder, not on the phone |
 | **On-device performance** | cold model load, tokens/sec, retrieval latency across increasing active-pack counts, tracked as a gate |
 
@@ -543,10 +640,22 @@ suite that could not be written.
 They are builder validations, and the builder is where they run: it has the source in
 hand and fails the build. What crosses to the device is the guarantee that they ran.
 
-The phone still gets one real span check that needs no source: `span_end -
-span_start` must equal the UTF-8 byte length of `text`. Cheap, and it catches
-truncation and offset drift — the corruptions most likely to survive a build and a
-transfer.
+The phone still gets real checks that need no source, and they should not be
+undersold:
+
+- `span_end - span_start` must equal the UTF-8 byte length of `text` — cheap, and it
+  catches truncation and offset drift, the corruptions most likely to survive a build
+  and a transfer.
+- Every `chunk_derivation` row must resolve to a chunk that **exists in the pack and
+  has `origin='source'`**. Checking only that a row exists is not enough: a chain
+  terminating at another derived chunk passes that test, then produces a card whose
+  citation resolves to NULL page fields — prose rendered as attributed with nothing
+  behind it. Following one hop needs no source bytes, only a join.
+- Every `capabilities`, `tables`, `constraints`, and `entities` row must reference a
+  chunk that exists.
+
+These are all questions a pack can answer about itself, which is the line separating
+them from the builder's list.
 
 If the normalized source text ever ships in the pack (still open — it roughly doubles
 text size), full span re-validation becomes possible on-device and these rows merge.

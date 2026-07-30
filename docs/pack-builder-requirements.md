@@ -51,8 +51,28 @@ Requirements, applying **only to chunks with `origin = 'source'`**:
   from the document (heading, paragraph, list item, table, or statblock edges).
   A span ending mid-sentence, or starting mid-list, is rejected.
 - **Sibling** spans must not overlap, and must not leave unassigned text between them
-  without an explicit gap marker. Siblings are defined by `(source_id,
+  without an explicit gap marker (see below). Siblings are defined by `(source_id,
   parent_chunk_id)` — see *The span tree is per source*, below.
+
+#### Gaps are declared rows, not absent chunks
+
+A book contains text nobody should ever retrieve: the copyright page, the credits, the
+Kickstarter backer list, an ad for another product. Coverage validation exists so
+that *forgetting* a rule fails the build, and that only works if deliberate omission
+looks different from accidental omission.
+
+"Explicit gap marker" was doing that work without saying what one is, which leaves a
+builder to invent a pseudo-chunk with some invented `kind` — an unretrievable entry in
+the one table whose contents are by definition retrievable.
+
+So gaps live in their own relation, `source_gaps`: `source_id`, `span_start`,
+`span_end`, and a reason from a small closed set (`front-matter`, `legal`, `index`,
+`advertising`, `art-only`, `other` with a note). They are not chunks, carry no
+vectors, are never retrieved, and never render.
+
+Coverage validation then reads plainly: for each sibling group, the spans of its
+chunks plus the declared gaps must tile the parent range exactly. Anything left over
+is an omission the builder did not intend, and it fails the build.
 
 Chunks with `origin = 'derived'` have no spans. `span_start` / `span_end` are NULL,
 and the chunk instead references the source chunks it was produced from through the
@@ -155,6 +175,7 @@ Must be internally complete — no external asset references.
 | `tables` | structured random tables: dice expression + validated rows |
 | `capabilities` | declarative capability manifests shipped by this pack |
 | `chunk_derivation` | which source chunks each derived chunk was built from |
+| `source_gaps` | ranges deliberately not chunked, so coverage gaps are declared rather than inferred |
 | `constraints` | declared predicates over document trackers, from the closed vocabulary |
 | `supersessions` | chunks this pack replaces in another pack (errata) |
 | `build_report` | every enrichment that was dropped, and why |
@@ -300,10 +321,25 @@ chunk's best-scoring vector. The user always sees the whole unit.
 
 Requirements:
 
-- Content subchunk windows must tile the chunk with overlap; no region of a
-  verbatim-class chunk may be absent from every window.
+- Content subchunk windows must tile the chunk with overlap; **no region of any
+  retrievable chunk may be absent from every window** — `setting` and derived chunks
+  included, not verbatim-class only.
 - If a single atomic unit exceeds a configured maximum size, the builder fails loudly
   rather than truncating.
+
+Restricting coverage to verbatim-class chunks was a mistake carried over from when
+only rules text was retrievable. Every route in the app goes through retrieval:
+setting chunks have to be found before they can be generated from, and derived chunks
+have to be found before they can be rendered. A long lore chapter whose final third
+falls outside every content window is invisible to semantic search for exactly the
+material that section covers, and it fails silently — the query returns *something*,
+just never the right passage. Lexical search papers over it only when the user happens
+to use the book's own wording, which is the case query expansion exists because they
+usually do not.
+
+Coverage failure fails the build for every retrievable chunk. It is a builder defect,
+not a property of the content: the tiling code either covers the text or it does not,
+and there is no version of this worth shipping degraded.
 
 ### Vector BLOB layout
 
@@ -382,6 +418,34 @@ resolved `page_label_start` / `page_label_end` as **text**, not integers.
 
 Pages under a `none` range produce a nearest-labelled-page citation with an explicit
 marker rather than a fabricated number.
+
+### Sources with no page numbers at all
+
+"Nearest labelled page" assumes a labelled page exists somewhere. Plenty of real RPG
+products have none: a GM screen, a deck of cards, a fold-out map, a pamphlet
+adventure, a boxed set's loose reference sheets. Their page-label map is `none` end to
+end, there is nothing to be near, and the citation requirement as written forces the
+builder to either invent a number or refuse perfectly good content.
+
+Such a source instead declares a **locator scheme** describing how its parts are
+actually referred to at a table — the vocabulary people already use:
+
+| scheme | citation reads |
+|---|---|
+| `panel` | GM screen, panel 3 |
+| `card` | Hazard deck, card 14 |
+| `sheet` | Reference sheets, sheet 2 |
+| `section` | Pamphlet, §4 |
+| `position` | last resort: ordinal position in the source |
+
+Chunks then store `page_label_start`/`page_label_end` as the resolved locator text —
+the same text column, unchanged, since it was always text precisely so it would not
+assume numbers. A citation still points somewhere a person can physically go, which is
+the entire requirement; "page" was only ever the most common way to say it.
+
+`position` exists so the format never has no answer, and it should be rare. A citation
+reading "item 7" is worse than one reading "card 7", but both beat a fabricated page
+number, which looks checkable and is not.
 
 ---
 
@@ -640,6 +704,10 @@ superseding:
   index-only filter would leave a superseded table still rollable and a superseded
   constraint still flagging characters — the app enforcing and rolling on text the
   user can no longer look up.
+- Removal follows `chunk_derivation` as well: a derived chunk is deactivated when
+  **any** source it cites is superseded. Its whole claim to authority is that
+  provenance, and a summary of a rule that has since been corrected is stale prose
+  carrying citations to text the app has agreed not to show.
 - When the target is not installed, the rows are inert. An errata pack is valid on its
   own and simply has nothing to amend.
 - Each row carries a **snapshot of the target's citation** — book title, edition,
