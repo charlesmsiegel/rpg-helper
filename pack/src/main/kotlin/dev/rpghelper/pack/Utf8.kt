@@ -7,8 +7,13 @@ package dev.rpghelper.pack
  * check has to cross that boundary. [byteLength] does it without materialising the
  * encoded bytes, because activation walks every chunk in the pack and allocating a
  * copy of a whole book to measure it is not a cost worth paying on a phone.
+ *
+ * Public rather than internal to `:pack`: the byte-offset rule is the *format's*, not the
+ * validator's, so retrieval and routing check spans the same way activation does. Two
+ * implementations of "is this a UTF-8 boundary" is one more than the number that can be
+ * relied upon to agree.
  */
-internal object Utf8 {
+object Utf8 {
 
     /**
      * The form the pinned `unicode61 remove_diacritics 2` tokenizer reduces text to:
