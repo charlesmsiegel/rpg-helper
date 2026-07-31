@@ -76,7 +76,6 @@ dependencies {
     // Excluding it also makes that a build-time fact rather than a convention.
     implementation(project(":pack"))
     implementation(project(":state"))
-    implementation(project(":retrieval"))
     implementation(project(":routing"))
     implementation(project(":model"))
     implementation(project(":capabilities"))

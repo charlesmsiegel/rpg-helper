@@ -167,7 +167,9 @@ read the table**. So such a pack installed, activated, and rendered its prose wi
 well-formed citation chips, and the only person who ever saw the warning was the operator
 who ran the build.
 
-`BuildReport.of` reads it, `install` returns it, and the CLI prints it. `unchecked` sorts
+`BuildReport.of` reads it, `install` returns it, the CLI prints it, and the Packs surface
+lists it beside each pack — where a user reads it *before* deciding to activate rather than
+after. `unchecked` sorts
 above `dropped` deliberately: a dropped item is *absent*, and absence announces itself — the
 summary is not there, the control never appears. Unchecked content is **present and
 indistinguishable from checked content**, which is the failure this product is built
@@ -255,7 +257,31 @@ is the one that had to exist — a dropped constraint row has no natural symptom
 without it a sheet reads as validated while a rule it should have been checked against never
 ran.
 
-### 4.7 Assumptions no test enforces
+### 4.7 The one thing the export format asks for and cannot do — *stated, not fixed*
+
+`07-documents-and-constraints-spec.md` §6 says an imported acceptance's `ruleset_id` is
+"checked against its fingerprint, which contains the same value". It cannot be. A
+fingerprint is a SHA-256 over the canonical rule object, and a digest cannot be verified
+against a claimed field without its preimage — `rpgdoc/1` carries the digest and not the
+rule it was computed from, so there is nothing to hash and compare.
+
+What import does instead: check the row's *shape* — a 64-character lowercase hex digest and
+a non-blank ruleset — and drop what fails, **by name**, into `Imported.droppedAcceptances`.
+A malformed acceptance sitting in the table would suppress nothing while the user believed a
+ruling had travelled, which is the failure the check was reaching for.
+
+Closing it properly means exporting the rule object beside the digest, so an importer can
+recompute it. That is a format change (`rpgdoc/2`), and it trades a larger file for a check
+that only catches a hand-edited file — worth doing when there is a second version of the
+format for another reason, not on its own.
+
+The general shape is worth naming, because it will recur: **a spec can ask for a check that
+the data it also specifies makes impossible.** Writing the check anyway — comparing the
+digest to something that is not its preimage, or trusting the claimed field because the
+digest is *present* — would produce a verification that always passes, which is worse than
+the honest gap.
+
+### 4.8 Assumptions no test enforces
 
 Worth more to a reviewer than another green assertion:
 
