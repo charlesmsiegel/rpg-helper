@@ -448,10 +448,18 @@ text.
 
 The criterion is not "any term matches", which almost any English prose satisfies through
 a word like *check* or *creature*, nor "all terms match", which nothing satisfies. It is:
-**every query term that matched inside the child's span must also match outside it.** That
-asks the question the rule is actually about — did the parent match *because of* the child
-— rather than a proxy for it. A term the child never contained is not evidence either way
-and does not participate.
+**at least one query term matched inside the child's span, and every term that did also
+matches outside it.** That asks the question the rule is actually about — did the parent
+match *because of* the child — rather than a proxy for it. A term the child never
+contained is not evidence either way and does not participate.
+
+The first clause is not redundant, and omitting it inverts the rule. A parent that matched
+only *semantically* contains no query term inside the child either, so the set of terms to
+check is empty and the universal quantifier is satisfied **vacuously** — declaring
+independent a parent in whose redacted text no query term occurs at all, which is exactly
+the irrelevant lore this test exists to keep out of generation. Requiring positive lexical
+evidence turns the vacuous pass into a fail, and the dense test remains the route by which
+a genuinely semantic match can still qualify.
 
 Both thresholds are tunable and are measured by the dedup rows of the regression suite.
 The 64-byte and quarter-length figures are starting points, not findings.

@@ -119,11 +119,20 @@ it entirely. Route 3 still fired — retrieval genuinely matched — so:
   from pretraining, wearing the generated card's styling. That is the exact failure §2
   exists to prevent, arriving through the last door left open.
 - If quote or derived cards exist, they are the answer and nothing marks the absence.
-- If they do not, the app shows the chunks it found **with their citations**, and says
-  their content is quoted rather than generated. Presentationally this is the *model
+- If they do not, the app shows **citations only** — title, heading path, page — for the
+  chunks it found, and says where to read them. Presentationally this is the *model
   unavailable* card with a different sentence; it is not a sixth card kind, because the
   user's action is the same — go read these — and it is emphatically not the refusal card,
   which would claim nothing was found.
+
+  **It does not render the route-3 chunk's content, quoted or otherwise.** §1 declares
+  `('setting', 'source')` ineligible for verbatim rendering, and this branch is reached
+  *because* redaction removed the parent's text or refused to touch it. Quoting it here
+  would put the original, unredacted passage on screen in quotation styling, arriving
+  through the one door the fail-closed rule left open — and would do it in the branch
+  specifically designed for the case where that text could not be shown safely. A child
+  that is independently verbatim-eligible still renders as its own quote card by the
+  ordinary route; it is not this card's content.
 
 ### 2.3 The query is split too
 
