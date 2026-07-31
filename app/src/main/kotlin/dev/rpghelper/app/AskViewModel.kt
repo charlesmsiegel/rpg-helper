@@ -90,6 +90,25 @@ class AskViewModel(application: Application) : AndroidViewModel(application) {
 
     private val roller = Roller(SecureDiceSource())
 
+    private val voiceInput = OnDeviceVoice(application)
+
+    /**
+     * Whether the microphone is offered, and why not when it is not.
+     *
+     * Starts as whatever the device can assert *before* any permission is granted, so a
+     * device with no on-device recognizer never reaches the point of being asked for the
+     * microphone at all — asking would be collecting a permission this app would then
+     * refuse to use.
+     */
+    var voice by mutableStateOf(voiceState(voiceInput.onDeviceAvailable(), permissionGranted = false))
+        private set
+
+    private var listening: AutoCloseable? = null
+
+    /** What was heard, waiting to be asked or edited. The user sees it before it is sent. */
+    var heard by mutableStateOf<String?>(null)
+        private set
+
     init {
         // The feed survives process death, because the answer a table was looking at half
         // an hour ago is the thing they scrolled back to. Restored as history: the stored
@@ -229,6 +248,45 @@ class AskViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** The permission result. A refusal is not an error state — the control simply stays off. */
+    fun onMicrophonePermission(granted: Boolean) {
+        voice = voiceState(voiceInput.onDeviceAvailable(), granted)
+    }
+
+    /**
+     * Listens once, on the device.
+     *
+     * The transcript lands in [heard] rather than being asked immediately: recognition is
+     * imperfect, this app answers out of books where a mangled proper noun matters, and a
+     * question the user never saw before it was sent is a question they cannot correct.
+     */
+    fun listen() {
+        if (voice !is VoiceState.Idle) return
+        voice = VoiceState.Listening
+        listening = voiceInput.listen(
+            onResult = {
+                heard = it
+                voice = VoiceState.Idle
+                listening = null
+            },
+            onFailure = {
+                voice = VoiceState.Failed(it)
+                listening = null
+            },
+        )
+    }
+
+    fun stopListening() {
+        listening?.close()
+        listening = null
+        if (voice is VoiceState.Listening) voice = VoiceState.Idle
+    }
+
+    /** Clears the transcript, whether it was asked or abandoned. */
+    fun clearHeard() {
+        heard = null
+    }
+
     /**
      * Rolls on the table behind a quoted chunk.
      *
@@ -260,6 +318,9 @@ class AskViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     override fun onCleared() {
+        // The recognizer holds a microphone. Leaving it open past the ViewModel would keep
+        // it open past the screen.
+        listening?.close()
         store.close()
     }
 

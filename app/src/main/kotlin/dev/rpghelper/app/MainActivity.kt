@@ -2,7 +2,9 @@ package dev.rpghelper.app
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -27,7 +29,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -167,6 +172,21 @@ fun AskScreen(model: AskViewModel = viewModel()) {
     var question by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
 
+    val microphone = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+        model::onMicrophonePermission,
+    )
+
+    // A transcript is put in the field, not sent. Recognition is imperfect and this app
+    // answers out of books, where a mangled proper noun is the difference between a rule
+    // and a refusal -- so the user sees what was heard and can fix it first.
+    LaunchedEffect(model.heard) {
+        model.heard?.let {
+            question = it
+            model.clearHeard()
+        }
+    }
+
     // The newest turn is the one being read. Scrolling on answer rather than on every
     // recomposition leaves the user's own scroll position alone while they read back.
     LaunchedEffect(model.turns.size) {
@@ -242,24 +262,54 @@ fun AskScreen(model: AskViewModel = viewModel()) {
                 )
             }
 
-            TextField(
-                value = question,
-                onValueChange = { question = it },
-                placeholder = { Text("Ask about your books") },
-                enabled = !model.asking,
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                keyboardActions = KeyboardActions(
-                    onSend = {
-                        model.ask(question)
-                        question = ""
-                    },
-                ),
-                // Width, not size. `fillMaxSize` on a non-weighted child is measured
-                // first and takes the whole column, leaving the weighted feed above it
-                // zero height -- so every answer was rendered behind a full-screen input.
-                modifier = Modifier.fillMaxWidth().padding(8.dp),
-            )
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                TextField(
+                    value = question,
+                    onValueChange = { question = it },
+                    placeholder = { Text("Ask about your books") },
+                    enabled = !model.asking,
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                    keyboardActions = KeyboardActions(
+                        onSend = {
+                            model.ask(question)
+                            question = ""
+                        },
+                    ),
+                    // Width, not size. `fillMaxSize` on a non-weighted child is measured
+                    // first and takes the whole column, leaving the weighted feed above it
+                    // zero height -- so every answer was rendered behind a full-screen input.
+                    modifier = Modifier.weight(1f).padding(8.dp),
+                )
+
+                // **Hidden, not disabled, when the device cannot transcribe locally.** A
+                // disabled microphone is a promise the app is refusing to keep; an absent
+                // one is an honest statement that this build will not send audio anywhere.
+                when (val voice = model.voice) {
+                    is VoiceState.Unavailable -> Unit
+                    is VoiceState.NeedsPermission -> TextButton(
+                        onClick = { microphone.launch(android.Manifest.permission.RECORD_AUDIO) },
+                        modifier = Modifier.semantics {
+                            contentDescription = "Allow the microphone to ask by voice"
+                        },
+                    ) { Text("Voice") }
+                    is VoiceState.Idle -> TextButton(
+                        onClick = model::listen,
+                        enabled = !model.asking,
+                        modifier = Modifier.semantics { contentDescription = "Ask by voice" },
+                    ) { Text("Voice") }
+                    is VoiceState.Listening -> TextButton(
+                        onClick = model::stopListening,
+                        modifier = Modifier.semantics { contentDescription = "Stop listening" },
+                    ) { Text("Listening…") }
+                    is VoiceState.Failed -> TextButton(
+                        onClick = model::listen,
+                        modifier = Modifier.semantics {
+                            contentDescription = "Voice input failed: ${voice.reason}. Try again"
+                        },
+                    ) { Text("Voice") }
+                }
+            }
         }
     }
 }
