@@ -25,6 +25,20 @@ interface Db : AutoCloseable {
 
     /** Names of every table and view in the file, including virtual tables. */
     fun tableNames(): Set<String>
+
+    /**
+     * Runs a statement that returns no rows.
+     *
+     * **This does not make a pack writable.** The connection is opened `SQLITE_OPEN_READONLY`
+     * and stays that way; what this reaches is SQLite's `temp` database, which is separate
+     * from the file and writable regardless. The only statements this program issues through
+     * it build the per-connection `temp.withdrawn` table that supersession is applied from —
+     * a table whose alternative was pasting a hundred thousand chunk ids into the text of
+     * every query.
+     *
+     * @throws PackReadException if the statement fails.
+     */
+    fun execute(sql: String)
 }
 
 /**

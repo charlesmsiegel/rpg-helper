@@ -53,11 +53,12 @@ object LexicalSearch {
         // the limit and out of the list entirely, producing a refusal on a query with
         // perfectly good answers in the pack. The filter belongs before the truncation
         // because it belongs before the scoring.
-        val withdrawn = superseded.asSet()
-            .filter { it.packUid == pack.packUid }
-            .map { it.chunkId }
-        val exclusion =
-            if (withdrawn.isEmpty()) "" else " AND rowid NOT IN (${withdrawn.joinToString(",")})"
+        //
+        // Applied through `temp.withdrawn` rather than an inline id list: after an accepted
+        // broad replacement the set is legitimately six figures, and a query whose *text*
+        // grows with it is a question that gets slower the more corrections the user has
+        // accepted. `ActivePack.exclusion` owns the table.
+        val exclusion = pack.exclusion(superseded)
 
         return pack.db.map(
             "SELECT rowid, bm25(chunks_fts) FROM chunks_fts " +

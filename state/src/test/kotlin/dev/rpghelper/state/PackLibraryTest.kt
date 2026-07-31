@@ -273,7 +273,33 @@ class PackLibraryTest {
         )
         val result = strict.install(forge())
         assertTrue(result is InstallResult.TooLarge, "got $result")
-        assertTrue(result.limit.contains("text"), result.limit)
+        // Named as table.column, because "some value was too big" is not something anyone
+        // can act on and the refusal is the only thing the user ever sees.
+        assertTrue(Regex("""^\w+\.\w+: \d+ bytes exceeds""").containsMatchIn(result.limit), result.limit)
+    }
+
+    @Test
+    fun `the bound covers every column, not only chunk text`() {
+        // The ceiling used to be two columns: `chunks.text` and the embedding BLOB. A pack
+        // under the file-size limit could still carry one enormous `entities.alias` -- or a
+        // capability manifest, or a constraint payload -- and the loaders call `Row.string`
+        // on all of them, so the heap was exhausted before the refusal could be returned.
+        // Enumerating the columns the loaders read today would have left the next column
+        // anyone adds unbounded, so the check asks the file which columns it has.
+        val fat = "x".repeat(5 * 1024 * 1024) // over the format's own 4 MiB cell ceiling
+        val result = library.install(
+            forge { c ->
+                // Bound, not interpolated: SQLite caps the length of a *statement* well
+                // below the length of a value, so the oversized cell cannot be written by
+                // pasting it into SQL.
+                c.prepareStatement("UPDATE entities SET alias = ?").use {
+                    it.setString(1, fat)
+                    it.executeUpdate()
+                }
+            },
+        )
+        assertTrue(result is InstallResult.TooLarge, "got $result")
+        assertTrue(result.limit.startsWith("entities.alias:"), result.limit)
     }
 
     @Test
@@ -543,9 +569,13 @@ class PackLibraryTest {
             ),
         )
 
+        // The acknowledgement is the measured impact itself, not a yes: a yes cannot say
+        // what it is a yes to.
+        val shown = library.setActive(replacement.installId, true)
+        assertTrue(shown is ActivationResult.NeedsAcknowledgement, "got $shown")
         assertEquals(
             ActivationResult.Changed,
-            library.setActive(replacement.installId, true, acknowledgeBroadSupersession = true),
+            library.setActive(replacement.installId, true, shown.impacts),
         )
         assertTrue(library.installed().single { it.installId == replacement.installId }.active)
     }
@@ -588,7 +618,9 @@ class PackLibraryTest {
                 errata("errata:broad", "core:grapple", "core:underdark", "core:ogre"),
             ),
         )
-        library.setActive(replacement.installId, true, acknowledgeBroadSupersession = true)
+        val shown = library.setActive(replacement.installId, true)
+                as ActivationResult.NeedsAcknowledgement
+        library.setActive(replacement.installId, true, shown.impacts)
         assertEquals(ActivationResult.Changed, library.setActive(replacement.installId, false))
     }
 

@@ -14,6 +14,20 @@ object Packs {
         path: Path,
         supportedEmbedders: Set<EmbedderContract>,
         limits: PackLimits = PackLimits(),
+    ): ValidationReport =
+        Sqlite.openReadOnly(path).use { validate(it, supportedEmbedders, limits) }
+
+    /**
+     * The gate, against a pack that is **already open**.
+     *
+     * Preferred over [validateFile] wherever the caller goes on to read the pack, because
+     * a caller that validates a path and then opens the path has validated one file and
+     * read another that is only probably the same. See `Library.openLeased`.
+     */
+    fun validate(
+        db: Db,
+        supportedEmbedders: Set<EmbedderContract>,
+        limits: PackLimits = PackLimits(),
     ): ValidationReport {
         // **The preflight runs here, not only where a pack is installed.** The validator
         // materializes chunk metadata and reads every text value, so a malformed file well
@@ -22,11 +36,11 @@ object Packs {
         // a refusal. `PackLibrary.install` ran this first; `verify`, `build` and every
         // direct `Library.open` reached the validator without it, which made the protection
         // a property of one call site rather than of the gate.
-        val fault = Preflight.check(path, limits)
+        val fault = Preflight.check(db, limits)
         if (fault != null) {
             return ValidationReport(listOf(Violation(ViolationCode.PACK_EXCEEDS_LIMITS, fault)))
         }
-        return JdbcDb.openReadOnly(path).use { PackValidator(supportedEmbedders).validate(it) }
+        return PackValidator(supportedEmbedders).validate(db)
     }
 
     /**
@@ -37,23 +51,24 @@ object Packs {
      * doing so after the schema changes. Throws [PackReadException] if the file cannot
      * answer, which for an unvalidated file is the expected outcome rather than a bug.
      */
-    fun readMeta(path: Path): PackMeta =
-        JdbcDb.openReadOnly(path).use { db ->
-            db.map(
-                "SELECT schema_version, pack_uid, pack_version, title, ruleset_id, " +
-                    "embedder_id, embedder_dim FROM pack_meta",
-            ) {
-                PackMeta(
-                    schemaVersion = it.int(0),
-                    packUid = it.string(1),
-                    packVersion = it.string(2),
-                    title = it.string(3),
-                    rulesetId = it.stringOrNull(4),
-                    embedderId = it.string(5),
-                    embedderDim = it.int(6),
-                )
-            }.singleOrNull() ?: throw PackReadException("pack_meta does not hold exactly one row")
-        }
+    fun readMeta(path: Path): PackMeta = Sqlite.openReadOnly(path).use { readMeta(it) }
+
+    /** [readMeta] against a pack that is already open. */
+    fun readMeta(db: Db): PackMeta =
+        db.map(
+            "SELECT schema_version, pack_uid, pack_version, title, ruleset_id, " +
+                "embedder_id, embedder_dim FROM pack_meta",
+        ) {
+            PackMeta(
+                schemaVersion = it.int(0),
+                packUid = it.string(1),
+                packVersion = it.string(2),
+                title = it.string(3),
+                rulesetId = it.stringOrNull(4),
+                embedderId = it.string(5),
+                embedderDim = it.int(6),
+            )
+        }.singleOrNull() ?: throw PackReadException("pack_meta does not hold exactly one row")
 
     /**
      * The **open-time subset**: schema version, embedder contract, probe vector.
@@ -72,7 +87,7 @@ object Packs {
      */
     fun openCheck(path: Path, supportedEmbedders: Set<EmbedderContract>): String? =
         runCatching {
-            JdbcDb.openReadOnly(path).use { db ->
+            Sqlite.openReadOnly(path).use { db ->
                 // Read as Long, never narrowed to Int. `4294967297` truncates to 1 and
                 // `4294967424` truncates to 128, so a damaged or substituted file could
                 // declare exactly the gross metadata corruption this check exists to

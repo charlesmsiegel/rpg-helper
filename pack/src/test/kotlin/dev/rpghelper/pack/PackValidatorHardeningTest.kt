@@ -30,20 +30,6 @@ class PackValidatorHardeningTest {
     private fun validate(mutate: (Connection) -> Unit = {}): ValidationReport =
         Packs.validateFile(PackForge.writePack(directory, mutate), supported)
 
-    /**
-     * Rebuilds [table] without its constraints, preserving rows.
-     *
-     * The canonical DDL declares NOT NULL and UNIQUE, so a defect that violates one
-     * cannot be injected with an UPDATE. That is the point of these tests: a pack ships
-     * its own DDL, so those declarations describe what its builder chose to write and
-     * guarantee nothing about the file in hand.
-     */
-    private fun Connection.relax(table: String) {
-        exec("CREATE TABLE ${table}_lax AS SELECT * FROM $table")
-        exec("DROP TABLE $table")
-        exec("ALTER TABLE ${table}_lax RENAME TO $table")
-    }
-
     private fun assertRejects(code: ViolationCode, mutate: (Connection) -> Unit) {
         val baseline = validate()
         assertTrue(baseline.isValid, "the forged baseline pack must validate, but:\n$baseline")

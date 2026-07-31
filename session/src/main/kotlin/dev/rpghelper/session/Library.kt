@@ -5,8 +5,9 @@ import dev.rpghelper.capabilities.RollableTable
 import dev.rpghelper.model.BundledEmbedders
 import dev.rpghelper.model.HashingEmbedder
 import dev.rpghelper.pack.ChunkRef
-import dev.rpghelper.pack.JdbcDb
+import dev.rpghelper.pack.Db
 import dev.rpghelper.pack.Packs
+import dev.rpghelper.pack.Sqlite
 import dev.rpghelper.retrieval.ActivePack
 import dev.rpghelper.retrieval.ActiveSet
 import dev.rpghelper.retrieval.Gates
@@ -76,6 +77,8 @@ class Library private constructor(
      * citing a book the user just removed.
      */
     private val leases: List<AutoCloseable> = emptyList(),
+    /** Where [open] put its copies, removed on close. Null when nothing was staged. */
+    private val staging: Path? = null,
 ) : AutoCloseable {
 
     /** Which chunks a roll control is offered for, as `:capabilities` decided it. */
@@ -85,6 +88,12 @@ class Library private constructor(
     override fun close() {
         packs.forEach { it.db.close() }
         leases.forEach { it.close() }
+        staging?.let { dir ->
+            runCatching {
+                Files.list(dir).use { entries -> entries.forEach { Files.deleteIfExists(it) } }
+                Files.deleteIfExists(dir)
+            }
+        }
     }
 
     companion object {
@@ -94,8 +103,36 @@ class Library private constructor(
          *
          * Ordered by the caller: `installed_packs.priority` is the app's, and on the
          * command line the argument order is the only statement of it there is.
+         *
+         * **Each pack is copied before it is looked at**, and every subsequent step — the
+         * gate, the metadata, the digest, and the queries that answer questions — reads the
+         * copy. These paths are wherever the user typed, writable by anything on the
+         * machine, and validating a path and then reading that path checks one file and
+         * quotes another that is only probably the same. A rename between the two is enough
+         * to make retrieval quote bytes that never passed the gate; an in-place rewrite is
+         * enough to make the runtime connection and the cache fingerprint disagree about
+         * what the book says. This is the same rule `PackLibrary.install` already keeps —
+         * every decision is derived from the staged copy, never from the source — and the
+         * cost is one copy per invocation, paid by a command line rather than by the app.
+         *
+         * [openActive] does not stage: its files live in the app's own directory, under a
+         * lease that prevents removal, with a digest recorded at install time.
          */
-        fun open(paths: List<Path>): Library = openLeased(paths.map { it to null })
+        fun open(paths: List<Path>): Library {
+            val staging = Files.createTempDirectory("rpghelper-packs")
+            return try {
+                val staged = paths.mapIndexed { index, path ->
+                    Files.copy(path, staging.resolve("$index.rpgpack"))
+                }
+                openLeased(staged.map { it to null }, emptyMap(), staging)
+            } catch (e: Throwable) {
+                runCatching {
+                    Files.list(staging).use { it.forEach { entry -> Files.deleteIfExists(entry) } }
+                    Files.deleteIfExists(staging)
+                }
+                throw e
+            }
+        }
 
         /** SHA-256 of a pack file, for callers that have no install row to read one from. */
         private fun digestOf(path: Path): String {
@@ -134,9 +171,18 @@ class Library private constructor(
             return openLeased(leased, digests)
         }
 
+        /**
+         * Opens each source **once** and does everything through that one handle.
+         *
+         * The gate, the metadata read, and every query that later answers a question are
+         * the same connection to the same inode. Opening the path again per step made each
+         * step a fresh chance to read a different file, and the one that mattered was the
+         * last: retrieval could quote a pack that the gate never saw.
+         */
         private fun openLeased(
             sources: List<Pair<Path, AutoCloseable?>>,
             digests: Map<String, String> = emptyMap(),
+            staging: Path? = null,
         ): Library {
             val opened = mutableListOf<ActivePack>()
             val fingerprint = mutableListOf<CachedPack>()
@@ -145,13 +191,18 @@ class Library private constructor(
 
             for ((index, source) in sources.withIndex()) {
                 val (path, _) = source
-                val report = Packs.validateFile(path, BUNDLED.bundled)
-                if (!report.isValid) {
+                val db = Sqlite.openReadOnly(path)
+                fun bail(message: String): Nothing {
+                    db.close()
                     opened.forEach { it.db.close() }
                     sources.forEach { it.second?.close() }
-                    error("$path would not activate:\n$report")
+                    error(message)
                 }
-                val meta = Packs.readMeta(path)
+
+                val report = Packs.validate(db, BUNDLED.bundled)
+                if (!report.isValid) bail("$path would not activate:\n$report")
+
+                val meta = Packs.readMeta(db)
                 // Two files claiming one uid cannot both be active. Everything downstream
                 // identifies a chunk by `(pack_uid, chunk_id)` -- retrieval, routing, and
                 // the citation resolver alike -- so two editions of one book merge on
@@ -159,15 +210,13 @@ class Library private constructor(
                 // other version's citation. The library enforces this with a uid
                 // uniqueness rule at install; on a command line the check has to be here.
                 if (meta.packUid in priority) {
-                    opened.forEach { it.db.close() }
-                    sources.forEach { it.second?.close() }
-                    error(
+                    bail(
                         "two packs claim '${meta.packUid}'; they cannot be active together, " +
                             "because a chunk is identified by (pack_uid, chunk_id) everywhere " +
                             "downstream and the two would merge",
                     )
                 }
-                opened += ActivePack(meta.packUid, JdbcDb.openReadOnly(path))
+                opened += ActivePack(meta.packUid, db)
                 fingerprint += CachedPack(
                     meta.packUid,
                     digests[meta.packUid]?.takeIf { it.isNotEmpty() } ?: digestOf(path),
@@ -198,6 +247,7 @@ class Library private constructor(
                 dropped = dropped,
                 fingerprint = fingerprint,
                 leases = sources.mapNotNull { it.second },
+                staging = staging,
             )
         }
     }

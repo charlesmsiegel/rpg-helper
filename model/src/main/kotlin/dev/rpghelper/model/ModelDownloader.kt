@@ -132,7 +132,21 @@ class ModelDownloader(
                 )
             }
 
-            Files.move(partial, target, StandardCopyOption.REPLACE_EXISTING)
+            // Finalization is a result, not an exception. Network failures and digest
+            // mismatches are deliberately values so the model lifecycle can move to a
+            // failed state and offer a retry; letting the *move* throw past all of that
+            // crashed the caller after a multi-gigabyte fetch, for the ordinary reasons a
+            // move fails -- storage gone read-only, the target replaced by a directory, a
+            // filesystem error. The verified partial is kept: it hashed correctly, so a
+            // retry has nothing left to download.
+            try {
+                Files.move(partial, target, StandardCopyOption.REPLACE_EXISTING)
+            } catch (e: java.io.IOException) {
+                return DownloadResult.Failed(
+                    "'${file.name}' downloaded and verified but could not be put in place: " +
+                        "${e.message}; the verified copy is kept at $partial for a retry",
+                )
+            }
             done[file.name] = target
             fetchedBefore += file.bytes
             onProgress(DownloadProgress(fetchedBefore, total))

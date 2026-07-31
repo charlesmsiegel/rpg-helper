@@ -4,8 +4,53 @@ import dev.rpghelper.pack.ChunkRef
 import dev.rpghelper.pack.Db
 import dev.rpghelper.pack.map
 
-/** A pack the user has activated, opened read-only. */
-class ActivePack(val packUid: String, val db: Db)
+/**
+ * A pack the user has activated, opened read-only.
+ *
+ * Also owns **how supersession reaches SQL** for this pack, which is not a detail the
+ * query builders should each solve. See [exclusion].
+ */
+class ActivePack(val packUid: String, val db: Db) {
+
+    /** The withdrawn ids currently materialized in `temp.withdrawn`, or null for none. */
+    private var installed: Set<Long>? = null
+
+    /**
+     * A `WHERE` fragment excluding this pack's withdrawn chunks, or `""` when none are.
+     *
+     * The withdrawn ids live in a **temp table**, not in the text of the query. Once a user
+     * accepts a broad replacement the set is legitimately hundreds of thousands of chunks,
+     * and pasting them into every `MATCH` — plus once more per term inside
+     * `InformationGate.measure` — spends a multi-megabyte SQL parse on each question, which
+     * is retrieval failing at exactly the moment a large errata pack made it matter. The
+     * table is built when the set changes, which is when the active set changes, so an
+     * ordinary question adds one indexed subquery and no string building at all.
+     *
+     * Kept here rather than in the query builders because it is per-pack state: both
+     * callers were already narrowing the global set to this pack's ids on every call.
+     */
+    fun exclusion(superseded: SupersededSet, column: String = "rowid"): String {
+        val ids = superseded.chunksIn(packUid)
+        if (ids.isEmpty()) return ""
+        if (ids != installed) materialize(ids)
+        return " AND $column NOT IN (SELECT chunk_id FROM temp.withdrawn)"
+    }
+
+    private fun materialize(ids: Set<Long>) {
+        db.execute("DROP TABLE IF EXISTS temp.withdrawn")
+        db.execute("CREATE TEMP TABLE withdrawn (chunk_id INTEGER PRIMARY KEY)")
+        // Batched so no single statement is itself the multi-megabyte string this exists
+        // to avoid. The ids are longs read out of the pack's own supersession resolution,
+        // never text.
+        ids.chunked(500).forEach { batch ->
+            db.execute(
+                "INSERT INTO temp.withdrawn (chunk_id) VALUES " +
+                    batch.joinToString(",") { "($it)" },
+            )
+        }
+        installed = ids
+    }
+}
 
 /**
  * Chunks removed from the candidate set because an active pack corrects them.
@@ -23,6 +68,10 @@ class SupersededSet(private val chunks: Set<ChunkRef>) {
     val size: Int get() = chunks.size
 
     fun asSet(): Set<ChunkRef> = chunks
+
+    /** The withdrawn chunk ids belonging to one pack. */
+    fun chunksIn(packUid: String): Set<Long> =
+        chunks.mapNotNullTo(mutableSetOf()) { if (it.packUid == packUid) it.chunkId else null }
 
     companion object {
         val EMPTY = SupersededSet(emptySet())

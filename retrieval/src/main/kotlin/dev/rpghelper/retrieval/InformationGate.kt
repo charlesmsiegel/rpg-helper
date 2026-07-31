@@ -151,11 +151,11 @@ object InformationGate {
         // with. An errata pack could then gate out the very answer it was published to
         // fix, and the ratio would still look principled. Corpus size drops for the same
         // reason: the denominator and the frequencies must be counted over one corpus.
-        val withdrawn = superseded.asSet()
-            .filter { it.packUid == pack.packUid }
-            .map { it.chunkId }
-        fun excluding(column: String) =
-            if (withdrawn.isEmpty()) "" else " AND $column NOT IN (${withdrawn.joinToString(",")})"
+        //
+        // Through `temp.withdrawn`, built once per change to the active set. Inline id
+        // lists put the whole correction set into the text of *every term's* query, so a
+        // 32-term question rebuilt and reparsed it 64 times.
+        fun excluding(column: String) = pack.exclusion(superseded, column)
         val exclusion = excluding("rowid")
         val total = pack.db.map(
             "SELECT count(*) FROM chunks WHERE 1=1${excluding("chunk_id")}",

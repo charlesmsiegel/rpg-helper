@@ -26,7 +26,17 @@ data class BuildNote(
 )
 
 /** What a build produced. */
-data class BuildOutcome(val path: Path, val notes: List<BuildNote>)
+/**
+ * @param report the activation gate's verdict on what was built. When it is not valid,
+ * [path] still holds whatever was there before — see [PackBuilder.buildTo].
+ */
+data class BuildOutcome(
+    val path: Path,
+    val notes: List<BuildNote>,
+    val report: dev.rpghelper.pack.ValidationReport,
+) {
+    val valid: Boolean get() = report.isValid
+}
 
 /**
  * Assembles a `.rpgpack` from a [CorpusSpec].
@@ -109,6 +119,14 @@ class PackBuilder(
      * on one instance is a second *build*: carrying `nextChunkId` and the stable-key map
      * over would number the second pack's chunks differently and mark every repeated key
      * ambiguous, failing on the first derived citation that resolved one.
+     *
+     * **The activation gate runs against the staged file, before the move.** Committing
+     * the transaction is not the same as producing a pack the app will accept: a builder
+     * or schema regression can write a perfectly valid SQLite database that the validator
+     * refuses. Validating after the move meant the command reported failure having already
+     * destroyed the last known-good artifact and left the refused pack under its name —
+     * exactly the loss staging exists to prevent, arriving through the one door staging
+     * did not cover.
      */
     fun buildTo(path: Path): BuildOutcome {
         reset()
@@ -134,12 +152,20 @@ class PackBuilder(
                 writeReport(c)
                 c.commit()
             }
+            val report = dev.rpghelper.pack.Packs.validateFile(
+                staging,
+                setOf(embedder.contract),
+            )
+            if (!report.isValid) {
+                Files.deleteIfExists(staging)
+                return BuildOutcome(path, notes.toList(), report)
+            }
             Files.move(staging, target, StandardCopyOption.REPLACE_EXISTING)
+            return BuildOutcome(path, notes.toList(), report)
         } catch (failure: Throwable) {
             Files.deleteIfExists(staging)
             throw failure
         }
-        return BuildOutcome(path, notes.toList())
     }
 
     private fun reset() {

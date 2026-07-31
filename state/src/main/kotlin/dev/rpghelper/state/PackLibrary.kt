@@ -1,7 +1,7 @@
 package dev.rpghelper.state
 
 import dev.rpghelper.pack.EmbedderContract
-import dev.rpghelper.pack.JdbcDb
+import dev.rpghelper.pack.Sqlite
 import dev.rpghelper.pack.map
 import dev.rpghelper.pack.PackMeta
 import dev.rpghelper.pack.Packs
@@ -58,8 +58,16 @@ sealed interface ActivationResult {
      * that is installed, active, and mostly unreachable, with nothing on screen saying so.
      * `04-retrieval-spec.md` §5.3.1: supersession is unbounded, so what the app can do is
      * refuse to let it happen quietly.
+     *
+     * @param stale true when the caller *did* acknowledge something, and it was not this.
+     * Either they never saw a warning, or the active set changed between the warning and
+     * the retry — and in both cases activating would withdraw books nobody agreed to lose.
+     * [impacts] is always the freshly measured set, so a caller can show it and ask again.
      */
-    data class NeedsAcknowledgement(val impacts: List<SupersessionImpact>) : ActivationResult
+    data class NeedsAcknowledgement(
+        val impacts: List<SupersessionImpact>,
+        val stale: Boolean = false,
+    ) : ActivationResult
 }
 
 /** Why an install did not happen. */
@@ -73,6 +81,18 @@ sealed interface InstallResult {
     data class Installed(
         val pack: InstalledPack,
         val deactivatedForReview: List<SupersessionImpact> = emptyList(),
+        /**
+         * What this pack would withdraw from each currently active book, at every size.
+         *
+         * Reported for **every** install, not only for a replacement of an active pack.
+         * `04-retrieval-spec.md` §5.3.1 asks that supersession impact be shown before
+         * activation, and the ordinary case — a newly installed errata pack — is the one
+         * that used to report nothing at all: a set below the acknowledgement threshold
+         * withdraws real passages from a real book and never appeared on any surface.
+         * The threshold decides whether the user must *answer*; it was never meant to
+         * decide whether they are told.
+         */
+        val impact: List<SupersessionImpact> = emptyList(),
     ) : InstallResult
     data class Rejected(val report: ValidationReport) : InstallResult
     data class TooLarge(val limit: String) : InstallResult
@@ -183,6 +203,7 @@ class PackLibrary(
 
         val staged = packsDir.resolve("$installId.rpgpack")
         var broadImpact: List<SupersessionImpact> = emptyList()
+        var impact: List<SupersessionImpact> = emptyList()
         val existing: InstalledPack?
         val meta: PackMeta
         val size: Long
@@ -233,14 +254,20 @@ class PackLibrary(
                 // Measured while the pack being replaced is still active and this one is
                 // not, which is exactly the comparison the user would be shown: how much
                 // of somebody *else's* active book this new file would withdraw.
+                //
+                // Measured for **every** install. It used to run only when replacing an
+                // active pack, so a first-time errata install reported no amended passages
+                // and no target books -- and any set below the acknowledgement threshold
+                // was never surfaced at all, at any point in the pack's life.
+                impact = supersessionImpact(
+                    InstalledPack(
+                        installId, meta.packUid, meta.packVersion, meta.title,
+                        meta.rulesetId, meta.embedderId, size, digest,
+                        active = false, priority = current?.priority ?: 0,
+                    ),
+                )
                 if (current?.active == true) {
-                    broadImpact = supersessionImpact(
-                        InstalledPack(
-                            installId, meta.packUid, meta.packVersion, meta.title,
-                            meta.rulesetId, meta.embedderId, size, digest,
-                            active = false, priority = current.priority,
-                        ),
-                    ).filter { it.fraction > BROAD_SUPERSESSION }
+                    broadImpact = impact.filter { it.fraction > BROAD_SUPERSESSION }
                 }
 
                 db.execute(
@@ -279,7 +306,7 @@ class PackLibrary(
         //    installed. `reconcile` sweeps files with no row.
         if (existing != null) deleteWhenUnread(existing.installId)
 
-        return InstallResult.Installed(requireNotNull(byId(installId)), broadImpact)
+        return InstallResult.Installed(requireNotNull(byId(installId)), broadImpact, impact)
     }
 
     /**
@@ -334,19 +361,29 @@ class PackLibrary(
      *
      * Deactivation never asks: switching a pack off can only ever restore reachability.
      *
-     * @param acknowledgeBroadSupersession the user's answer to exactly the impact this
-     * returned, having seen it. Passing it blind reintroduces the failure.
+     * @param acknowledged **the impact the user was shown**, not a yes. The impact is
+     * measured again here and the two must match. A boolean could only say *yes*, never
+     * *yes to what*: it let `--accept` be passed by someone who had never seen a warning,
+     * and it let a warning shown before another pack was activated stand in for a
+     * withdrawal that had since grown to cover a different set of books entirely. The
+     * measurement is cheap and the thing it protects — a book going dark unannounced — is
+     * the failure this whole path exists for.
      */
     fun setActive(
         installId: Long,
         active: Boolean,
-        acknowledgeBroadSupersession: Boolean = false,
+        acknowledged: List<SupersessionImpact>? = null,
     ): ActivationResult {
         val row = byId(installId) ?: return ActivationResult.NotInstalled
 
-        if (active && !acknowledgeBroadSupersession) {
+        // Measured on every activation, including an acknowledged one. Skipping the
+        // measurement when an acknowledgement was offered is what made the acknowledgement
+        // unfalsifiable.
+        if (active) {
             val broad = supersessionImpact(row).filter { it.fraction > BROAD_SUPERSESSION }
-            if (broad.isNotEmpty()) return ActivationResult.NeedsAcknowledgement(broad)
+            if (broad.isNotEmpty() && acknowledged?.toSet() != broad.toSet()) {
+                return ActivationResult.NeedsAcknowledgement(broad, stale = acknowledged != null)
+            }
         }
 
         db.execute(
@@ -369,7 +406,7 @@ class PackLibrary(
      */
     fun supersessionImpact(candidate: InstalledPack): List<SupersessionImpact> {
         val targets = runCatching {
-            JdbcDb.openReadOnly(fileOf(candidate.installId)).use { db ->
+            Sqlite.openReadOnly(fileOf(candidate.installId)).use { db ->
                 db.map("SELECT target_source_uid, target_stable_key FROM supersessions") {
                     it.string(0) to it.string(1)
                 }
@@ -383,7 +420,7 @@ class PackLibrary(
         for (other in active()) {
             if (other.installId == candidate.installId) continue
             runCatching {
-                JdbcDb.openReadOnly(fileOf(other.installId)).use { db ->
+                Sqlite.openReadOnly(fileOf(other.installId)).use { db ->
                     val sources = db.map("SELECT source_id, source_uid, title FROM sources") {
                         Triple(it.long(0), it.string(1), it.string(2))
                     }
@@ -462,7 +499,16 @@ class PackLibrary(
         // it is supposed to hold.
         if (installId in pendingDeletion) return@withLock null
         val file = fileOf(installId)
-        if (!Files.isRegularFile(file)) return@withLock null
+        // A missing file is deactivated, exactly like a failed open-check or digest below.
+        // Returning null and leaving the row active made the pack invisible to every query
+        // while the library and the Packs surface went on listing it as active -- so a
+        // refusal, or an answer missing the very rule the user was looking at, appeared to
+        // come from a book that was in fact never searched. External-storage cleanup and a
+        // manual deletion both arrive here.
+        if (!Files.isRegularFile(file)) {
+            setActive(installId, false)
+            return@withLock null
+        }
 
         // The open-time subset, every time. It is the cheap half of the bargain
         // `01-app-state-spec.md` strikes: the full digest pass runs in the background,

@@ -100,6 +100,44 @@ class BundledDbTest {
     }
 
     @Test
+    fun `both bindings refuse a NULL in a column the format requires`() {
+        // The comparison above was only ever run over a *well-formed* pack, so it could not
+        // see this: `BundledDb` had none of the NULL guards its twin has, and answered 0
+        // for a NULL integer, "" for a NULL string, and an empty array for a NULL BLOB.
+        // The validator then reasoned about those values as though they had resolved --
+        // a NULL `source_id` read as source 0, a NULL probe vector reported as the wrong
+        // violation entirely. It stayed invisible for exactly as long as production ran
+        // only the other binding, which is the failure mode this whole test class exists
+        // for and the one it had a blind spot in.
+        val holed = PackForge.writePack(directory) { c ->
+            c.relax("sources")
+            c.exec("UPDATE sources SET title = NULL")
+        }
+        val failures = listOf<(Path) -> Db>(JdbcDb::openReadOnly, BundledDb::openReadOnly).map { open ->
+            runCatching {
+                open(holed).use { db -> db.map("SELECT title FROM sources") { it.string(0) } }
+            }.exceptionOrNull()
+        }
+        assertTrue(
+            failures.all { it is PackReadException },
+            "both bindings must report a NULL as a read error, got $failures",
+        )
+    }
+
+    @Test
+    fun `both bindings agree that a missing file is not a database`() {
+        val absent = directory.resolve("nowhere.rpgpack")
+        val failures = listOf<(Path) -> Db>(JdbcDb::openReadOnly, BundledDb::openReadOnly).map { open ->
+            runCatching { open(absent) }.exceptionOrNull()
+        }
+        assertTrue(
+            failures.all { it is IllegalArgumentException },
+            "SQLite would otherwise create an empty database and hand back a pack that is " +
+                "merely missing every table, got $failures",
+        )
+    }
+
+    @Test
     fun `a file that is not a pack fails as a read error, not as a driver exception`() {
         // A malformed pack has to reach the validator as a violation rather than as
         // whichever exception hierarchy this platform's driver happens to use.

@@ -16,6 +16,7 @@ import dev.rpghelper.model.ModelManifest
 import dev.rpghelper.pack.Packs
 import dev.rpghelper.state.ActivationResult
 import dev.rpghelper.state.InstallResult
+import dev.rpghelper.state.SupersessionImpact
 import dev.rpghelper.retrieval.Pipeline
 import dev.rpghelper.routing.LoadedRollables
 import dev.rpghelper.routing.PackCitations
@@ -103,12 +104,18 @@ private fun build(arguments: List<String>): Int {
     val outcome = PackBuilder(corpus, EMBEDDER).buildTo(target)
     outcome.notes.forEach { println("${it.severity}: ${it.subjectKind} ${it.subjectId} — ${it.detail}") }
 
-    // The builder's output goes through the app's own gate, always. Emitting a pack the
-    // app would refuse is the one bug a builder must not be able to ship, and the only way
-    // to know it cannot is to run the real validator over the real output.
-    val report = Packs.validateFile(target, BUNDLED.bundled)
-    println(if (report.isValid) "$target activates" else "$target would NOT activate:\n$report")
-    return if (report.isValid) 0 else 1
+    // The builder's output goes through the app's own gate, always -- and it goes through
+    // it *before* the staged file replaces whatever was at the target, so a refused build
+    // leaves the last good pack where it was. `buildTo` owns that ordering; re-validating
+    // here would only be a second opinion arriving too late to matter.
+    println(
+        if (outcome.valid) {
+            "$target activates"
+        } else {
+            "$target was NOT written; the build would not activate:\n${outcome.report}"
+        },
+    )
+    return if (outcome.valid) 0 else 1
 }
 
 // ---------------------------------------------------------------------- verify
@@ -221,6 +228,25 @@ private fun install(arguments: List<String>): Int {
                         "  inactive until you activate it"
                     },
                 )
+                // Every install reports what it would withdraw, at every size. The
+                // acknowledgement threshold decides whether the user must *answer*; it was
+                // never meant to decide whether they are told, and an ordinary errata pack
+                // -- the common case, and the one below the threshold -- used to withdraw
+                // real passages from a real book and say nothing on any surface.
+                result.impact.forEach {
+                    println(
+                        "  amends %s: %d of %d passages (%.0f%%)".format(
+                            it.targetTitle, it.withdrawnChunks, it.totalChunks, it.fraction * 100,
+                        ),
+                    )
+                }
+                if (result.deactivatedForReview.isNotEmpty()) {
+                    println(
+                        "  installed inactive: it replaces an active pack and now withdraws " +
+                            "more than a quarter of another active book, which is a decision " +
+                            "to make rather than one to inherit",
+                    )
+                }
                 0
             }
             is InstallResult.NeedsConfirmation -> {
@@ -268,6 +294,26 @@ private fun listPacks(arguments: List<String>): Int {
     }
 }
 
+/**
+ * Names the share per book.
+ *
+ * Supersession is unbounded: any active pack may withdraw any chunk of any other. What the
+ * app can do is refuse to let it happen quietly, and "a third of your core rulebook" is the
+ * sentence that does that where "a third of everything installed" does not.
+ */
+private fun report(installId: Long, impacts: List<SupersessionImpact>) {
+    System.err.println(
+        "#$installId would withdraw a large part of a book that is already active:",
+    )
+    impacts.forEach {
+        System.err.println(
+            "  %s: %d of %d passages (%.0f%%)".format(
+                it.targetTitle, it.withdrawnChunks, it.totalChunks, it.fraction * 100,
+            ),
+        )
+    }
+}
+
 private fun setActive(arguments: List<String>, active: Boolean): Int {
     val accept = active && arguments.lastOrNull() == "--accept"
     val head = if (accept) arguments.dropLast(1) else arguments
@@ -277,7 +323,16 @@ private fun setActive(arguments: List<String>, active: Boolean): Int {
     val installId = head[1].toLongOrNull() ?: error("'${head[1]}' is not an install id")
 
     Store(Path.of(head[0])).use { store ->
-        return when (val result = store.library.setActive(installId, active, accept)) {
+        // `--accept` is not passed straight through. The library now requires the *impact*
+        // rather than a yes, because a yes cannot say what it is a yes to -- so the flag
+        // means "measure it, print it, and then accept exactly that", with no window
+        // between the measurement and the acceptance for the active set to change.
+        val acknowledged = if (!accept) null else {
+            (store.library.setActive(installId, true) as? ActivationResult.NeedsAcknowledgement)
+                ?.also { report(installId, it.impacts) }
+                ?.impacts
+        }
+        return when (val result = store.library.setActive(installId, active, acknowledged)) {
             is ActivationResult.Changed -> {
                 println("#$installId is now ${if (active) "active" else "inactive"}")
                 0
@@ -290,19 +345,16 @@ private fun setActive(arguments: List<String>, active: Boolean): Int {
             // other. What the app can do is refuse to let it happen quietly, so the share
             // is named per book before it is accepted.
             is ActivationResult.NeedsAcknowledgement -> {
+                report(installId, result.impacts)
                 System.err.println(
-                    "#$installId would withdraw a large part of a book that is already active:",
-                )
-                result.impacts.forEach {
-                    System.err.println(
-                        "  %s: %d of %d passages (%.0f%%)".format(
-                            it.targetTitle, it.withdrawnChunks, it.totalChunks, it.fraction * 100,
-                        ),
-                    )
-                }
-                System.err.println(
-                    "At that size it is a replacement edition. Deactivating the old pack is " +
-                        "usually the honest action; pass --accept to activate anyway.",
+                    if (result.stale) {
+                        "The active set changed while this was being decided, so what would " +
+                            "be withdrawn is no longer what was accepted. Nothing changed; " +
+                            "run it again."
+                    } else {
+                        "At that size it is a replacement edition. Deactivating the old pack " +
+                            "is usually the honest action; pass --accept to activate anyway."
+                    },
                 )
                 1
             }

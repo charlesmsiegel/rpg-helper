@@ -481,6 +481,20 @@ fun Connection.exec(sql: String) {
     createStatement().use { it.execute(sql) }
 }
 
+/**
+ * Rebuilds [table] without its constraints, preserving rows.
+ *
+ * The canonical DDL declares NOT NULL and UNIQUE, so a defect that violates one cannot be
+ * injected with an UPDATE. That is the point: a pack ships its own DDL, so those
+ * declarations describe what its builder chose to write and guarantee nothing whatever
+ * about the file in hand.
+ */
+fun Connection.relax(table: String) {
+    exec("CREATE TABLE ${table}_lax AS SELECT * FROM $table")
+    exec("DROP TABLE $table")
+    exec("ALTER TABLE ${table}_lax RENAME TO $table")
+}
+
 /** Binds one row and executes it. */
 fun Connection.prepare(sql: String, bind: (PreparedStatement) -> Unit) {
     prepareStatement(sql).use { statement ->

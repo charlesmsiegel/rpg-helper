@@ -33,6 +33,14 @@ class JdbcDb private constructor(private val connection: Connection) : Db {
         }
     }
 
+    override fun execute(sql: String) {
+        try {
+            connection.createStatement().use { it.execute(sql) }
+        } catch (e: SQLException) {
+            throw PackReadException("statement failed against this pack: $sql", e)
+        }
+    }
+
     override fun tableNames(): Set<String> {
         val names = mutableSetOf<String>()
         forEachRow("SELECT name FROM sqlite_master WHERE type IN ('table', 'view')") {
