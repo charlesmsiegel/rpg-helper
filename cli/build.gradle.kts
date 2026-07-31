@@ -14,6 +14,7 @@ dependencies {
     // seam it crosses is a seam the app will have to cross too.
     implementation(project(":pack"))
     implementation(project(":model"))
+    implementation(project(":state"))
     implementation(project(":builder"))
     implementation(project(":retrieval"))
     implementation(project(":routing"))

@@ -111,6 +111,37 @@ class CliTest {
     }
 
     @Test
+    fun `an installed library answers from its active set, and only from that`() {
+        // The app's own path: priority as `installed_packs` records it, and a pack absent
+        // because the user deactivated it rather than because it was not typed. A newly
+        // installed pack arrives inactive, since a pack can claim any uid it likes and
+        // arriving active would let an imported file become live content with nobody
+        // deciding anything.
+        Store(Files.createTempDirectory("store")).use { store ->
+            val installed = store.library.install(pack)
+            assertTrue(installed is dev.rpghelper.state.InstallResult.Installed, "$installed")
+            val id = installed.pack.installId
+
+            Library.openActive(store.library).use { assertTrue(it.packs.isEmpty()) }
+
+            store.library.setActive(id, true)
+            Library.openActive(store.library).use { library ->
+                assertEquals(listOf("srd:emberlight"), library.packs.map { it.packUid })
+            }
+        }
+    }
+
+    @Test
+    fun `two packs claiming one uid cannot be active together`() {
+        // Everything downstream identifies a chunk by (pack_uid, chunk_id), so two
+        // editions of one book merge on equal chunk ids -- and a card can render one
+        // version's text beneath the other version's citation.
+        val failure = runCatching { Library.open(listOf(pack, pack)) }.exceptionOrNull()
+        assertTrue(failure != null, "a duplicate uid must be refused")
+        assertTrue(failure.message!!.contains("srd:emberlight"), failure.message!!)
+    }
+
+    @Test
     fun `a file that is not a pack is refused rather than half-opened`() {
         val bogus = Files.createTempFile("not-a-pack", ".rpgpack")
         Files.writeString(bogus, "certainly not SQLite")

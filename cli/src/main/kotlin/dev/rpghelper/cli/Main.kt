@@ -8,6 +8,7 @@ import dev.rpghelper.model.DownloadResult
 import dev.rpghelper.model.ModelDownloader
 import dev.rpghelper.model.ModelManifest
 import dev.rpghelper.pack.Packs
+import dev.rpghelper.state.InstallResult
 import dev.rpghelper.retrieval.Pipeline
 import dev.rpghelper.routing.LoadedRollables
 import dev.rpghelper.routing.PackCitations
@@ -23,7 +24,14 @@ rpg-helper — build packs, and answer questions out of them.
   build <corpus-dir> <out.rpgpack>   assemble a pack and put it through the activation gate
   verify <pack.rpgpack>...           run the activation gate and report
   ask [--why] <pack.rpgpack>... -- <question>
+  ask [--why] --library <dir> -- <question>
                                      retrieve, route, and print the cards
+
+  install <dir> <pack.rpgpack> [--replace]   install into a library
+  packs <dir>                                list what is installed
+  activate <dir> <install-id>                make a pack live
+  deactivate <dir> <install-id>              take it out of the active set
+  uninstall <dir> <install-id>               forget it, and unlink when unread
   roll <pack.rpgpack> <table-id>     roll on a validated table
   fetch-model <manifest.json> <dir>  download a model and verify it against its digests
   make-manifest <id> <name> <license> <base-url> <dir>
@@ -50,6 +58,11 @@ fun main(arguments: Array<String>) {
             "verify" -> verify(rest)
             "ask" -> ask(rest)
             "roll" -> roll(rest)
+            "install" -> install(rest)
+            "packs" -> listPacks(rest)
+            "activate" -> setActive(rest, true)
+            "deactivate" -> setActive(rest, false)
+            "uninstall" -> uninstall(rest)
             "fetch-model" -> fetchModel(rest)
             "make-manifest" -> makeManifest(rest)
             "help", "--help", "-h", null -> {
@@ -120,10 +133,23 @@ private fun ask(arguments: List<String>): Int {
     require(separator > 0 && separator < tail.size - 1) {
         "usage: ask [--why] <pack.rpgpack>... -- <question>"
     }
-    val paths = tail.take(separator).map { Path.of(it) }
+    val head = tail.take(separator)
     val question = tail.drop(separator + 1).joinToString(" ")
 
-    Library.open(paths).use { library ->
+    // Either an explicit list of files or a library's active set. The second is the app's
+    // own path -- priority as `installed_packs` records it, deactivated packs absent
+    // because the user said so rather than because they were not typed.
+    val store = if (head.firstOrNull() == "--library") {
+        require(head.size == 2) { "usage: ask [--why] --library <dir> -- <question>" }
+        Store(Path.of(head[1]))
+    } else {
+        null
+    }
+
+    val opened = store?.let { Library.openActive(it.library) }
+        ?: Library.open(head.map { Path.of(it) })
+
+    opened.use { library ->
         library.dropped.forEach { System.err.println("note: $it") }
 
         // One embedding per distinct contract, because a pack built two years ago and one
@@ -144,7 +170,102 @@ private fun ask(arguments: List<String>): Int {
             activePacks = library.packs.map { it.packUid },
         )
         print(renderAnswer(answer, diagnostics = why))
+        store?.close()
         return if (answer.refused) 1 else 0
+    }
+}
+
+// ---------------------------------------------------------------------- the library
+
+private fun install(arguments: List<String>): Int {
+    require(arguments.size in 2..3) { "usage: install <dir> <pack.rpgpack> [--replace]" }
+    val replace = arguments.size == 3 && arguments[2] == "--replace"
+    require(arguments.size == 2 || replace) { "unknown option '${arguments.getOrNull(2)}'" }
+    val source = Path.of(arguments[1])
+
+    Store(Path.of(arguments[0])).use { store ->
+        // Replacing is a two-step on purpose. A pack claims its own uid, so an install
+        // that silently replaced one would let an imported file overwrite the user's
+        // copy of a book by naming it -- and the confirmation names the pack it would
+        // replace rather than asking in the abstract.
+        val existing = if (replace) Packs.readMeta(source).packUid else null
+        return when (val result = store.library.install(source, confirmReplacing = existing)) {
+            is InstallResult.Installed -> {
+                val pack = result.pack
+                println("installed #${pack.installId}: ${pack.title} (${pack.packUid} ${pack.packVersion})")
+                println("  inactive until you activate it")
+                0
+            }
+            is InstallResult.NeedsConfirmation -> {
+                System.err.println(
+                    "${result.existing.packUid} is already installed as #${result.existing.installId} " +
+                        "(${result.existing.title} ${result.existing.packVersion}). " +
+                        "Pass --replace to replace it.",
+                )
+                1
+            }
+            is InstallResult.TooLarge -> {
+                System.err.println("refused: ${result.limit}")
+                1
+            }
+            is InstallResult.Rejected -> {
+                System.err.println("refused: this pack would not activate")
+                System.err.println(result.report)
+                1
+            }
+        }
+    }
+}
+
+private fun listPacks(arguments: List<String>): Int {
+    require(arguments.size == 1) { "usage: packs <dir>" }
+    Store(Path.of(arguments[0])).use { store ->
+        val installed = store.library.installed()
+        if (installed.isEmpty()) {
+            println("nothing installed")
+            return 0
+        }
+        for (pack in installed) {
+            // The digest is rechecked rather than trusted: the file lives where the user
+            // can reach it, and a pack edited after install is one whose every span is
+            // subtly wrong and whose every quotation is subtly not what the book says.
+            val intact = store.library.verify(pack.installId)
+            println(
+                "#${pack.installId}  ${if (pack.active) "active  " else "inactive"}  " +
+                    "priority ${pack.priority}  ${pack.title} " +
+                    "(${pack.packUid} ${pack.packVersion}, ${pack.byteSize} bytes)" +
+                    if (intact) "" else "  [BYTES CHANGED — deactivated]",
+            )
+        }
+        return 0
+    }
+}
+
+private fun setActive(arguments: List<String>, active: Boolean): Int {
+    require(arguments.size == 2) { "usage: ${if (active) "activate" else "deactivate"} <dir> <install-id>" }
+    val installId = arguments[1].toLongOrNull() ?: error("'${arguments[1]}' is not an install id")
+    Store(Path.of(arguments[0])).use { store ->
+        require(store.library.installed().any { it.installId == installId }) {
+            "no pack #$installId is installed"
+        }
+        store.library.setActive(installId, active)
+        println("#$installId is now ${if (active) "active" else "inactive"}")
+        return 0
+    }
+}
+
+private fun uninstall(arguments: List<String>): Int {
+    require(arguments.size == 2) { "usage: uninstall <dir> <install-id>" }
+    val installId = arguments[1].toLongOrNull() ?: error("'${arguments[1]}' is not an install id")
+    Store(Path.of(arguments[0])).use { store ->
+        val pack = store.library.installed().singleOrNull { it.installId == installId }
+            ?: error("no pack #$installId is installed")
+        store.library.uninstall(installId)
+        // The row goes now -- the pack is uninstalled the moment the user says so -- and
+        // the bytes go when the last reader closes, or at the next open if this process
+        // dies first. Documents are never touched; only their validation stops.
+        println("uninstalled #$installId (${pack.title})")
+        return 0
     }
 }
 

@@ -11,6 +11,9 @@ import dev.rpghelper.retrieval.ActivePack
 import dev.rpghelper.retrieval.ActiveSet
 import dev.rpghelper.retrieval.Gates
 import dev.rpghelper.retrieval.Supersession
+import dev.rpghelper.state.PackLibrary
+import dev.rpghelper.state.StateDb
+import java.nio.file.Files
 import java.nio.file.Path
 
 /**
@@ -53,13 +56,26 @@ class Library private constructor(
     /** Loadable roll tables, by the pack that supplied them. */
     val rollables: Map<String, List<RollableTable>>,
     val dropped: List<String>,
+    /**
+     * Held for the life of this set, released on close.
+     *
+     * A query captures the active set once, at its start, and completes against that
+     * snapshot; the lease is what makes the *file* half of that snapshot true too. Without
+     * it an uninstall mid-query unlinks the file, and on the platforms where that succeeds
+     * the in-flight read keeps going against bytes no longer in the directory and answers
+     * citing a book the user just removed.
+     */
+    private val leases: List<AutoCloseable> = emptyList(),
 ) : AutoCloseable {
 
     /** Which chunks a roll control is offered for, as `:capabilities` decided it. */
     val rollableChunks: Set<ChunkRef> =
         rollables.flatMap { (uid, tables) -> tables.map { ChunkRef(uid, it.chunkId) } }.toSet()
 
-    override fun close() = packs.forEach { it.db.close() }
+    override fun close() {
+        packs.forEach { it.db.close() }
+        leases.forEach { it.close() }
+    }
 
     companion object {
 
@@ -69,18 +85,56 @@ class Library private constructor(
          * Ordered by the caller: `installed_packs.priority` is the app's, and on the
          * command line the argument order is the only statement of it there is.
          */
-        fun open(paths: List<Path>): Library {
+        fun open(paths: List<Path>): Library = openLeased(paths.map { it to null })
+
+        /**
+         * The active set of an installed library, each pack held by a lease.
+         *
+         * This is the app's own path, and the reason it is worth having on a command line:
+         * the priority order is the one `installed_packs` records rather than one an
+         * argument list implies, and the deactivated packs are absent because the user
+         * said so rather than because they were not typed.
+         */
+        fun openActive(library: PackLibrary): Library {
+            val active = library.active()
+            val leased: List<Pair<Path, AutoCloseable?>> = active.mapNotNull { pack ->
+                // A pack whose file has been condemned refuses its lease. It is dropped
+                // from the set rather than read anyway, which is the same answer the app
+                // gives and one query short of the answer it would otherwise give.
+                library.borrow(pack.installId)?.let { lease -> lease.file to lease }
+            }
+            return openLeased(leased)
+        }
+
+        private fun openLeased(sources: List<Pair<Path, AutoCloseable?>>): Library {
             val opened = mutableListOf<ActivePack>()
             val priority = mutableMapOf<String, Int>()
             val contracts = mutableMapOf<String, String>()
 
-            for ((index, path) in paths.withIndex()) {
+            for ((index, source) in sources.withIndex()) {
+                val (path, _) = source
                 val report = Packs.validateFile(path, BUNDLED.bundled)
                 if (!report.isValid) {
                     opened.forEach { it.db.close() }
+                    sources.forEach { it.second?.close() }
                     error("$path would not activate:\n$report")
                 }
                 val meta = Packs.readMeta(path)
+                // Two files claiming one uid cannot both be active. Everything downstream
+                // identifies a chunk by `(pack_uid, chunk_id)` -- retrieval, routing, and
+                // the citation resolver alike -- so two editions of one book merge on
+                // equal chunk ids and a card can render one version's text beneath the
+                // other version's citation. The library enforces this with a uid
+                // uniqueness rule at install; on a command line the check has to be here.
+                if (meta.packUid in priority) {
+                    opened.forEach { it.db.close() }
+                    sources.forEach { it.second?.close() }
+                    error(
+                        "two packs claim '${meta.packUid}'; they cannot be active together, " +
+                            "because a chunk is identified by (pack_uid, chunk_id) everywhere " +
+                            "downstream and the two would merge",
+                    )
+                }
                 opened += ActivePack(meta.packUid, JdbcDb.openReadOnly(path))
                 priority[meta.packUid] = index
                 contracts[meta.packUid] = meta.embedderId
@@ -106,7 +160,34 @@ class Library private constructor(
                 active = ActiveSet(opened, priority, contracts, superseded),
                 rollables = rollables,
                 dropped = dropped,
+                leases = sources.mapNotNull { it.second },
             )
         }
     }
+}
+
+/**
+ * The app's own storage, opened where the user keeps it.
+ *
+ * `state.db` and `packs/` beside each other under one root, exactly as on the device.
+ * Held open for the life of a command rather than a query: `StateDb` serializes its own
+ * connection, and a tool that opened it per call would be a tool whose two commands could
+ * see different databases.
+ */
+class Store(root: Path) : AutoCloseable {
+
+    private val directory: Path = Files.createDirectories(root)
+
+    val db: StateDb = StateDb.open(directory.resolve("state.db"))
+
+    val library: PackLibrary = PackLibrary(db, directory, BUNDLED.bundled)
+
+    init {
+        // Journalled installs that died mid-flight are resolved on open, not left for
+        // whoever notices. A row describing bytes that are not there is a pack the user
+        // sees listed and cannot use.
+        library.reconcile()
+    }
+
+    override fun close() = db.close()
 }
