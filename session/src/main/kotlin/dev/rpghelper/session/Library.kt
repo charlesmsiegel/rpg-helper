@@ -6,6 +6,7 @@ import dev.rpghelper.model.BundledEmbedders
 import dev.rpghelper.model.HashingEmbedder
 import dev.rpghelper.pack.ChunkRef
 import dev.rpghelper.pack.Db
+import dev.rpghelper.pack.FileDigest
 import dev.rpghelper.pack.Packs
 import dev.rpghelper.pack.Sqlite
 import dev.rpghelper.retrieval.ActivePack
@@ -134,19 +135,14 @@ class Library private constructor(
             }
         }
 
-        /** SHA-256 of a pack file, for callers that have no install row to read one from. */
-        private fun digestOf(path: Path): String {
-            val digest = java.security.MessageDigest.getInstance("SHA-256")
-            Files.newInputStream(path).use { input ->
-                val buffer = ByteArray(1 shl 16)
-                while (true) {
-                    val read = input.read(buffer)
-                    if (read < 0) break
-                    digest.update(buffer, 0, read)
-                }
-            }
-            return digest.digest().joinToString("") { "%02x".format(it) }
-        }
+        /**
+         * SHA-256 of a pack file, for callers that have no install row to read one from.
+         *
+         * The *same* routine the library hashes with. This was a second copy, and the two
+         * agreeing is what makes the answer cache's key mean anything -- a cache keyed on
+         * `(pack_uid, file_sha256)` has no other invalidation story.
+         */
+        private fun digestOf(path: Path): String = FileDigest.of(path)
 
         /**
          * The active set of an installed library, each pack held by a lease.

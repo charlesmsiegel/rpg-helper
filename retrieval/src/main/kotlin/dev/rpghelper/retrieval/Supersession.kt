@@ -32,9 +32,20 @@ class ActivePack(val packUid: String, val db: Db) {
     fun exclusion(superseded: SupersededSet, column: String = "rowid"): String {
         val ids = superseded.chunksIn(packUid)
         if (ids.isEmpty()) return ""
-        if (ids != installed) materialize(ids)
+        // Checked against the *connection*, not only against the field. `temp` is
+        // per-connection, so a second ActivePack over one Db -- or a connection reopened
+        // beneath this object -- would leave this believing it had materialized a table
+        // that is not there, and the subquery would then match nothing and withdraw
+        // nothing. A filter that fails open returns corrected passages as answers with
+        // nothing on screen saying so, which is the one direction this must not fail in.
+        if (ids != installed || !materialized()) materialize(ids)
         return " AND $column NOT IN (SELECT chunk_id FROM temp.withdrawn)"
     }
+
+    private fun materialized(): Boolean =
+        db.map("SELECT count(*) FROM sqlite_temp_master WHERE name = 'withdrawn'") {
+            it.long(0)
+        }.single() == 1L
 
     private fun materialize(ids: Set<Long>) {
         db.execute("DROP TABLE IF EXISTS temp.withdrawn")

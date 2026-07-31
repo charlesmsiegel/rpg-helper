@@ -1,6 +1,7 @@
 package dev.rpghelper.state
 
 import dev.rpghelper.pack.EmbedderContract
+import dev.rpghelper.pack.FileDigest
 import dev.rpghelper.pack.Sqlite
 import dev.rpghelper.pack.map
 import dev.rpghelper.pack.PackMeta
@@ -10,7 +11,6 @@ import dev.rpghelper.pack.ValidationReport
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardOpenOption
-import java.security.MessageDigest
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 
@@ -656,18 +656,8 @@ class PackLibrary(
             }
         }
 
-    private fun sha256(path: Path): String {
-        val digest = MessageDigest.getInstance("SHA-256")
-        Files.newInputStream(path).use { stream ->
-            val buffer = ByteArray(1 shl 16)
-            while (true) {
-                val read = stream.read(buffer)
-                if (read < 0) break
-                digest.update(buffer, 0, read)
-            }
-        }
-        return digest.digest().joinToString("") { "%02x".format(it) }
-    }
+    /** Delegated to `:pack`, which owns the one implementation. See [FileDigest]. */
+    private fun sha256(path: Path): String = FileDigest.of(path)
 }
 
 /**
