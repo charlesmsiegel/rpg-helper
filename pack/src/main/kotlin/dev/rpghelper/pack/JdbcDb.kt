@@ -70,6 +70,17 @@ class JdbcDb private constructor(private val connection: Connection) : Db {
             results.getString(column + 1)
                 ?: throw PackReadException("NULL in a column the format requires (index $column)")
 
+        // Same treatment as long(): getDouble returns 0.0 for SQL NULL, and a bm25 of
+        // 0.0 on the negated scale is a perfectly ordinary weak-but-real match rather
+        // than an obvious sentinel, so it would be reasoned about instead of noticed.
+        override fun double(column: Int): Double {
+            val value = results.getDouble(column + 1)
+            if (results.wasNull()) {
+                throw PackReadException("NULL in a column the format requires (index $column)")
+            }
+            return value
+        }
+
         override fun bytes(column: Int): ByteArray =
             results.getBytes(column + 1)
                 ?: throw PackReadException("NULL in a column the format requires (index $column)")

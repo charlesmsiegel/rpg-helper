@@ -48,6 +48,15 @@ interface Row {
     fun string(column: Int): String
     fun bytes(column: Int): ByteArray
 
+    /**
+     * A REAL column.
+     *
+     * Nothing the pack *stores* is a REAL — the format has no floating-point columns, and
+     * embeddings are BLOBs. This exists for `bm25()`, which is a value SQLite computes
+     * rather than one a builder wrote, and is the only place retrieval reads one.
+     */
+    fun double(column: Int): Double
+
     fun longOrNull(column: Int): Long? = if (isNull(column)) null else long(column)
     fun stringOrNull(column: Int): String? = if (isNull(column)) null else string(column)
     fun int(column: Int): Int = long(column).toInt()

@@ -1,0 +1,72 @@
+package dev.rpghelper.retrieval
+
+import java.text.Normalizer
+
+/**
+ * The deterministic normalization every query gets, whatever mode it arrived in.
+ *
+ * Table lookup and string work, and no model. That is the point: a typed one-word lookup
+ * reaches the index having invoked nothing, which is the guarantee the design claimed and
+ * the reason the app is usable before any download completes.
+ */
+object QueryNormalizer {
+
+    /**
+     * Curly punctuation to its ASCII equivalent.
+     *
+     * A phone keyboard produces `’` and a book is set with `'`, so without this a query
+     * for *a creature's speed* misses text that says exactly that. The dashes matter for
+     * the same reason in the other direction: books set ranges with en-dashes.
+     */
+    private val PUNCTUATION = mapOf(
+        '‘' to '\'', '’' to '\'', '‚' to '\'', '‛' to '\'',
+        '“' to '"', '”' to '"', '„' to '"', '‟' to '"',
+        '‐' to '-', '‑' to '-', '‒' to '-', '–' to '-',
+        '—' to '-', '―' to '-', '−' to '-',
+        '…' to ' ', // an ellipsis is a pause, not a term
+    )
+
+    fun normalize(query: String): String {
+        val composed = Normalizer.normalize(query, Normalizer.Form.NFC)
+        val folded = buildString(composed.length) {
+            for (c in composed) append(PUNCTUATION[c] ?: c)
+        }
+        return folded.lowercase().split(WHITESPACE).filter { it.isNotEmpty() }.joinToString(" ")
+    }
+
+    private val WHITESPACE = Regex("\\s+")
+
+    /**
+     * Openers that make a query meaningless on its own.
+     *
+     * The cheap deterministic check that runs **before the model is considered**: a
+     * follow-up needs rewriting only if it opens with a pronoun, a demonstrative, or an
+     * ellipsis, *and* there is a conversation to resolve it against. Nothing else
+     * triggers it — a self-contained question never wakes the model, however it is
+     * phrased, which is what keeps the model off the common path.
+     */
+    private val DEPENDENT_OPENERS = setOf(
+        "it", "its", "they", "them", "their", "he", "him", "his", "she", "her", "hers",
+        "this", "that", "these", "those",
+    )
+
+    private val ELLIPTICAL_PREFIXES = listOf(
+        "what about", "how about", "and ", "but ", "or what",
+    )
+
+    /**
+     * Whether [query] carries a reference only the conversation can resolve.
+     *
+     * @param conversationTurns turns available to resolve against. With none, there is
+     * nothing to resolve *to*, and rewriting would be the model inventing a subject.
+     */
+    fun needsRewrite(query: String, conversationTurns: Int): Boolean {
+        if (conversationTurns <= 0) return false
+        val normalized = normalize(query)
+        if (normalized.isEmpty()) return false
+        if (ELLIPTICAL_PREFIXES.any { normalized.startsWith(it) }) return true
+        // "and" and "but" as whole one-word queries, which the prefixes above miss.
+        val first = normalized.substringBefore(' ').trim('?', '.', ',', '!')
+        return first in DEPENDENT_OPENERS || first == "and" || first == "but"
+    }
+}
