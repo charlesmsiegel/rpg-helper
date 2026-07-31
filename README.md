@@ -11,11 +11,26 @@ confusable, anywhere in the app.**
 
 ## Documents
 
+**Design** — what the system does and why, with the arguments:
+
 | Document | What it covers |
 |---|---|
-| [`docs/android-app-design.md`](docs/android-app-design.md) | the app — retrieval, routing, cards, capabilities, documents and constraints |
-| [`docs/pack-schema.md`](docs/pack-schema.md) | the pack format — DDL, vector layout, probe constant, dice grammar, what is validated where |
+| [`docs/android-app-design.md`](docs/android-app-design.md) | the app as a whole — the central guarantee and everything downstream of it |
 | [`docs/pack-builder-requirements.md`](docs/pack-builder-requirements.md) | what the builder (a separate project) must produce |
+
+**Specifications** — pinned and implementable, one per subsystem:
+
+| Document | What it pins |
+|---|---|
+| [`docs/pack-schema.md`](docs/pack-schema.md) | the pack format — DDL, vector layout, probe constant, dice grammar, what is validated where |
+| [`docs/retrieval-spec.md`](docs/retrieval-spec.md) | the pipeline — query grammars, supersession, gating, fusion, nesting deduplication |
+| [`docs/routing-and-cards-spec.md`](docs/routing-and-cards-spec.md) | the three routes, redaction, residual intent, the five cards, citation resolution |
+| [`docs/model-runtime-spec.md`](docs/model-runtime-spec.md) | the three on-device models, their interfaces, the download contract, degradation |
+| [`docs/documents-and-constraints-spec.md`](docs/documents-and-constraints-spec.md) | documents, trackers, ruleset binding, and the five constraint predicate forms |
+| [`docs/capabilities-spec.md`](docs/capabilities-spec.md) | the capability vocabulary, manifests, and the dice roller |
+| [`docs/app-state-spec.md`](docs/app-state-spec.md) | the app's own database, install and activation, caching, migrations, backup |
+| [`docs/ui-spec.md`](docs/ui-spec.md) | the four surfaces, and what the quote/paraphrase distinction must survive |
+| [`docs/test-infrastructure-spec.md`](docs/test-infrastructure-spec.md) | the corpus, labelled query sets, the claim-support judge, and the CI gates |
 
 ## Status
 
@@ -24,9 +39,9 @@ not.
 
 | Component | State |
 |---|---|
-| Pack schema specification | written, and enforced against the code by test |
+| Specifications | written for every subsystem; the pack schema is enforced against the code by test |
 | Pack reader + activation validator (`:pack`) | implemented |
-| Retrieval, answer cards, documents, capabilities | designed, unimplemented |
+| Retrieval, answer cards, model runtime, documents, capabilities, UI | specified, unimplemented |
 | Android app module | not started |
 | Pack builder | separate project, not started |
 
