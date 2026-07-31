@@ -484,8 +484,14 @@ modifier := ('+' | '-') integer
 N, S     := positive integers
 ```
 
+- **The grammar is case-sensitive and admits no whitespace.** `2D6` and `d6 + 1` do not
+  parse. Both were already implied by the production rules and neither was stated, which
+  is exactly the sort of gap that produces two implementations disagreeing politely.
 - `d%` is exactly 1–100. Books printing `00` map to 100 at build time, and the mapping
   is recorded rather than assumed.
+- **`d100` is a separate, legal expression**, being `dS` with `S = 100`. It is not a
+  spelling of `d%` and carries none of its `00` mapping; the two coincide only in their
+  outcome range.
 - Exploding dice, drop-lowest, and rerolls are not expressible. A table needing them
   ships quotable and not rollable.
 - Both the outcome **range** and the **distribution** are part of the definition.

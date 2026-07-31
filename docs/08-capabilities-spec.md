@@ -181,9 +181,18 @@ is consumed verbatim by the builder project. It carries three sections:
 
 | section | contents |
 |---|---|
-| `vectors` | 16 expressions with their range and **exact** probability mass function, as rationals |
-| `unparseable` | 15 expressions the grammar must refuse, including `d6+d6`, `4d6kh3`, `0d6`, `d0`, `2D6`, and `d100` |
+| `vectors` | 18 expressions with their range and **exact** probability mass function, as rationals |
+| `unparseable` | 20 expressions the grammar must refuse, including `d6+d6`, `4d6kh3`, `0d6`, `d0`, `2D6`, and `d6 + 1` |
 | `sampler` | draw sequences with the dice and total they must produce |
+
+**Everything in `unparseable` must be unparseable under the pinned EBNF, not merely
+unusual.** An earlier version listed `d100` and `d%+1` there, and both are grammatical —
+`d100` is `dS` with `S = 100`, `d%+1` is a form followed by a modifier. An implementer
+following the grammar would have failed the vectors; one following the vectors would have
+implemented restrictions the format never states. That is precisely the cross-language
+disagreement this file exists to prevent, and it appeared in the file meant to prevent it.
+Both are now distribution vectors, and the grammar states the case-sensitivity and
+no-whitespace rules its production rules only implied.
 
 The `unparseable` list is part of the contract, not a courtesy. Exploding dice,
 drop-lowest, and rerolls are not expressible, so a table needing them ships quotable and

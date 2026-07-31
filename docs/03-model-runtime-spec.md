@@ -190,11 +190,24 @@ Two rules keep it honest:
 - **Every attribution must name a chunk that was in the context.** One that does not is a
   generation failure, and the card is not rendered — the same rule as an unresolvable
   citation (§4 of the routing spec).
-- **A model that produces no usable attributions degrades to whole-answer
-  attribution**: the card shows footer citations for the whole context and no inline chips,
-  and the claim-support harness evaluates the answer against the context as a set. That is
-  weaker and it is *defined*, which is the difference between a degraded mode and an
-  undefined one.
+- **Every attribution's span must be non-empty, in range, and on UTF-8 sequence
+  boundaries of `text`.** These offsets come from a model, not from the builder, so they
+  get the same treatment claim spans get in a pack: an in-range offset can still split a
+  multi-byte character, and the result is a chip anchored to corrupted text or a crash
+  converting the offset for display. An attribution failing any of these is discarded, and
+  the region it covered is treated as unattributed.
+- **Unattributed regions fall back to the whole context, they are not left untested.**
+  Partial coverage is the common case — a model attributes two sentences of four — and if
+  only *zero* attributions triggered the fallback, the remaining claims would render with
+  no chip and reach the claim-support harness with no cited chunk to check them against.
+  Every region of the answer not covered by a surviving attribution is therefore attributed
+  to the context as a set: a footer citation rather than a chip, and an entailment check
+  against all of it rather than against one chunk. Weaker, and defined.
+A model producing no usable attributions is simply the limiting case of that last rule:
+every region is unattributed, the card shows footer citations and no chips, and the harness
+evaluates the whole answer against the whole context. Nothing about the contract is special
+at zero — which is what stops the boundary between "some" and "none" from being a place
+where behaviour is undefined.
 
 ### 4.2 None of the jobs is unconditional
 
@@ -297,6 +310,8 @@ explanation, not shown and then failing.
 | Job isolation | `answer` receives only redacted `('setting','source')` chunks — enforced by type and asserted at the boundary |
 | Attributions | every attribution names a context chunk and lies within the answer's bytes; one that does not suppresses the card |
 | Attribution fallback | an answer with no usable attributions renders with footer citations rather than failing |
+| Attribution spans | empty, inverted, out-of-range, and mid-character spans are each discarded, and their regions fall back |
+| Partial coverage | an answer attributed in part renders chips for those regions and footer citations for the rest; no region is untested |
 | Availability transitions | each state produces the right card; `Failed` offers retry and `NotDownloaded` offers download |
 | Download integrity | a truncated file, a wrong-hash file, and an HTML error page under the model's name are all rejected and deleted |
 | Resume | a download interrupted at an arbitrary byte resumes to a byte-identical, hash-verified file |

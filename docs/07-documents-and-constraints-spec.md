@@ -423,7 +423,8 @@ Format is JSON, one document per file, `.rpgdoc` extension:
     { "key": "concept", "type": "text", "value": "Reluctant archivist" }
   ],
   "accepted_violations": [
-    { "fingerprint": "9f2c…", "note": "Storyteller allowed the seventh dot" }
+    { "fingerprint": "9f2c…", "ruleset_id": "vtm-20",
+      "note": "Storyteller allowed the seventh dot" }
   ]
 }
 ```
@@ -437,8 +438,15 @@ Deliberate properties:
 - **The ruleset binding travels.** A document imported onto a device without the matching
   pack is unvalidated, not unbound: the binding is intact and validation resumes when the
   pack arrives.
-- **Accepted violations travel, with their notes.** They are a record of table decisions,
-  which is exactly the sort of thing that is lost and missed.
+- **Accepted violations travel, with their notes and their ruleset.** They are a record of
+  table decisions, which is exactly the sort of thing that is lost and missed.
+
+  `ruleset_id` is exported per acceptance rather than taken from the document's current
+  binding, because acceptances survive rebinding (§5): a document bound to game B may
+  carry dormant acceptances from game A, and assigning every row the current binding on
+  import would both lose A's and wrongly activate them against B. On import each row's
+  `ruleset_id` is checked against its fingerprint, which contains the same value (§4.7) —
+  a row whose two disagree has been edited and is dropped rather than trusted.
 - **No computed state travels.** Violations are derived and are recomputed on import.
 - **Unknown top-level keys are preserved on round-trip** so a document exported by a
   later version and re-imported by an earlier one does not quietly lose data.
