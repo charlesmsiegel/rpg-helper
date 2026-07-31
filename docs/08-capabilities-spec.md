@@ -57,6 +57,17 @@ fails its schema — an unknown kind, a missing field, a `table_id` with no matc
 `tables` row — causes that one capability to be dropped. Refusing a 300-page book because
 one manifest is malformed is the "builder nobody can use" failure, applied to activation.
 
+**A `roll-table` manifest must also target its own chunk**: `capabilities.chunk_id` and
+the referenced `tables.chunk_id` must be the same verbatim `table` chunk, and the
+capability is dropped when they are not.
+
+Requiring only that `table_id` resolves would let a pack attach table B's roller to quote
+card A. Worse, it breaks supersession: the cascade deactivates capabilities rooted at the
+superseded chunk (`04-retrieval-spec.md` §5.2), so superseding B removes B's table while
+leaving a capability rooted at A still offering to roll on it — the app rolling on text a
+correction has withdrawn, which is the exact outcome the cascade reaches capabilities to
+prevent.
+
 The rule underneath is the design's: a *missing* capability is acceptable and a *wrong*
 answer is not — but the user is never left guessing which they got. Dropped capabilities
 are listed on the Packs surface alongside the pack's own `build_report` rows.
@@ -164,27 +175,28 @@ The builder's parser and the app's roller are different codebases in different l
 and dice notation is a folk grammar with no standard. Without shared vectors this is a
 specification two teams can each believe they implement.
 
-**Both sides run the same file.** It lives at `conformance/dice-vectors.json` in this
-repository and is consumed verbatim by the builder project.
+**Both sides run the same file.** It lives at
+[`conformance/dice-vectors.json`](../conformance/dice-vectors.json) in this repository and
+is consumed verbatim by the builder project. It carries three sections:
 
-```json
-{
-  "grammar_version": 1,
-  "vectors": [
-    { "expr": "d6",    "min": 1, "max": 6,
-      "pmf": [["1","1/6"],["2","1/6"],["3","1/6"],["4","1/6"],["5","1/6"],["6","1/6"]] },
-    { "expr": "2d6",   "min": 2, "max": 12,
-      "pmf": [["2","1/36"],["3","2/36"],["4","3/36"],["5","4/36"],["6","5/36"],
-              ["7","6/36"],["8","5/36"],["9","4/36"],["10","3/36"],["11","2/36"],
-              ["12","1/36"]] },
-    { "expr": "d11+1", "min": 2, "max": 12, "pmf": "uniform" },
-    { "expr": "d%",    "min": 1, "max": 100, "pmf": "uniform" },
-    { "expr": "3d4-2", "min": 1, "max": 10, "pmf": "…" },
-    { "expr": "d6+d6", "error": "unparseable" },
-    { "expr": "4d6kh3", "error": "unparseable" }
-  ]
-}
-```
+| section | contents |
+|---|---|
+| `vectors` | 16 expressions with their range and **exact** probability mass function, as rationals |
+| `unparseable` | 15 expressions the grammar must refuse, including `d6+d6`, `4d6kh3`, `0d6`, `d0`, `2D6`, and `d100` |
+| `sampler` | draw sequences with the dice and total they must produce |
+
+The `unparseable` list is part of the contract, not a courtesy. Exploding dice,
+drop-lowest, and rerolls are not expressible, so a table needing them ships quotable and
+not rollable — and an implementation that helpfully accepted `4d6kh3` would diverge from
+the builder that rejected it. `d100` is there because it is *not* `d%`: the grammar admits
+one spelling, and accepting the other is how two implementations start disagreeing about
+whether the range is 1–100.
+
+The `sampler` section pins what no distribution can: `draws` are zero-based uniform
+integers in `[0, S)` and `face = draw + 1`, so `{"expr": "2d6", "draws": [0, 5]}` must
+yield dice `[1, 6]` and total `7`. An implementation that collapsed `NdS` into a single
+draw over the whole range cannot satisfy it, which is the difference between testing the
+distribution and testing the roller.
 
 ### 4.1 Distributions are compared exactly, not statistically
 
@@ -194,18 +206,20 @@ the sampler would flake, and *a suite that flakes gets disabled*, which is the r
 mode.
 
 Probabilities are exact rationals, so `2d6` and `d11+1` are distinguishable by an equality
-test rather than by a confidence interval.
+test rather than by a confidence interval. Both are in the file, sharing the range 2–12
+and differing in every interior probability — the pair exists precisely so a roller that
+confuses them fails.
 
 The **sampler** is tested separately from the distribution: driven by a deterministic
 generator, it must produce a specified sequence of individual dice, which proves it rolls
 `N` times rather than once.
 
-### 4.2 Unparseable expressions are vectors too
+### 4.2 Where the file is generated from
 
-`d6+d6` and `4d6kh3` are in the file with an expected `error`. Exploding dice,
-drop-lowest, and rerolls are not expressible, and a table needing them ships quotable and
-not rollable — so *refusing to parse them* is part of the contract, and an implementation
-that helpfully accepted `4d6kh3` would diverge from the builder that rejected it.
+The distributions are computed by convolution rather than typed by hand, and the file is
+regenerated rather than edited. A hand-written probability table is a place for a
+transcription error to live indefinitely, in the one artifact whose entire purpose is that
+two independent implementations agree with it.
 
 ---
 
@@ -232,6 +246,9 @@ who has just looked the table up actually is.
 | Area | What it asserts |
 |---|---|
 | Grammar conformance | the shared vectors, run identically here and in the builder |
+| Refusals | every `unparseable` entry is refused, with no partial parse |
+| Sampler sequences | every `sampler` entry produces exactly its dice and total from its draws |
+| Capability targeting | a manifest whose `table_id` belongs to a different chunk is dropped |
 | Distribution | exact PMF by convolution for every `NdS` vector; `2d6` and `d11+1` distinguishable |
 | Sampler | a deterministic generator produces the specified individual dice; `NdS` draws `N` times |
 | Modulo bias | over the full generator range, every face is equally reachable |
