@@ -112,6 +112,32 @@ class Library private constructor(
     companion object {
 
         /**
+         * The last active set's resolved supersession, keyed by its content fingerprint.
+         *
+         * One entry, because the app has one active set at a time and a second entry would
+         * only ever be the previous one. Synchronized because `openActive` may be called
+         * from any thread; the computation itself is idempotent, so a rare double compute
+         * on a race costs one scan and never a wrong answer.
+         */
+        private val supersessionCache = object {
+            private var key: List<CachedPack>? = null
+            private var value: dev.rpghelper.retrieval.SupersededSet? = null
+
+            @Synchronized
+            fun get(
+                fingerprint: List<CachedPack>,
+                compute: () -> dev.rpghelper.retrieval.SupersededSet,
+            ): dev.rpghelper.retrieval.SupersededSet {
+                val cached = value
+                if (cached != null && key == fingerprint) return cached
+                val computed = compute()
+                key = fingerprint
+                value = computed
+                return computed
+            }
+        }
+
+        /**
          * Opens and validates [paths], or throws with the first pack's violations.
          *
          * Ordered by the caller: `installed_packs.priority` is the app's, and on the
@@ -244,7 +270,15 @@ class Library private constructor(
                 contracts[meta.packUid] = meta.embedderId
             }
 
-            val superseded = Supersession.compute(opened)
+            // **Resolved once per active set, not once per question.** `Supersession` is
+            // documented as work done when the active set changes -- it scans every source,
+            // every supersession row, every stable-keyed chunk and every derivation row --
+            // and that was true right up until the app started opening a fresh `Library`
+            // for each question, at which point a full-pack scan ran before every single
+            // retrieval. The fingerprint is `(pack_uid, file_sha256)` in priority order, so
+            // it changes exactly when activation or the bytes change, which is exactly when
+            // the answer would differ.
+            val superseded = supersessionCache.get(fingerprint.toList()) { Supersession.compute(opened) }
             val dropped = mutableListOf<String>()
             val rollables = mutableMapOf<String, List<RollableTable>>()
             for (pack in opened) {

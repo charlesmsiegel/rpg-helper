@@ -79,22 +79,10 @@ class AskViewModel(application: Application) : AndroidViewModel(application) {
         private set
 
     /** One roll control's identity: which turn's card, which chunk, which of its tables. */
-    data class Roll(val turn: Int, val ref: ChunkRef, val tableId: Long)
+    data class Roll(val turn: Long, val ref: ChunkRef, val tableId: Long)
 
-    /**
-     * The loadable tables behind the cards on screen, **per turn**.
-     *
-     * Captured while the library is open and **kept after it closes**. The active set is
-     * opened for the length of one question, so by the time a user taps a roll control the
-     * connection that loaded the table is long gone — and `RollableTable` already holds its
-     * rows, validated at activation, so nothing needs re-reading. Rolling from a live
-     * connection would mean re-opening the pack on a tap, which is both slower and a
-     * different pack from the one the card was built from.
-     *
-     * Indexed by turn for the same reason `rolls` is: these are the tables *that turn's
-     * cards* were built from, and a later edition must not silently replace them.
-     */
-    private var tables: List<Map<ChunkRef, List<RollableTable>>> = emptyList()
+    /** Monotonic, so a turn's identity never depends on its position in the feed. */
+    private var nextTurnId = 0L
 
     private val roller = Roller(SecureDiceSource())
 
@@ -103,7 +91,9 @@ class AskViewModel(application: Application) : AndroidViewModel(application) {
         // an hour ago is the thing they scrolled back to. Restored as history: the stored
         // render, not live cards -- a card is only ever built from a pack that is active
         // now, and these were built from whatever was active then.
-        turns = conversation.feed().map { Turn(it.query, answer = null, rendered = it.cards) }
+        turns = conversation.feed().map {
+            Turn(nextTurnId++, it.query, answer = null, rendered = it.cards, origin = Origin.RESTORED)
+        }
     }
 
     fun ask(question: String) {
@@ -149,10 +139,16 @@ class AskViewModel(application: Application) : AndroidViewModel(application) {
             }
             outcome
                 .onSuccess { (asked, loadable) ->
-                    // Appended in lockstep with `turns`, so index i of one describes index
-                    // i of the other. Restored history has no live cards and so no tables.
-                    tables = tables + listOf(loadable)
-                    turns = turns + Turn(asked.question, asked.answer, asked.rendered)
+                    turns = turns + Turn(
+                        id = nextTurnId++,
+                        query = asked.question,
+                        answer = asked.answer,
+                        rendered = asked.rendered,
+                        // A null answer from a *live* ask is a cache hit, not history. The
+                        // stored render is the answer; what it is not is a previous session.
+                        origin = if (asked.answer != null) Origin.LIVE else Origin.CACHED,
+                        tables = loadable,
+                    )
                 }
                 .onFailure { failure = it.message ?: "could not answer that" }
             asking = false
@@ -166,17 +162,13 @@ class AskViewModel(application: Application) : AndroidViewModel(application) {
      * passed activation, and showing nothing at all would read as a control that does not
      * work rather than as a pack that is wrong.
      */
-    fun roll(turn: Int, ref: ChunkRef, table: RollableTable) {
+    fun roll(turn: Long, ref: ChunkRef, table: RollableTable) {
         roller.roll(table)
             .onSuccess { rolls = rolls + (Roll(turn, ref, table.tableId) to it) }
             .onFailure { failure = "the roll produced nothing: ${it.message}" }
     }
 
-    /** The tables that turn's card may offer a control for, in the order the pack loaded them. */
-    fun tablesFor(turn: Int, ref: ChunkRef): List<RollableTable> =
-        tables.getOrNull(turn)?.get(ref).orEmpty()
-
-    fun rollOf(turn: Int, ref: ChunkRef, tableId: Long): RollResult? = rolls[Roll(turn, ref, tableId)]
+    fun rollOf(turn: Long, ref: ChunkRef, tableId: Long): RollResult? = rolls[Roll(turn, ref, tableId)]
 
     /**
      * Clears the feed **and** the conversational window, which are the same thing.
@@ -189,7 +181,6 @@ class AskViewModel(application: Application) : AndroidViewModel(application) {
         conversation.newTopic()
         turns = emptyList()
         rolls = emptyMap()
-        tables = emptyList()
         failure = null
     }
 

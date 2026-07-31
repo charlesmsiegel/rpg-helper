@@ -396,21 +396,28 @@ class PackLibrary(
     ): ActivationResult {
         val row = byId(installId) ?: return ActivationResult.NotInstalled
 
-        // Measured on every activation, including an acknowledged one. Skipping the
-        // measurement when an acknowledgement was offered is what made the acknowledgement
-        // unfalsifiable.
-        if (active) {
-            val broad = supersessionImpact(row).filter { it.fraction > BROAD_SUPERSESSION }
-            if (broad.isNotEmpty() && acknowledged?.toSet() != broad.toSet()) {
-                return ActivationResult.NeedsAcknowledgement(broad, stale = acknowledged != null)
+        // **Measured and applied in one transaction.** Measured on every activation,
+        // including an acknowledged one -- skipping the measurement when an acknowledgement
+        // was offered is what made the acknowledgement unfalsifiable. But measuring outside
+        // the transaction left the same hole one step further along: another install,
+        // uninstall or activation landing between the measurement and the update meant the
+        // pack went live against an active set nobody had checked it against, and a newly
+        // activated book could be broadly withdrawn with no acknowledgement at all.
+        return db.transaction {
+            if (active) {
+                val broad = supersessionImpact(row).filter { it.fraction > BROAD_SUPERSESSION }
+                if (broad.isNotEmpty() && acknowledged?.toSet() != broad.toSet()) {
+                    return@transaction ActivationResult.NeedsAcknowledgement(
+                        broad, stale = acknowledged != null,
+                    )
+                }
             }
+            db.execute(
+                "UPDATE installed_packs SET active = ? WHERE install_id = ? AND state = ?",
+                active, installId, StateSchema.STATE_READY,
+            )
+            ActivationResult.Changed
         }
-
-        db.execute(
-            "UPDATE installed_packs SET active = ? WHERE install_id = ? AND state = ?",
-            active, installId, StateSchema.STATE_READY,
-        )
-        return ActivationResult.Changed
     }
 
     /**

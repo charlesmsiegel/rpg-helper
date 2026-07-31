@@ -1,5 +1,6 @@
 package dev.rpghelper.builder
 
+import dev.rpghelper.model.GoldClaim
 import dev.rpghelper.model.Judge
 import dev.rpghelper.model.Verdict
 import dev.rpghelper.pack.JdbcDb
@@ -51,9 +52,63 @@ class DerivedClaimTest {
             .format(covered * 100, missing))
     }
 
-    private fun build(judge: Judge?): BuildOutcome =
-        PackBuilder(CorpusPack.spec, CorpusPack.EMBEDDER, judge)
-            .buildTo(directory.resolve("out-${judge.hashCode()}.rpgpack"))
+    /**
+     * Verdicts written down here, which any judge must reproduce before it is believed.
+     *
+     * These tests used to supply a judge and assert on what it said — which is exactly the
+     * failure the builder itself had: *a judge nobody checked is one model's opinion of
+     * another's.* Two entries is a small gold set and a real one; it is enough to reject a
+     * judge that answers the same way regardless of the claim, which is the drift that
+     * matters.
+     */
+    private val gold = listOf(
+        GoldClaim(
+            "Seizing leaves the target Held.",
+            listOf("Seizing leaves the target Held."),
+            entailed = true,
+        ),
+        GoldClaim(
+            "The moon is made of cheese.",
+            listOf("Seizing leaves the target Held."),
+            entailed = false,
+        ),
+    )
+
+    private var built = 0
+
+    private fun build(judge: Judge?, spec: CorpusSpec = CorpusPack.spec): BuildOutcome =
+        PackBuilder(spec, CorpusPack.EMBEDDER, judge, judgeGold = gold)
+            .buildTo(directory.resolve("out-${built++}.rpgpack"))
+
+    @Test
+    fun `a judge that agrees with nobody has its verdicts discarded, not counted`() {
+        // The whole point. A misconfigured or drifting judge answering `entailed = true`
+        // regardless would otherwise ship every fabricated summary with authoritative
+        // citations, and the build would report `claim-support` as having passed -- on the
+        // one path that ships derived prose as *adjudicated*.
+        val outcome = build(Judge { _, _ -> Verdict(true, "sure") })
+
+        val dropped = outcome.notes.single { it.validation == "claim-support" }
+        assertEquals("dropped", dropped.severity)
+        assertTrue(dropped.detail.contains("gold subset"), dropped.detail)
+        JdbcDb.openReadOnly(outcome.path).use { db ->
+            assertEquals(
+                0L,
+                db.map("SELECT count(*) FROM chunks WHERE origin = 'derived'") { it.long(0) }
+                    .single(),
+                "an unchecked verdict ships nothing",
+            )
+        }
+    }
+
+    @Test
+    fun `a judge with no gold set is treated exactly like no judge at all`() {
+        val outcome = PackBuilder(CorpusPack.spec, CorpusPack.EMBEDDER, overlapJudge)
+            .buildTo(directory.resolve("uncalibrated.rpgpack"))
+        val dropped = outcome.notes.single { it.validation == "claim-support" }
+        assertEquals("dropped", dropped.severity)
+        assertTrue(dropped.detail.contains("no hand-written verdicts"), dropped.detail)
+    }
 
     @Test
     fun `the corpus summary is entailed by the chunks it cites`() {
@@ -75,8 +130,13 @@ class DerivedClaimTest {
         // The trust claim is identical to a generated answer's, and the citation is
         // well-formed either way. Dropping it costs a convenience; shipping it puts a
         // fabricated detail on screen wearing an authoritative citation.
-        val skeptic = Judge { _, _ -> Verdict(false, "invented") }
-        val outcome = build(skeptic)
+        // Judged by a judge that *passes* its gold set, so the drop is about the claim and
+        // not about the judge. An always-false judge now fails calibration first and never
+        // reaches the claim check, which would make this test pass for the wrong reason.
+        val outcome = build(
+            overlapJudge,
+            withDerivedText(CorpusPack.spec, "The Emberguard patrol the Cinder Marches nightly."),
+        )
 
         val dropped = outcome.notes.single { it.validation == "claim-support" }
         assertEquals("dropped", dropped.severity)
@@ -106,7 +166,7 @@ class DerivedClaimTest {
             asked += text
             overlapJudge.judge(text, evidence)
         }
-        PackBuilder(repeated, CorpusPack.EMBEDDER, recording)
+        PackBuilder(repeated, CorpusPack.EMBEDDER, recording, judgeGold = gold)
             .buildTo(directory.resolve("repeated.rpgpack"))
 
         assertEquals(
@@ -159,9 +219,7 @@ class DerivedClaimTest {
         // unchecked model prose shipped as attributed derived text with well-formed
         // citation chips. `ClaimReport.vacuous` already answers this for live generation;
         // the builder had its own copy of the arithmetic and not of the rule.
-        val outcome = PackBuilder(
-            withDerivedText(CorpusPack.spec, "."), CorpusPack.EMBEDDER, overlapJudge,
-        ).buildTo(directory.resolve("vacuous.rpgpack"))
+        val outcome = build(overlapJudge, withDerivedText(CorpusPack.spec, "."))
 
         val dropped = outcome.notes.single { it.validation == "claim-support" }
         assertEquals("dropped", dropped.severity)

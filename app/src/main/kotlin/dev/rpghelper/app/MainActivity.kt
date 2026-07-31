@@ -9,7 +9,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -30,6 +30,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import dev.rpghelper.capabilities.RollableTable
+import dev.rpghelper.pack.ChunkRef
 import dev.rpghelper.routing.Answer
 
 /**
@@ -61,13 +63,54 @@ class MainActivity : ComponentActivity() {
 /**
  * One exchange in the feed.
  *
- * @param answer the live cards, or **null for a turn restored from storage**. A card is
- * built from a pack that is active *now*; a turn from a previous session was built from
- * whatever was active then, and rebuilding it against today's active set would silently
- * re-answer a question the user already read. History is shown as the text that was stored,
- * marked as history, rather than as cards that look current and are not.
+ * **Everything a turn needs travels with the turn.** An earlier version kept the loaded
+ * tables in a second list indexed in lockstep with this one, which was wrong before it was
+ * even wrong in an interesting way: the feed is restored from storage at startup with N
+ * entries while the table list starts empty, so the first live answer landed at feed index
+ * N and table index 0 and every roll control on it silently vanished. A parallel array with
+ * an invariant nobody states is a bug waiting for its first off-by-N; putting the tables in
+ * the turn deletes the invariant instead of maintaining it.
+ *
+ * @param answer the live cards. Null when there are none to show — see [origin].
+ * @param tables the roll tables that turn's cards were built from, by chunk. Kept after the
+ * library closes: the rows were validated at activation, and re-opening the pack on a tap
+ * would read a different pack than the card was built from.
  */
-data class Turn(val query: String, val answer: Answer?, val rendered: String)
+data class Turn(
+    val id: Long,
+    val query: String,
+    val answer: Answer?,
+    val rendered: String,
+    val origin: Origin,
+    val tables: Map<ChunkRef, List<RollableTable>> = emptyMap(),
+)
+
+/**
+ * Where a turn's content came from — **three states, not two**.
+ *
+ * These were collapsed into `answer == null`, which made a same-session cache hit
+ * indistinguishable from a turn restored after process death. `AskService` returns a null
+ * answer for a cache hit by design (the stored render *is* the answer), so a hit would have
+ * rendered under the label *"Earlier answer — from a previous session, not re-checked"*,
+ * which is simply false: the cache key pins the current active pack bytes and contract.
+ */
+enum class Origin {
+    /** Answered just now, with live cards. */
+    LIVE,
+
+    /**
+     * Answered just now, from the answer cache.
+     *
+     * The cache contract says a hit and a fresh generation must be indistinguishable on
+     * screen. They are not yet: the cache stores a *rendering*, and this app stores the
+     * plain-text one, so a hit shows the gutter but not the card chrome. Marked as its own
+     * state rather than papered over — see `docs/THEORY.md` §4.1.
+     */
+    CACHED,
+
+    /** Restored from storage. Built from whatever was active then, not now. */
+    RESTORED,
+}
 
 // `TopAppBar` is still `ExperimentalMaterial3Api` in the pinned BOM. Opted in at the one
 // composable that uses it rather than module-wide, so the next thing that reaches for an
@@ -110,7 +153,7 @@ fun AskScreen(model: AskViewModel = viewModel()) {
                 modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                itemsIndexed(model.turns) { index, turn ->
+                items(model.turns, key = { it.id }) { turn ->
                     Column {
                         Text(
                             text = turn.query,
@@ -123,15 +166,15 @@ fun AskScreen(model: AskViewModel = viewModel()) {
                             // `(pack_uid, chunk_id)`, so a control keyed on the ref alone
                             // would roll the new edition's table under an older card.
                             val controls = RollControls(
-                                tablesFor = { ref -> model.tablesFor(index, ref) },
-                                resultFor = { ref, tableId -> model.rollOf(index, ref, tableId) },
-                                onRoll = { ref, table -> model.roll(index, ref, table) },
+                                tablesFor = { ref -> turn.tables[ref].orEmpty() },
+                                resultFor = { ref, tableId -> model.rollOf(turn.id, ref, tableId) },
+                                onRoll = { ref, table -> model.roll(turn.id, ref, table) },
                             )
                             answer.cards.forEach { card ->
                                 AnswerCard(card = card, rolls = controls)
                             }
                         } else {
-                            HistoryCard(turn.rendered)
+                            StoredCard(turn.rendered, turn.origin)
                         }
                     }
                 }

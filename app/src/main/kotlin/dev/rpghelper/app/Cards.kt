@@ -253,19 +253,27 @@ private fun CitationLine(citation: Citation, marker: String? = null) {
  * that would answer are the ones active now.
  */
 @Composable
-fun HistoryCard(rendered: String, modifier: Modifier = Modifier) {
+fun StoredCard(rendered: String, origin: Origin, modifier: Modifier = Modifier) {
+    val label = when (origin) {
+        // The cache key already pins the current active pack bytes and contract, so this
+        // *is* a current answer. Calling it "from a previous session, not re-checked" would
+        // be a plain falsehood, and the one thing this app must not do is misdescribe where
+        // text came from.
+        Origin.CACHED -> "Answered from this session's cache — same books, same rules"
+        else -> "Earlier answer — from a previous session, not re-checked against the " +
+            "books active now"
+    }
     Surface(
         modifier = modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
         color = MaterialTheme.colorScheme.surfaceVariant,
     ) {
         Column(
             Modifier.padding(12.dp).semantics(mergeDescendants = true) {
-                contentDescription = "Earlier answer, from a previous session. $rendered"
+                contentDescription = "$label. $rendered"
             },
         ) {
             Text(
-                text = "Earlier answer — from a previous session, not re-checked against " +
-                    "the books active now",
+                text = label,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

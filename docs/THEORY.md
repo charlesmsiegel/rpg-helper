@@ -204,7 +204,24 @@ control is offered only where a table exists. Every UI bug this session was in t
 **Fix: a Robolectric or instrumented test asserting the block-to-composable mapping**, which
 is a small surface now that the decisions live elsewhere.
 
-### 4.6 Assumptions no test enforces
+### 4.6 The constraints engine has no production caller — *open*
+
+`ConstraintParser` and `ConstraintEngine` are complete, well tested, and **invoked only by
+tests**. No `src/main` source queries active packs' `constraints` rows, filters superseded
+roots, applies pack priority, or reports dropped rows — so the state layer can persist a
+character's trackers and cannot validate them against the rules of the books they came
+from. `07-documents-and-constraints-spec.md` describes a subsystem that exists and is
+unreachable.
+
+This is the third instance of the pattern §4.1 named: a layer built, tested, and never
+attached. It is bigger than the other two because there is no obvious single call site —
+the loader has to walk the active set, and the result has to reach document evaluation.
+
+**Fix: an active-set constraint loader in `:session`, alongside `AskService`**, since that
+is where the active set and the store already meet, plus a `DocumentStore` path that
+evaluates on save.
+
+### 4.7 Assumptions no test enforces
 
 Worth more to a reviewer than another green assertion:
 

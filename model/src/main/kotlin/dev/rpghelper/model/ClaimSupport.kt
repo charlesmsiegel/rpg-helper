@@ -35,6 +35,8 @@ data class ClaimReport(
     val threshold: Double,
     val judgeAgreement: Double,
     val judgeAgreementFloor: Double,
+    /** How many hand-written verdicts the judge was checked against. Zero is a failure. */
+    val goldSize: Int = 0,
 ) {
     val supported: Int get() = verdicts.count { it.second.entailed }
 
@@ -54,13 +56,29 @@ data class ClaimReport(
     /** True when the answer held nothing the harness could check. */
     val vacuous: Boolean get() = verdicts.isEmpty()
 
-    /** The judge failed its own check, so its opinion on everything else is not counted. */
-    val judgeRejected: Boolean get() = judgeAgreement < judgeAgreementFloor
+    /**
+     * The judge failed its own check, so its opinion on everything else is not counted.
+     *
+     * **An empty gold subset is a failure, not a pass.** It used to score 1.0 — a judge
+     * that had been checked against nothing was treated as having agreed with everyone,
+     * which is the same vacuity bug [supportRate] had two fields up: the case a ratio
+     * cannot express, answered by pretending it can. A judge nobody calibrated is exactly
+     * the *one model grading another* this field exists to prevent.
+     */
+    val judgeRejected: Boolean get() = uncalibrated || judgeAgreement < judgeAgreementFloor
+
+    /** No human wrote down what the right answers were, so nothing checked the judge. */
+    val uncalibrated: Boolean get() = goldSize == 0
 
     val passed: Boolean get() = !judgeRejected && !vacuous && supportRate >= threshold
 
     override fun toString(): String = buildString {
-        if (judgeRejected) {
+        if (uncalibrated) {
+            appendLine(
+                "JUDGE REJECTED: no gold subset, so nothing checked the judge. Its verdicts " +
+                    "are one model's opinion of another's and are not counted.",
+            )
+        } else if (judgeRejected) {
             appendLine(
                 "JUDGE REJECTED: agreed with the humans on %.1f%% of the gold subset, floor %.1f%%"
                     .format(judgeAgreement * 100, judgeAgreementFloor * 100),
@@ -196,10 +214,7 @@ object ClaimSupport {
         threshold: Double,
         judgeAgreementFloor: Double = 0.9,
     ): ClaimReport {
-        val agreement = if (gold.isEmpty()) 1.0 else {
-            gold.count { judge.judge(it.claim, it.evidence).entailed == it.entailed }
-                .toDouble() / gold.size
-        }
+        val agreement = agreement(judge, gold)
 
         val verdicts = claims.map { claim ->
             val evidence = claim.cited.mapNotNull(evidenceFor)
@@ -213,6 +228,22 @@ object ClaimSupport {
             }
         }
 
-        return ClaimReport(verdicts, threshold, agreement, judgeAgreementFloor)
+        return ClaimReport(verdicts, threshold, agreement, judgeAgreementFloor, gold.size)
     }
+
+    /**
+     * How often [judge] matches verdicts a human wrote down.
+     *
+     * Exposed because the builder adjudicates derived prose with its own decomposition —
+     * it works from `chunk_derivation` rows rather than from attribution spans — but must
+     * not therefore skip the calibration. The rule *a judge's opinions do not count until
+     * it has agreed with humans* is the shared thing; the decomposition is not.
+     *
+     * Zero with an empty gold set, which is what makes an unchecked judge fail rather than
+     * pass by default.
+     */
+    fun agreement(judge: Judge, gold: List<GoldClaim>): Double =
+        if (gold.isEmpty()) 0.0
+        else gold.count { judge.judge(it.claim, it.evidence).entailed == it.entailed }
+            .toDouble() / gold.size
 }

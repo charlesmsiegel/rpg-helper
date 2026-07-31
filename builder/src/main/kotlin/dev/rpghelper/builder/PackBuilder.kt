@@ -65,6 +65,21 @@ class PackBuilder(
      * shipping unchecked summaries is what this exists to stop.
      */
     private val judge: dev.rpghelper.model.Judge? = null,
+    /**
+     * Verdicts a human wrote down, which the judge must reproduce before it is believed.
+     *
+     * **A judge with no gold set is not a checked judge.** This path is the only one that
+     * ships derived prose as *adjudicated*, and it took the judge's word directly: a
+     * misconfigured or drifting model returning `entailed = true` shipped every fabricated
+     * summary with authoritative citations, and the build said `claim-support` had passed.
+     * `ClaimSupport` already implements this calibration for the runtime harness; the
+     * builder was the one place asserting a verdict nobody had checked.
+     *
+     * Empty means uncalibrated, and an uncalibrated judge is treated exactly like no judge
+     * at all — the summaries drop and the drop is recorded.
+     */
+    private val judgeGold: List<dev.rpghelper.model.GoldClaim> = emptyList(),
+    private val judgeAgreementFloor: Double = 0.9,
     private val claimThreshold: Double = 1.0,
     /**
      * Ships derived prose that **no judge has adjudicated**.
@@ -506,6 +521,26 @@ class PackBuilder(
         }
         for (sentence in sentences(remainder)) regions += sentence to wholeChunk
 
+        // **The judge is checked before its opinions are counted.** Measured once per
+        // summary rather than cached, because it is a handful of calls against a frontier
+        // model on a machine with no latency budget, and a cache here would be one more
+        // thing that can be stale in the direction of trusting an untrusted verdict.
+        val agreement = dev.rpghelper.model.ClaimSupport.agreement(judge, judgeGold)
+        if (agreement < judgeAgreementFloor) {
+            notes += BuildNote(
+                "dropped", "chunk", null, "claim-support",
+                if (judgeGold.isEmpty()) {
+                    "summary dropped: the judge was checked against no hand-written verdicts, " +
+                        "so its answers are one model's opinion of another's"
+                } else {
+                    "summary dropped: the judge agreed with the humans on only " +
+                        "%.0f%% of the gold subset, floor %.0f%%"
+                            .format(agreement * 100, judgeAgreementFloor * 100)
+                },
+            )
+            return false
+        }
+
         val unsupported = mutableListOf<String>()
         var claims = 0
         for ((region, evidence) in regions) {
@@ -818,15 +853,29 @@ class PackBuilder(
     }
 
     private fun writeCapabilities(c: Connection, writtenTables: Set<Long>) {
-        val tableIdByChunk = spec.tables.withIndex().associate { (index, table) ->
-            table.chunk to (index + 1).toLong()
-        }
+        // Grouped, not collapsed. `associate` kept the last table per chunk, so a chunk
+        // carrying two tables emitted both capabilities against the second and the first
+        // could never receive a roll control at all.
+        val tableIdsByChunk = spec.tables.withIndex()
+            .groupBy({ it.value.chunk }, { (index, _) -> (index + 1).toLong() })
         spec.capabilities.forEachIndexed { index, capability ->
             val chunkId = chunkFor(capability.chunk, "a capability")
             // A roll-table manifest must target its own chunk, or superseding the table
             // leaves a capability rooted elsewhere still offering to roll on it.
-            val tableId = tableIdByChunk[capability.chunk]
+            val candidates = tableIdsByChunk[capability.chunk]
                 ?: error("roll-table capability on '${capability.chunk}', which has no table")
+            val tableId = when {
+                candidates.size == 1 -> candidates.single()
+                capability.table == null -> error(
+                    "'${capability.chunk}' has ${candidates.size} tables, so the capability " +
+                        "must say which one it rolls on (\"table\": \"1\"..\"${candidates.size}\")",
+                )
+                capability.table !in 1..candidates.size -> error(
+                    "'${capability.chunk}' has ${candidates.size} tables; " +
+                        "table ${capability.table} is not one of them",
+                )
+                else -> candidates[capability.table - 1]
+            }
             // A capability naming a table whose enrichment was dropped goes with it. The
             // alternative is a manifest pointing at a table that is not in the pack, which
             // fails the reference check and refuses the book -- exactly the outcome

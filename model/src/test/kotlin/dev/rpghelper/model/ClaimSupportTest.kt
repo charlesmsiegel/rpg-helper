@@ -27,6 +27,20 @@ class ClaimSupportTest {
         Verdict(missing.isEmpty(), if (missing.isEmpty()) "supported" else "unsupported: $missing")
     }
 
+    /**
+     * Verdicts a human wrote down, which every run here checks its judge against.
+     *
+     * Was `emptyList()` at most call sites, which scored the judge at 100% agreement for
+     * having been asked nothing — so these tests measured the claim path while quietly
+     * asserting that an unchecked judge is a checked one. The empty case is the failure
+     * now, and passing a real subset is what makes the rest of each assertion about what it
+     * says it is about.
+     */
+    private val gold = listOf(
+        GoldClaim("The Marches are low country.", listOf(evidence.getValue(marches)), true),
+        GoldClaim("The Marches are underwater.", listOf(evidence.getValue(marches)), false),
+    )
+
     private fun validated(text: String, vararg attributions: Attribution) =
         Attributions.validate(GeneratedAnswer(text, attributions.toList()), context).getOrThrow()
 
@@ -83,7 +97,7 @@ class ClaimSupportTest {
         assertEquals(text, claims.single().text)
 
         val report = ClaimSupport.run(
-            claims, evidence::get, literalJudge, gold = emptyList(), threshold = 0.9,
+            claims, evidence::get, literalJudge, gold = gold, threshold = 0.9,
         )
         assertFalse(report.passed, "and it is still judged: $report")
     }
@@ -128,7 +142,7 @@ class ClaimSupportTest {
         val answer = validated(".")
         val report = ClaimSupport.run(
             ClaimSupport.decompose(answer), evidence::get, literalJudge,
-            gold = emptyList(), threshold = 0.9,
+            gold = gold, threshold = 0.9,
         )
         assertTrue(report.vacuous)
         assertFalse(report.passed, "$report")
@@ -148,7 +162,7 @@ class ClaimSupportTest {
 
         val report = ClaimSupport.run(
             ClaimSupport.decompose(answer), evidence::get, literalJudge,
-            gold = emptyList(), threshold = 0.9,
+            gold = gold, threshold = 0.9,
         )
         assertFalse(report.passed, "an invented patrol is not in the chunk it cites")
         assertEquals(0.0, report.supportRate)
@@ -161,7 +175,7 @@ class ClaimSupportTest {
 
         val report = ClaimSupport.run(
             ClaimSupport.decompose(answer), evidence::get, literalJudge,
-            gold = emptyList(), threshold = 0.9,
+            gold = gold, threshold = 0.9,
         )
         assertTrue(report.passed, "$report")
     }
@@ -176,7 +190,7 @@ class ClaimSupportTest {
 
         val report = ClaimSupport.run(
             ClaimSupport.decompose(answer), evidence::get, literalJudge,
-            gold = emptyList(), threshold = 0.9,
+            gold = gold, threshold = 0.9,
         )
         assertFalse(report.passed, "a claim citing a chunk that does not support it fails")
     }
@@ -189,7 +203,7 @@ class ClaimSupportTest {
 
         val report = ClaimSupport.run(
             ClaimSupport.decompose(answer), { null }, literalJudge,
-            gold = emptyList(), threshold = 0.9,
+            gold = gold, threshold = 0.9,
         )
         assertEquals(0.0, report.supportRate)
         assertTrue(report.toString().contains("none of which resolved"))
@@ -251,7 +265,7 @@ class ClaimSupportTest {
         )
         val claims = ClaimSupport.decompose(answer)
         val report = { threshold: Double ->
-            ClaimSupport.run(claims, evidence::get, literalJudge, emptyList(), threshold)
+            ClaimSupport.run(claims, evidence::get, literalJudge, gold, threshold)
         }
 
         assertEquals(2.0 / 3, report(0.6).supportRate, 1e-9)

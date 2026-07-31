@@ -119,6 +119,18 @@ class CorpusSpec(val root: Path, private val json: JsonObject) {
         val kind = json.text("kind")
         val chunk = json.text("chunk")
         val label = json.text("label")
+
+        /**
+         * Which of the chunk's tables, 1-based, when the chunk has more than one.
+         *
+         * `tables.chunk_id` is not unique and the runtime supports several tables on one
+         * passage, so identifying a capability by its chunk alone was ambiguous — the
+         * builder collapsed them and every capability on that chunk was emitted with the
+         * *last* table's id, leaving the earlier table unreachable forever. Optional
+         * because the common case is one table per chunk and requiring it everywhere would
+         * be ceremony; required exactly when the ambiguity is real.
+         */
+        val table = json.optionalText("table")?.toIntOrNull()
     }
 
     class EntitySpec(json: JsonObject) {

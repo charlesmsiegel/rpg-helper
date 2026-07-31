@@ -581,7 +581,18 @@ class ConstraintEngine(constraints: List<Constraint>) {
             // Without it the unordered pair below collapses to one element and the
             // message has no second half — a crash while evaluating someone's document.
             if (excluded.text == c.subject.text) continue
-            if (trackers.none { excluded.matches(it.key) && it.value.isPresent }) continue
+            // **Two distinct trackers, not two satisfied selectors.** Textual equality
+            // catches `virtue.x excludes virtue.x` and nothing else: with subject
+            // `discipline.*` and excluded `discipline.auspex`, a document holding only
+            // `discipline.auspex` satisfies both presence checks and was reported as holding
+            // two mutually exclusive choices -- a violation raised against a character who
+            // had made one choice. Overlapping selectors are legal and useful; what the rule
+            // means is that two *things* cannot be held together.
+            val present = trackers.filter { it.value.isPresent }
+            val subjects = present.keys.filter { c.subject.matches(it) }
+            val excludes = present.keys.filter { excluded.matches(it) }
+            if (excludes.isEmpty()) continue
+            if (subjects.none { subject -> excludes.any { it != subject } }) continue
 
             // Identified by the unordered pair. "A excludes B" and "B excludes A" are the
             // same rule, and letting whichever row loaded first decide the identity would

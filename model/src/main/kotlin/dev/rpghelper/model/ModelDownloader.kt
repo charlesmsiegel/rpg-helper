@@ -315,7 +315,17 @@ class HttpRangeFetcher(
             // reported as starting where we asked, so the caller would append a whole
             // body to the partial file, fail the digest after spending the bandwidth,
             // and fail the same way on every retry instead of restarting cleanly.
-            206 -> response.body() to rangeStart(response)
+            // The stream is closed if the header is unusable. Every other failure branch
+            // closes the body; this one threw past it, so retrying against a misconfigured
+            // mirror leaked one response stream per attempt while reporting an ordinary
+            // download failure -- eventually exhausting connections for a reason nothing
+            // on screen would connect to the mirror.
+            206 -> try {
+                response.body() to rangeStart(response)
+            } catch (e: Throwable) {
+                response.body().close()
+                throw e
+            }
             // 200 to a ranged request means the range was ignored and the body starts at
             // zero — reported as such rather than assumed.
             200 -> response.body() to 0L
