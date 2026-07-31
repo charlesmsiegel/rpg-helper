@@ -533,4 +533,53 @@ class RouterTest {
             "the drop is recorded rather than absorbed: ${answer.diagnostics}",
         )
     }
+
+    // ---------------------------------------------------------------- the model failing
+
+    /** Throws where a real one runs out of memory loading several gigabytes of weights. */
+    private class FailingGenerator(private val where: String) : Generator {
+        override val availability: Availability = Availability.Ready
+        override fun normalize(query: String, history: List<Turn>): String = query
+        override fun residualIntent(query: String, covered: List<CardSummary>): String? =
+            if (where == "residual") error("out of memory") else query
+        override fun answer(residual: String, context: List<RedactedChunk>): GeneratedAnswer =
+            error("out of memory")
+        override fun describeImage(image: ImageBuffer): String = error("not under test")
+    }
+
+    @Test
+    fun `a model that throws costs the generated card and nothing else`() {
+        // Inference fails in ways no caller can anticipate -- weights that will not load,
+        // memory pressure, a driver fault. Letting that escape `route` discarded the quote
+        // cards the same question had already produced correctly, so "the optional prose is
+        // unavailable" was reported as "this question failed". The quoted rules are the
+        // part the app exists for; the generated card is the part it is designed to do
+        // without.
+        val answer = router().route(
+            retrieved(candidate(1, "rules"), candidate(2, "setting")),
+            generator = FailingGenerator("answer"),
+            activePacks = listOf(pack),
+        )
+
+        assertTrue(
+            answer.cards.any { it is Card.Verbatim && it.ref == ref(1) },
+            "the rules quote survives: $answer",
+        )
+        assertTrue(answer.cards.none { it is Card.Generated })
+        assertTrue(
+            answer.diagnostics.any { "the model failed" in it },
+            "and the failure is reported rather than swallowed: ${answer.diagnostics}",
+        )
+    }
+
+    @Test
+    fun `a model that throws while splitting the residual is the same story`() {
+        val answer = router().route(
+            retrieved(candidate(1, "rules"), candidate(2, "setting")),
+            generator = FailingGenerator("residual"),
+            activePacks = listOf(pack),
+        )
+        assertTrue(answer.cards.any { it is Card.Verbatim })
+        assertTrue(answer.diagnostics.any { "the model failed" in it }, "${answer.diagnostics}")
+    }
 }

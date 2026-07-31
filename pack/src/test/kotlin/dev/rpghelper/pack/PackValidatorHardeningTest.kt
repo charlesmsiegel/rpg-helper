@@ -6,6 +6,7 @@ import java.sql.Connection
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -430,5 +431,30 @@ class PackValidatorHardeningTest {
     fun `accepts a table whose rows cover its range exactly`() {
         val report = validate()
         assertTrue(report.isValid, "the fixture's d6 table covers 1-6:\n$report")
+    }
+
+    // ---------------------------------------------------- widths the pack chooses
+
+    @Test
+    fun `an embedder dimension whose low 32 bits match is still refused`() {
+        // `4294967424` narrows to 128, and a 128-dimensional contract is bundled here. The
+        // open-time check read the field as a Long and rejected it while the full validator
+        // narrowed it and accepted -- so `install` and `verify` reported that the pack
+        // activates, and the very first borrow deactivated it as unreadable. Two checks of
+        // one field disagreeing is worse than either of them alone.
+        val report = validate {
+            it.relax("pack_meta")
+            it.exec("UPDATE pack_meta SET embedder_dim = 4294967424")
+        }
+        assertFalse(report.isValid, "expected a refusal, got:\n$report")
+    }
+
+    @Test
+    fun `a schema version whose low 32 bits match is still refused`() {
+        val report = validate {
+            it.relax("pack_meta")
+            it.exec("UPDATE pack_meta SET schema_version = 4294967297")
+        }
+        assertFalse(report.isValid, "expected a refusal, got:\n$report")
     }
 }

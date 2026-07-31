@@ -6,6 +6,11 @@ import androidx.lifecycle.viewModelScope
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import dev.rpghelper.capabilities.RollResult
+import dev.rpghelper.capabilities.RollableTable
+import dev.rpghelper.capabilities.Roller
+import dev.rpghelper.capabilities.SecureDiceSource
+import dev.rpghelper.pack.ChunkRef
 import dev.rpghelper.session.AskService
 import dev.rpghelper.session.Library
 import dev.rpghelper.session.Store
@@ -59,6 +64,29 @@ class AskViewModel(application: Application) : AndroidViewModel(application) {
     var failure by mutableStateOf<String?>(null)
         private set
 
+    /**
+     * What each rollable chunk on screen has most recently rolled.
+     *
+     * Per chunk rather than per card, because the same table can appear in two answers and
+     * a roll belongs to the table the user tapped.
+     */
+    var rolls by mutableStateOf<Map<ChunkRef, RollResult>>(emptyMap())
+        private set
+
+    /**
+     * The loadable tables behind the cards currently on screen.
+     *
+     * Captured while the library is open and **kept after it closes**. The active set is
+     * opened for the length of one question, so by the time a user taps a roll control the
+     * connection that loaded the table is long gone — and `RollableTable` already holds its
+     * rows, validated at activation, so nothing needs re-reading. Rolling from a live
+     * connection would mean re-opening the pack on a tap, which is both slower and a
+     * different pack from the one the card was built from.
+     */
+    private var tables: Map<ChunkRef, RollableTable> = emptyMap()
+
+    private val roller = Roller(SecureDiceSource())
+
     init {
         // The feed survives process death, because the answer a table was looking at half
         // an hour ago is the thing they scrolled back to. Restored as history: the stored
@@ -76,6 +104,9 @@ class AskViewModel(application: Application) : AndroidViewModel(application) {
                 runCatching {
                     // Reconciled and reopened per question; closed before the next one.
                     Library.openActive(store.library).use { library ->
+                        val loadable = library.rollables.flatMap { (uid, tables) ->
+                            tables.map { ChunkRef(uid, it.chunkId) to it }
+                        }.toMap()
                         service.ask(
                             question = question,
                             library = library,
@@ -87,17 +118,35 @@ class AskViewModel(application: Application) : AndroidViewModel(application) {
                             // to keep.
                             generator = null,
                             hasInactivePacks = store.library.installed().any { !it.active },
-                        )
+                        ) to loadable
                     }
                 }
             }
             outcome
-                .onSuccess { asked ->
+                .onSuccess { (asked, loadable) ->
+                    tables = tables + loadable
                     turns = turns + Turn(asked.question, asked.answer, asked.rendered)
                 }
                 .onFailure { failure = it.message ?: "could not answer that" }
             asking = false
         }
+    }
+
+    /**
+     * Rolls on the table behind a quoted chunk.
+     *
+     * Fails **closed and visibly**: a result matching no row is a defect in a pack that
+     * passed activation, and showing nothing at all would read as a control that does not
+     * work rather than as a pack that is wrong.
+     */
+    fun roll(ref: ChunkRef) {
+        val table = tables[ref] ?: run {
+            failure = "no loadable table for that passage"
+            return
+        }
+        roller.roll(table)
+            .onSuccess { rolls = rolls + (ref to it) }
+            .onFailure { failure = "the roll produced nothing: ${it.message}" }
     }
 
     /**
@@ -110,6 +159,8 @@ class AskViewModel(application: Application) : AndroidViewModel(application) {
     fun newTopic() {
         conversation.newTopic()
         turns = emptyList()
+        rolls = emptyMap()
+        tables = emptyMap()
         failure = null
     }
 

@@ -60,13 +60,13 @@ object Packs {
                 "embedder_id, embedder_dim FROM pack_meta",
         ) {
             PackMeta(
-                schemaVersion = it.int(0),
+                schemaVersion = it.long(0),
                 packUid = it.string(1),
                 packVersion = it.string(2),
                 title = it.string(3),
                 rulesetId = it.stringOrNull(4),
                 embedderId = it.string(5),
-                embedderDim = it.int(6),
+                embedderDim = it.long(6),
             )
         }.singleOrNull() ?: throw PackReadException("pack_meta does not hold exactly one row")
 

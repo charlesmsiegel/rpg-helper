@@ -16,13 +16,24 @@ import dev.rpghelper.pack.ViolationCode.UNSUPPORTED_SCHEMA_VERSION
 
 /** Identity and contract fields from `pack_meta`. */
 data class PackMeta(
-    val schemaVersion: Int,
+    /**
+     * Read as [Long], never narrowed.
+     *
+     * A pack chooses these numbers and `Int` truncation is silent: `4294967297` narrows to
+     * `1` and `4294967424` narrows to `128`, so a damaged or hostile file could declare
+     * exactly the gross metadata corruption these fields exist to catch and be accepted.
+     * The open-time check already read them at full width, and the full validator did not —
+     * so a pack could pass `install` and `verify`, be reported as activating, and then be
+     * deactivated as unreadable on its first borrow. Two checks of one field disagreeing is
+     * worse than either alone.
+     */
+    val schemaVersion: Long,
     val packUid: String,
     val packVersion: String,
     val title: String,
     val rulesetId: String?,
     val embedderId: String,
-    val embedderDim: Int,
+    val embedderDim: Long,
 )
 
 /**
@@ -159,13 +170,13 @@ class PackValidator(private val supportedEmbedders: Set<EmbedderContract>) {
                 "embedder_id, embedder_dim FROM pack_meta",
         ) {
             PackMeta(
-                schemaVersion = it.int(0),
+                schemaVersion = it.long(0),
                 packUid = it.string(1),
                 packVersion = it.string(2),
                 title = it.string(3),
                 rulesetId = it.stringOrNull(4),
                 embedderId = it.string(5),
-                embedderDim = it.int(6),
+                embedderDim = it.long(6),
             )
         }.single()
 
@@ -198,7 +209,7 @@ class PackValidator(private val supportedEmbedders: Set<EmbedderContract>) {
                 UNKNOWN_EMBEDDER,
                 "pack needs embedder '${meta.embedderId}', which this build does not bundle",
             )
-        } else if (contract.dim != meta.embedderDim) {
+        } else if (contract.dim.toLong() != meta.embedderDim) {
             out += Violation(
                 EMBEDDER_DIM_MISMATCH,
                 "embedder '${meta.embedderId}' is ${contract.dim}-dimensional here, " +

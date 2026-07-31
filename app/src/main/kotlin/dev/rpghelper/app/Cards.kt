@@ -12,6 +12,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -22,6 +23,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import dev.rpghelper.capabilities.RollResult
+import dev.rpghelper.pack.ChunkRef
 import dev.rpghelper.routing.Card
 import dev.rpghelper.routing.Chip
 import dev.rpghelper.routing.Citation
@@ -47,9 +50,16 @@ import dev.rpghelper.routing.render
  *   accurate*, so nothing here has to decide how confident to look.
  */
 @Composable
-fun AnswerCard(card: Card, modifier: Modifier = Modifier) {
+fun AnswerCard(
+    card: Card,
+    modifier: Modifier = Modifier,
+    /** Invoked when the user taps a roll control. Null offers no control at all. */
+    onRoll: ((ChunkRef) -> Unit)? = null,
+    /** The last roll on this card's table, if there has been one. */
+    rolled: RollResult? = null,
+) {
     when (card) {
-        is Card.Verbatim -> VerbatimCard(card, modifier)
+        is Card.Verbatim -> VerbatimCard(card, modifier, onRoll, rolled)
         is Card.Derived -> ProseCard(
             label = "Summary — written by this pack's builder, not quoted",
             body = card.body,
@@ -70,7 +80,12 @@ fun AnswerCard(card: Card, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun VerbatimCard(card: Card.Verbatim, modifier: Modifier) {
+private fun VerbatimCard(
+    card: Card.Verbatim,
+    modifier: Modifier,
+    onRoll: ((ChunkRef) -> Unit)? = null,
+    rolled: RollResult? = null,
+) {
     // **Provenance is announced before content, and as one node.** Sighted readers get the
     // rule down the left edge and the monospaced face; a screen-reader user got a `RULES`
     // label, then the body, then a citation three nodes later -- so the fact that this was
@@ -119,12 +134,14 @@ private fun VerbatimCard(card: Card.Verbatim, modifier: Modifier) {
             }
             Spacer(Modifier.height(8.dp))
             CitationLine(card.citation)
-            if (card.rollable) {
-                Text(
-                    text = "Roll on this table",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                )
+            // **An actionable control, not a label that looks like one.** This rendered
+            // as plain text with no click handler and no callback to reach the roller, so
+            // the app announced a capability -- to sighted users and, via the accessibility
+            // description, to TalkBack users -- that tapping could never deliver.
+            if (card.rollable && onRoll != null) {
+                Spacer(Modifier.height(8.dp))
+                TextButton(onClick = { onRoll(card.ref) }) { Text("Roll on this table") }
+                rolled?.let { RolledOutcome(it, card.citation) }
             }
         }
     }
@@ -266,5 +283,61 @@ fun HistoryCard(rendered: String, modifier: Modifier = Modifier) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+    }
+}
+
+/**
+ * What a roll produced: the dice, then the outcome **as a quotation**.
+ *
+ * The outcome text is a validated span of a verbatim table chunk — the book's own words,
+ * selected by a die rather than by a search. So it wears the same monospaced, preformatted,
+ * cited styling every other quotation wears, and the dice line above it is visibly separate
+ * from it. Paraphrasing the outcome into the roll line, or rendering it in the body style,
+ * would make the one text on screen that came from a random number look exactly like text
+ * the user asked for.
+ *
+ * The individual faces are shown, not just the total, so a user can confirm the app rolled
+ * what it said it rolled.
+ */
+@Composable
+private fun RolledOutcome(result: RollResult, citation: Citation, modifier: Modifier = Modifier) {
+    val faces = result.dice.joinToString(" + ")
+    val modifierPart = when {
+        result.modifier > 0 -> " + ${result.modifier}"
+        result.modifier < 0 -> " − ${-result.modifier}"
+        else -> ""
+    }
+    val line = "${result.expression} → $faces$modifierPart = ${result.total}"
+
+    Column(
+        modifier.padding(top = 6.dp).semantics(mergeDescendants = true) {
+            contentDescription = "Rolled $line. Quotation from ${citation.sourceTitle}. " +
+                "${result.row.text}. Cited as ${render(citation)}."
+        },
+    ) {
+        Text(
+            text = line,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.primary,
+        )
+        Spacer(Modifier.height(4.dp))
+        Row {
+            // The same rule marker every other quotation gets, at the same width.
+            Surface(
+                modifier = Modifier.width(3.dp).height(quoteHeight(result.row.text)),
+                color = MaterialTheme.colorScheme.primary,
+                content = {},
+            )
+            Spacer(Modifier.width(10.dp))
+            Text(
+                text = result.row.text,
+                fontFamily = FontFamily.Monospace,
+                softWrap = false,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
+            )
+        }
+        Spacer(Modifier.height(4.dp))
+        CitationLine(citation)
     }
 }

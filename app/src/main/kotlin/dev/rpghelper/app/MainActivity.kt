@@ -17,7 +17,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -29,6 +31,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.rpghelper.routing.Answer
+import dev.rpghelper.routing.Card
 
 /**
  * The Ask surface, which is the app.
@@ -67,6 +70,10 @@ class MainActivity : ComponentActivity() {
  */
 data class Turn(val query: String, val answer: Answer?, val rendered: String)
 
+// `TopAppBar` is still `ExperimentalMaterial3Api` in the pinned BOM. Opted in at the one
+// composable that uses it rather than module-wide, so the next thing that reaches for an
+// experimental API has to say so too.
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun AskScreen(model: AskViewModel = viewModel()) {
     var question by remember { mutableStateOf("") }
@@ -78,7 +85,26 @@ fun AskScreen(model: AskViewModel = viewModel()) {
         if (model.turns.isNotEmpty()) listState.animateScrollToItem(model.turns.lastIndex)
     }
 
-    Scaffold { padding ->
+    Scaffold(
+        topBar = {
+            // **New topic is reachable.** Every answer is appended and the whole feed is
+            // restored at startup, so with no way to clear it the history only ever grows
+            // -- and once follow-up generation is enabled, the feed *is* the context a
+            // dependent question resolves against, so a user unable to clear it is a user
+            // unable to change the subject.
+            TopAppBar(
+                title = { Text("Ask") },
+                actions = {
+                    TextButton(
+                        onClick = model::newTopic,
+                        enabled = model.turns.isNotEmpty() && !model.asking,
+                    ) {
+                        Text("New topic")
+                    }
+                },
+            )
+        },
+    ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
             LazyColumn(
                 state = listState,
@@ -94,7 +120,13 @@ fun AskScreen(model: AskViewModel = viewModel()) {
                         )
                         val answer = turn.answer
                         if (answer != null) {
-                            answer.cards.forEach { AnswerCard(it) }
+                            answer.cards.forEach { card ->
+                                AnswerCard(
+                                    card = card,
+                                    onRoll = model::roll,
+                                    rolled = (card as? Card.Verbatim)?.let { model.rolls[it.ref] },
+                                )
+                            }
                         } else {
                             HistoryCard(turn.rendered)
                         }

@@ -303,6 +303,23 @@ class PackLibraryTest {
     }
 
     @Test
+    fun `every relation the loaders materialize has a row ceiling`() {
+        // The ceilings named four relations, and the rest were unbounded because nobody had
+        // argued about their sizes. `PackValidator.collect` builds maps from every `sources`
+        // row and `Supersession.compute` reads every `supersessions` row, so millions of
+        // small rows in either exhausts the heap while staying under the per-cell ceiling
+        // *and* under the install file-size limit -- refusing a pack by being killed rather
+        // than by refusing it.
+        val strict = PackLibrary(
+            db, root, setOf(PackForge.EMBEDDER),
+            PackLibrary.PackLimits(content = dev.rpghelper.pack.PackLimits(maxRelationRows = 1)),
+        )
+        val result = strict.install(forge())
+        assertTrue(result is InstallResult.TooLarge, "got $result")
+        assertTrue(result.limit.contains("rows exceeds"), result.limit)
+    }
+
+    @Test
     fun `an unreadable file is rejected as malformed, not as too large`() {
         // Preflight reports limit breaches only. A file that cannot be queried at all is
         // not too large, it is not a pack -- and the validator says which.

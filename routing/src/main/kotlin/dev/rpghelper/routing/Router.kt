@@ -290,7 +290,11 @@ class Router(
             // the context and appended it to an already-complete answer. Null and blank are
             // the same statement made two ways; both end route 3 here, and neither is a
             // failure.
-            val split = generator!!.residualIntent(normalizedQuery, covered)
+            val split = runCatching { generator!!.residualIntent(normalizedQuery, covered) }
+                .getOrElse {
+                    diagnostics += "route 3 dropped: the model failed — ${it.message}"
+                    return null
+                }
             if (split.isNullOrBlank()) {
                 diagnostics += "route 3 dropped: the quote cards answered the whole question"
                 return null
@@ -298,7 +302,17 @@ class Router(
             split
         }
 
-        val answer = generator!!.answer(residual, context)
+        // **A model that throws costs the generated card and nothing else.** Loading
+        // several gigabytes of weights, or running inference under memory pressure, fails
+        // in ways no caller can anticipate -- and letting that escape `route` discarded the
+        // quote and derived cards the same question had already produced correctly, turning
+        // "the optional prose is unavailable" into "this question failed". The generated
+        // card is the one part of an answer the app is designed to do without; the quoted
+        // rules are the part it exists for.
+        val answer = runCatching { generator!!.answer(residual, context) }.getOrElse {
+            diagnostics += "generated card suppressed: the model failed — ${it.message}"
+            return null
+        }
         val validated = Attributions.validate(answer, context).getOrElse {
             // An attribution naming a chunk that was not in the context is a generation
             // failure, and the card is not rendered -- the same rule as an unresolvable

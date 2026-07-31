@@ -20,6 +20,18 @@ data class PackLimits(
     val maxEntities: Long = 500_000,
     val maxTableRows: Long = 1_000_000,
     /**
+     * Every **other** relation the loaders materialize.
+     *
+     * The four ceilings above name the relations whose realistic sizes differ enough to be
+     * worth arguing about; this is the one that keeps the rest from being unbounded merely
+     * because nobody thought about them. `PackValidator.collect` builds maps from every
+     * `sources` row and `Supersession.compute` reads every `supersessions` and
+     * `chunk_derivation` row, so millions of small rows in any of those exhausts the heap
+     * while staying under both the per-cell ceiling and the install file-size limit —
+     * refusing a pack by being killed rather than by refusing it.
+     */
+    val maxRelationRows: Long = 1_000_000,
+    /**
      * Any single cell the loaders can materialize. A book's longest chapter is far below
      * this, and so is the longest alias, canonical name, capability manifest and
      * constraint payload anyone would write on purpose.
@@ -66,18 +78,13 @@ object Preflight {
      * probably the same one.
      */
     fun check(db: Db, limits: PackLimits = PackLimits()): String? {
-        val counts = listOf(
-            Triple("chunks", "chunks", limits.maxChunks),
-            Triple("vectors", "vectors", limits.maxVectors),
-            Triple("entities", "entities", limits.maxEntities),
-            Triple("table rows", "table_rows", limits.maxTableRows),
-        )
-        // Counts first. They are the cheap half, and a pack that fails one of them is a
-        // pack whose per-column scans below would be the expensive way to learn the same
-        // thing.
-        for ((what, table, ceiling) in counts) {
+        // Counts first, over **every** relation rather than the four with interesting
+        // numbers. They are the cheap half, and a pack that fails one of them is a pack
+        // whose per-column scans below would be the expensive way to learn the same thing.
+        for (table in SCANNED) {
+            val ceiling = rowCeiling(table, limits)
             val actual = aggregate(db, "SELECT count(*) FROM $table") ?: continue
-            if (actual > ceiling) return "$what: $actual exceeds the limit of $ceiling"
+            if (actual > ceiling) return "$table: $actual rows exceeds the limit of $ceiling"
         }
 
         // The tightest ceiling in the format, kept as its own check because the general
@@ -96,6 +103,23 @@ object Preflight {
             if (fault != null) return fault
         }
         return null
+    }
+
+    /**
+     * How many rows [table] may hold.
+     *
+     * Named ceilings where the realistic size is worth arguing about, and the general one
+     * everywhere else — so a relation added to the format later is bounded by default
+     * rather than unbounded until somebody remembers it. That default is the direction the
+     * mistake should fall in: a legitimate pack that trips it gets one number changed, and
+     * a hostile one that would not have tripped anything gets refused.
+     */
+    private fun rowCeiling(table: String, limits: PackLimits): Long = when (table) {
+        "chunks" -> limits.maxChunks
+        "vectors" -> limits.maxVectors
+        "entities" -> limits.maxEntities
+        "table_rows" -> limits.maxTableRows
+        else -> limits.maxRelationRows
     }
 
     /**
