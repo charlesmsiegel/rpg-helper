@@ -1,0 +1,12 @@
+[versions]
+kotlin = "2.2.0"
+# Bundles its own SQLite (3.50.3) built with FTS5 and bm25() enabled, which the pack
+# format requires. The platform's SQLite is not an option on the device side either --
+# see docs/pack-schema.md, "SQLite on the device".
+sqlite-jdbc = "3.50.3.0"
+
+[libraries]
+sqlite-jdbc = { module = "org.xerial:sqlite-jdbc", version.ref = "sqlite-jdbc" }
+
+[plugins]
+kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }

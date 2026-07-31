@@ -6,7 +6,11 @@ elsewhere (see `pack-builder-requirements.md`).
 This document specifies what the app does and why. It does not pin schemas — the
 schema spec does that, and this document defers to it wherever DDL is involved.
 
-Status: designed, unimplemented.
+The schema spec this document defers to is `pack-schema.md`.
+
+Status: designed. The pack contract and the activation gate are implemented in the
+`:pack` module (§8's on-device rejection cases are covered by tests); everything else
+is unimplemented.
 
 ---
 
@@ -615,7 +619,7 @@ strategy is mostly about making the invariants falsifiable:
 | **Constraint engine** | unit and property tests over the closed predicate vocabulary |
 | **Dice grammar conformance** | shared expression/range/distribution vectors, run identically here and in the builder |
 | **Pack rejection** | one deliberately broken pack per *on-device* rejection case — wrong endianness (caught by the probe vector, not by length), non-finite or zero-norm vectors, dimension mismatch, span length disagreeing with its text, derivation that is empty or does not terminate at a `source` chunk, unknown `embedder_id`, unrecognized `schema_version` |
-| **Builder validation** | span boundaries, containment, sibling overlap, slice equality, `text_sha256` — run against the source, in the builder, not on the phone |
+| **Builder validation** | span boundaries, slice equality, `text_sha256`, source-side UTF-8 boundary alignment, coverage tiling — run against the source, in the builder, not on the phone |
 | **On-device performance** | cold model load, tokens/sec, retrieval latency across increasing active-pack counts, tracked as a gate |
 
 ### Citation integrity is not grounding
@@ -662,12 +666,29 @@ distrust, because its output looks like data by the time the app sees it.
 
 ### What the phone can actually check
 
-The two rows above are split deliberately. Span validation — boundaries, containment,
-sibling overlap, and whether `text` equals its slice — requires the normalized source
-bytes, and the pack ships only their hash. The app cannot recompute `text_sha256`
-without the text it hashes, and it cannot tell that an offset lands mid-character
-without the character. Listing those as on-device rejection tests would have been a
+The two rows above are split deliberately. Some span validation requires the normalized
+source bytes, and the pack ships only their hash: the app cannot recompute
+`text_sha256` without the text it hashes, it cannot tell that a *source* offset lands
+mid-character without the character, and it cannot know whether a span began at a
+heading or mid-paragraph. Listing those as on-device rejection tests would have been a
 suite that could not be written.
+
+**But the line sits further along than this section first drew it.** An earlier version
+put containment, sibling overlap, and claim-span validity on the builder-only side, on
+the grounds that "span validation needs the source". That over-generalized from two
+checks to five:
+
+- **Containment** and **sibling overlap** compare integers already stored in the pack.
+  Whether one span encloses another, or two siblings run into each other, is arithmetic
+  over `span_start`/`span_end` — the source text never enters it.
+- **Claim spans** index into the *derived chunk's own* `text`, which ships in the pack
+  by definition. Range, emptiness, and UTF-8 boundary alignment are all decidable on
+  the device, and skipping them leaves the app anchoring an inline citation chip to an
+  offset that is out of range or lands mid-character.
+
+All three moved to the on-device set. The cost is nil, and the alternative was trusting
+a builder that does not exist yet to be correct about the one contract the app cannot
+otherwise check.
 
 They are builder validations, and the builder is where they run: it has the source in
 hand and fails the build. What crosses to the device is the guarantee that they ran.
@@ -685,9 +706,18 @@ undersold:
   behind it. Following one hop needs no source bytes, only a join.
 - Every `capabilities`, `tables`, `constraints`, and `entities` row must reference a
   chunk that exists.
+- A nested child's span must be contained in its parent's, its `source_id` must match
+  its parent's, and nesting must not exceed one level — all integer comparisons over
+  columns the pack carries.
+- Sibling spans, grouped by `(source_id, parent_chunk_id)`, must not overlap.
+- Every claim span must fall inside its derived chunk's `text`, be non-empty, and land
+  on UTF-8 sequence boundaries of that text.
 
 These are all questions a pack can answer about itself, which is the line separating
 them from the builder's list.
+
+The full activation check set, and the codes each failure reports, are pinned in
+`pack-schema.md` §7 and implemented in the `:pack` module.
 
 If the normalized source text ever ships in the pack (still open — it roughly doubles
 text size), full span re-validation becomes possible on-device and these rows merge.
