@@ -371,9 +371,22 @@ eval, no callbacks. `chunk_id` cites the passage stating the rule, so a flagged
 violation can link to the text behind it.
 
 The vocabulary is pinned in `07-documents-and-constraints-spec.md` §4: five forms, a
-two-shape selector grammar, and bounds that may reference another tracker. The app
-validates a row's `chunk_id` reference at activation and its `form`/`args` when the
-constraint engine loads it.
+two-shape selector grammar, and bounds that may reference another tracker.
+
+The app validates a row's `chunk_id` reference at activation — including that it is
+present, since the DDL's `NOT NULL` is the builder's word — and its `form` and `args` when
+the constraint engine loads them.
+
+**A row that fails the payload check is dropped, and the drop is visible.** Rejecting a
+300-page book over one malformed constraint is disproportionate, but silently dropping one
+is worse than it looks: unlike a capability, whose absence shows as a control that never
+appears, a missing constraint leaves a document displaying as *validated* while a rule it
+should have been checked against never loaded. The user is told their sheet is legal on
+evidence that was never gathered.
+
+So a ruleset with dropped constraints is reported on the Packs surface like any other
+dropped enrichment, **and** the affected documents show how many rules could not be loaded
+(`06-ui-spec.md` §2.3). The label never claims more checking than happened.
 
 ---
 
@@ -506,7 +519,8 @@ violation is visible the builder's guarantees have demonstrably not held.
 |---|---|
 | format | required tables present; `pack_meta` is exactly one row; `schema_version` recognised |
 | readability | every query the format requires succeeds — a relation present in name but missing a column is a violation, never a thrown exception |
-| lexical index | `chunks_fts` is declared as an FTS5 virtual table **and** answers a `MATCH` for a term taken from a chunk's own text with that chunk |
+| lexical index | `chunks_fts` is declared as an FTS5 virtual table, indexes one document per chunk, **and** answers a `MATCH` for a term taken from a chunk's own text with that chunk |
+| constraints | `form` is in the closed vocabulary and `args` parses; a row failing either is dropped at load with a visible consequence, not silently |
 | embedder | `embedder_id` is bundled; `embedder_dim` matches that contract and is positive |
 | vector layout | probe decodes to the pinned constant; `length(blob) == embedder_dim * 2` |
 | vector numerics | all elements finite; L2 norm above `1e-6` |
@@ -533,9 +547,19 @@ rule:
   as an ordinary `table`, so checking the name admits a plain table wearing it — and
   nothing else in the validator queries the index. The failure would surface at the
   user's first search, either as a thrown `MATCH` error or, for an FTS5 table that was
-  simply never populated, as an empty lexical result on every query forever. The probe
-  uses a term drawn from a chunk's own text, so a pass proves the index exists, is
-  queryable, and indexes the content it claims to.
+  never populated, as an empty lexical result on every query forever.
+
+  Two checks, because neither suffices alone. The index must hold **one document per
+  chunk**, which catches an index populated for some chunks and not others — invisible to
+  any single probe, and permanent. And a **canary term** taken from a chunk's own text
+  must return that chunk, which proves the relation answers `MATCH` and resolves rowids
+  correctly.
+
+  Together these establish that the index exists, is queryable, covers every chunk, and
+  returns the right rowid for at least one. They do **not** establish that every chunk's
+  content was indexed correctly — that would need a term per chunk. The claim is scoped
+  deliberately: an earlier version of this note said the probe proved the index "indexes
+  the content it claims to", which one term cannot show.
 - **`stable_key` uniqueness is enforced here rather than by a `UNIQUE` constraint.** The
   DDL is shipped inside the pack, so its constraints describe what its builder chose to
   declare and guarantee nothing about the file in hand. A duplicate does not make a pack

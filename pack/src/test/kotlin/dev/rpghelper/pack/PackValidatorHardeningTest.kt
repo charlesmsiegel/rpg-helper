@@ -165,6 +165,18 @@ class PackValidatorHardeningTest {
         }
     }
 
+    // ---------------------------------------------------- lexical index coverage
+
+    @Test
+    fun `rejects an index populated for some chunks but not others`() {
+        // The canary alone cannot see this: it searches a term from the lowest-numbered
+        // chunk, which is still indexed. Every other chunk would be invisible to lexical
+        // search for the life of the pack, silently.
+        assertRejects(ViolationCode.FTS_INDEX_UNUSABLE) {
+            it.exec("DELETE FROM chunks_fts WHERE rowid = 5")
+        }
+    }
+
     // ---------------------------------------------------- the FTS canary
 
     @Test

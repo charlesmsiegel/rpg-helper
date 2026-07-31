@@ -144,9 +144,17 @@ remedies are:
 
 | state | meaning |
 |---|---|
-| **validated** | bound to a ruleset whose pack is installed and active |
+| **validated** | bound to a ruleset whose pack is installed and active, and every constraint loaded |
+| **partly validated** | as above, but *N* constraints could not be loaded — the pack is reporting them on the Packs surface |
 | **unvalidated** | bound, but the pack is absent or inactive — install or activate it |
 | **unbound** | no ruleset; trackers work and nothing is checked — bind it if you want checking |
+
+**Partly validated exists so the label cannot overclaim.** A malformed constraint row is
+dropped rather than rejecting the whole pack (`00-pack-schema.md` §4), and without this
+state the document would read as *validated* while a rule it should have been checked
+against never ran — telling the user their sheet is legal on evidence nobody gathered.
+Unlike a missing capability, which shows as a control that never appears, a missing
+constraint has no natural symptom at all.
 
 A document with unaccepted violations shows a count. A draft shows a draft badge, because
 minimum-bound violations are suppressed while it is one

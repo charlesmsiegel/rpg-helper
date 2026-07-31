@@ -108,7 +108,7 @@ class PackValidator(private val supportedEmbedders: Set<EmbedderContract>) {
         val chunks = loadChunks(db)
         val text = readTextPass(db)
 
-        checkLexicalIndex(db, text.canary, violations)
+        checkLexicalIndex(db, text.canary, chunks.size.toLong(), violations)
         val sourceUids = mutableMapOf<Long, String>()
         db.forEachRow("SELECT source_id, source_uid FROM sources") {
             sourceUids[it.long(0)] = it.string(1)
@@ -219,16 +219,50 @@ class PackValidator(private val supportedEmbedders: Set<EmbedderContract>) {
      * for an FTS5 table that was simply never populated, an empty lexical result on
      * every query, forever, on a pack the user was told is active.
      *
-     * The canary is a term taken from a chunk's own text, so a positive result proves
-     * the index exists, is queryable, and is populated with the content it indexes.
+     * Two checks, because neither is sufficient alone. The row count catches an index
+     * populated for some chunks and not others, which a single probe cannot see. The
+     * canary -- a term taken from a chunk's own text -- proves the index answers `MATCH`
+     * and returns the chunk that term came from.
+     *
+     * Together they establish that the index exists, is queryable, covers every chunk,
+     * and returns the right rowid for at least one of them. They do not establish that
+     * every chunk's *content* was indexed correctly; that would need a term per chunk,
+     * and the row count is what makes the cheap version worth having.
      */
-    private fun checkLexicalIndex(db: Db, canary: Canary?, out: MutableList<Violation>) {
+    private fun checkLexicalIndex(
+        db: Db,
+        canary: Canary?,
+        chunkCount: Long,
+        out: MutableList<Violation>,
+    ) {
         val declaration = db.declarationOf("chunks_fts")
         val declared = declaration?.replace(Regex("\\s+"), " ")?.lowercase()
         if (declared == null || !declared.contains("virtual table") || !declared.contains("fts5")) {
             out += Violation(
                 FTS_INDEX_UNUSABLE,
                 "chunks_fts is not declared as an FTS5 virtual table",
+            )
+            return
+        }
+
+        // Row count first: it catches wholesale under-population, which one canary term
+        // cannot. An index populated for chunk 1 and nothing else satisfies any single
+        // probe while leaving every other chunk invisible to lexical search forever.
+        //
+        // `count(*)` on an external-content table reads the content table and would
+        // always agree, so this counts the index's own per-document rows. The shadow
+        // table is part of FTS5's documented on-disk structure, but if a future build
+        // omits it the check is skipped rather than turned into a false rejection.
+        val indexed = try {
+            db.map("SELECT count(*) FROM chunks_fts_docsize") { it.long(0) }.singleOrNull()
+        } catch (e: PackReadException) {
+            null
+        }
+        if (indexed != null && indexed != chunkCount) {
+            out += Violation(
+                FTS_INDEX_UNUSABLE,
+                "chunks_fts indexes $indexed of $chunkCount chunks; the rest are invisible " +
+                    "to lexical search",
             )
             return
         }
