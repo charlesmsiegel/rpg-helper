@@ -229,6 +229,7 @@ object ConstraintParser {
         packPriority: Int = 0,
     ): Result<Constraint> = runCatching {
         val obj = json.parseToJsonElement(args).jsonObject
+        requireKnownKeys(obj, ARGUMENT_KEYS[form] ?: error("unknown constraint form '$form'"))
         when (form) {
             "range" -> Constraint.Range(
                 chunkId, rulesetId, constraintId, packPriority,
@@ -249,6 +250,7 @@ object ConstraintParser {
                 chunkId, rulesetId, selector(obj, "subject"), constraintId, packPriority,
                 obj.getValue("requires").jsonArray.map { element ->
                     val requirement = element.jsonObject
+                    requireKnownKeys(requirement, REQUIREMENT_KEYS)
                     Constraint.Requires.Requirement(
                         selector(requirement, "selector"),
                         number(requirement, "min"),
@@ -308,6 +310,34 @@ object ConstraintParser {
         }
     }
 
+    /** Every key each form understands, and nothing else is tolerated. */
+    private val ARGUMENT_KEYS = mapOf(
+        "range" to setOf("selector", "min", "max"),
+        "sum_range" to setOf("selector", "min", "max"),
+        "count_range" to setOf("selector", "min", "max"),
+        "requires" to setOf("subject", "requires"),
+        "excludes" to setOf("subject", "excludes"),
+    )
+
+    private val REQUIREMENT_KEYS = setOf("selector", "min")
+
+    /**
+     * A key this form does not understand is a dropped constraint, not a shrug.
+     *
+     * `{"selector": "attribute.*", "mx": 5}` parses, and every optional field it misspelled
+     * reads as absent — so a 1-5 range silently becomes "at least 1", the document
+     * validates, and nothing anywhere says a rule was weakened. That is the exact failure
+     * mode the dropped-constraint report exists for: unlike a capability, whose absence
+     * shows as a missing control, a constraint that half-loaded is invisible. Strictness
+     * here costs an author one clear error message at build time.
+     */
+    private fun requireKnownKeys(obj: JsonObject, allowed: Set<String>) {
+        val unknown = obj.keys - allowed
+        if (unknown.isNotEmpty()) {
+            error("unknown argument key(s) ${unknown.sorted()}; expected ${allowed.sorted()}")
+        }
+    }
+
     private fun selector(obj: JsonObject, field: String) =
         Selector(obj.getValue(field).jsonPrimitive.content)
 
@@ -337,8 +367,9 @@ object ConstraintParser {
         val element = obj[field] ?: return null
         if (element is JsonNull) return null
         if (element is JsonPrimitive) return Bound.Literal(numberOf(field, element))
-        val ref = element.jsonObject.getValue("tracker").jsonPrimitive.content
-        return Bound.TrackerRef(ref)
+        val obj = element.jsonObject
+        requireKnownKeys(obj, setOf("tracker"))
+        return Bound.TrackerRef(obj.getValue("tracker").jsonPrimitive.content)
     }
 }
 

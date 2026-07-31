@@ -67,6 +67,58 @@ class ClaimSupportTest {
         assertEquals(listOf(marches, ashfall), invented.cited)
     }
 
+    @Test
+    fun `attributions cannot fragment a sentence out of the harness`() {
+        // Decomposing per region and splitting sentences inside each lets the model being
+        // measured decide what a claim is. One attribution per character makes every
+        // fragment too short to survive the length filter, and the run reports zero claims,
+        // 100% support, and a green gate over an answer nobody checked. Sentence boundaries
+        // are a property of the text, which the model cannot restate its way out of.
+        val text = "The Marches are patrolled nightly by the Emberguard."
+        val perCharacter = text.indices.map { Attribution(it, it + 1, marches) }
+        val answer = validated(text, *perCharacter.toTypedArray())
+
+        val claims = ClaimSupport.decompose(answer)
+        assertEquals(1, claims.size, "the fabricated sentence is still one claim")
+        assertEquals(text, claims.single().text)
+
+        val report = ClaimSupport.run(
+            claims, evidence::get, literalJudge, gold = emptyList(), threshold = 0.9,
+        )
+        assertFalse(report.passed, "and it is still judged: $report")
+    }
+
+    @Test
+    fun `a sentence straddling two regions is checked against both`() {
+        // There is no honest way to attribute half a sentence, so the evidence is the union
+        // -- dropping it, or checking it against one side, would be a claim the harness
+        // does not measure.
+        val text = "Ash falls on the Marches for roughly nine days in ten."
+        val answer = validated(text, span(text, "Ash falls on the Marches", ashfall))
+
+        val claim = ClaimSupport.decompose(answer).single()
+        assertEquals(text, claim.text)
+        assertEquals(listOf(ashfall, marches), claim.cited)
+        assertTrue(claim.chipped)
+    }
+
+    @Test
+    fun `sentence offsets are counted in the bytes the regions use`() {
+        // Regions carry UTF-8 offsets and the split happens over chars; an em-dash is one
+        // char and three bytes, so any confusion of the two lands the overlap test on the
+        // wrong region and cites the wrong chunk.
+        val text = "The Marches—low country—are east of the Ember. Ash falls there."
+        val answer = validated(
+            text,
+            span(text, "The Marches—low country—are east of the Ember.", marches),
+            span(text, "Ash falls there.", ashfall),
+        )
+        val claims = ClaimSupport.decompose(answer)
+        assertEquals(2, claims.size)
+        assertEquals(listOf(marches), claims[0].cited)
+        assertEquals(listOf(ashfall), claims[1].cited)
+    }
+
     // ---------------------------------------------------------------- support
 
     @Test

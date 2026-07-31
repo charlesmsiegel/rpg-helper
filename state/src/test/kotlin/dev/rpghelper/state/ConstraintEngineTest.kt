@@ -311,6 +311,37 @@ class ConstraintEngineTest {
     }
 
     @Test
+    fun `a misspelled argument key is dropped rather than silently weakening the rule`() {
+        // The failure this catches is invisible without it: every optional field a pack
+        // misspells reads as absent, so "attributes are 1 to 5" quietly becomes "at least
+        // 1", the document validates, and nothing anywhere says a rule was weakened.
+        // Unlike a capability, whose absence shows as a control that never appears, a
+        // half-loaded constraint leaves the document looking checked.
+        val result = ConstraintParser.parse(
+            1, ruleset, "range", """{"selector":"attribute.*","min":1,"mx":5}""", 1,
+        )
+        assertTrue(result.isFailure)
+        assertTrue(result.exceptionOrNull()!!.message!!.contains("unknown argument key"))
+    }
+
+    @Test
+    fun `unknown keys are refused inside a requirement and inside a tracker bound too`() {
+        // The nested objects are where a typo is least likely to be noticed by eye.
+        val requirement = ConstraintParser.parse(
+            1, ruleset, "requires",
+            """{"subject":"merit.x","requires":[{"selector":"attribute.y","minimum":3}]}""", 1,
+        )
+        assertTrue(requirement.isFailure)
+        assertTrue(requirement.exceptionOrNull()!!.message!!.contains("unknown argument key"))
+
+        val bound = ConstraintParser.parse(
+            1, ruleset, "range", """{"selector":"attribute.*","max":{"traker":"cap"}}""", 1,
+        )
+        assertTrue(bound.isFailure)
+        assertTrue(bound.exceptionOrNull()!!.message!!.contains("unknown argument key"))
+    }
+
+    @Test
     fun `malformed JSON is dropped rather than crashing the load`() {
         assertTrue(ConstraintParser.parse(1, ruleset, "range", "{not json", 1).isFailure)
         assertTrue(ConstraintParser.parse(1, ruleset, "range", """{"min":1}""", 1).isFailure)

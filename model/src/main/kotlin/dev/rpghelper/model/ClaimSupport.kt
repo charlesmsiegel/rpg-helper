@@ -88,24 +88,75 @@ object ClaimSupport {
      * Deliberately mechanical. A model-driven decomposition would put a second model
      * between the answer and the verdict, and a disagreement there is indistinguishable
      * from a disagreement about entailment — which is the thing being measured.
+     *
+     * **The answer is split first, and regions are read off the sentences.** The other
+     * order — regions, then sentences within each — lets the attributions decide what a
+     * claim is, and the attributions come from the model being measured. A model emitting
+     * one attribution per character fragments every sentence into single-character
+     * regions, each too short to survive the length filter, and the harness reports zero
+     * claims, 100% support, and a green run over an answer nobody checked. Sentence
+     * boundaries are a property of the text, which the model cannot restate its way out of.
      */
     fun decompose(answer: ValidatedAnswer): List<Claim> {
+        val bytes = answer.text.toByteArray(Charsets.UTF_8)
         val claims = mutableListOf<Claim>()
-        for (region in answer.regions) {
-            val text = Attributions.slice(answer.text, region)
-            val cited = when (region) {
-                is SupportedRegion.Cited -> listOf(region.chunk)
-                is SupportedRegion.Contextual -> region.context
-            }
-            for (sentence in sentences(text)) {
-                claims += Claim(sentence, cited, region is SupportedRegion.Cited)
-            }
+        for ((start, end) in sentenceSpans(answer.text)) {
+            val sentence = String(bytes, start, end - start, Charsets.UTF_8).trim()
+            if (sentence.length <= 1) continue
+
+            // Every region the sentence touches. A sentence straddling two regions is
+            // checked against the union of their evidence, because there is no honest way
+            // to attribute half a sentence -- and dropping it, or checking it against one
+            // side, would be a claim the harness does not measure.
+            val touched = answer.regions.filter { it.start < end && it.end > start }
+            val cited = touched.flatMap {
+                when (it) {
+                    is SupportedRegion.Cited -> listOf(it.chunk)
+                    is SupportedRegion.Contextual -> it.context
+                }
+            }.distinct()
+            claims += Claim(sentence, cited, touched.any { it is SupportedRegion.Cited })
         }
         return claims
     }
 
-    private fun sentences(text: String): List<String> =
-        text.split(SENTENCE).map { it.trim() }.filter { it.length > 1 }
+    /** Sentence spans of [text], as UTF-8 byte offsets on the scale regions use. */
+    private fun sentenceSpans(text: String): List<Pair<Int, Int>> {
+        val prefix = byteOffsets(text)
+        val spans = mutableListOf<Pair<Int, Int>>()
+        var start = 0
+        for (gap in SENTENCE.findAll(text)) {
+            spans += prefix[start] to prefix[gap.range.first]
+            start = gap.range.last + 1
+        }
+        spans += prefix[start] to prefix[text.length]
+        return spans
+    }
+
+    /** `prefix[i]` is the UTF-8 byte offset of char index `i`. */
+    private fun byteOffsets(text: String): IntArray {
+        val prefix = IntArray(text.length + 1)
+        var i = 0
+        var offset = 0
+        while (i < text.length) {
+            val codePoint = text.codePointAt(i)
+            val chars = Character.charCount(codePoint)
+            val width = when {
+                codePoint < 0x80 -> 1
+                codePoint < 0x800 -> 2
+                codePoint < 0x10000 -> 3
+                else -> 4
+            }
+            // A surrogate pair has no offset of its own between the halves; giving the low
+            // surrogate the pair's start keeps the array total rather than inventing a
+            // boundary inside a character.
+            if (chars == 2) prefix[i + 1] = offset
+            offset += width
+            i += chars
+            prefix[i] = offset
+        }
+        return prefix
+    }
 
     private val SENTENCE = Regex("(?<=[.!?])\\s+")
 

@@ -138,15 +138,34 @@ object InformationGate {
      * the pinned `unicode61 remove_diacritics 2` — silently, and only for the words where
      * the two disagree.
      */
-    fun measure(pack: ActivePack, groups: List<TermGroup>): Coverage {
-        val total = pack.db.map("SELECT count(*) FROM chunks") { it.long(0) }.single()
+    fun measure(
+        pack: ActivePack,
+        groups: List<TermGroup>,
+        superseded: SupersededSet = SupersededSet.EMPTY,
+    ): Coverage {
+        // Withdrawn chunks are removed from the statistics, not only from the results. A
+        // corrected passage and its correction say much the same thing, so a term the
+        // errata touched is held by both copies; counting the withdrawn one halves that
+        // term's apparent rarity and shrinks the share the surviving chunk is credited
+        // with. An errata pack could then gate out the very answer it was published to
+        // fix, and the ratio would still look principled. Corpus size drops for the same
+        // reason: the denominator and the frequencies must be counted over one corpus.
+        val withdrawn = superseded.asSet()
+            .filter { it.packUid == pack.packUid }
+            .map { it.chunkId }
+        fun excluding(column: String) =
+            if (withdrawn.isEmpty()) "" else " AND $column NOT IN (${withdrawn.joinToString(",")})"
+        val exclusion = excluding("rowid")
+        val total = pack.db.map(
+            "SELECT count(*) FROM chunks WHERE 1=1${excluding("chunk_id")}",
+        ) { it.long(0) }.single()
         val postings = mutableMapOf<String, Set<Long>>()
         val idf = mutableMapOf<String, Double>()
 
         for (term in groups.flatMap { it.terms }.distinct()) {
             val literal = LexicalQuery.literal(term).replace("'", "''")
             val holders = pack.db.map(
-                "SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH '$literal'",
+                "SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH '$literal'$exclusion",
             ) { it.long(0) }.toSet()
             postings[term] = holders
             idf[term] = idf(holders.size.toLong(), total)

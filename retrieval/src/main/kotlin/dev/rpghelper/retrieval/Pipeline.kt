@@ -143,7 +143,7 @@ object Pipeline {
                 // BM25 still does the ranking -- it is the better ordering, and rank is all
                 // fusion consumes. The information ratio decides only who is *in*, which is
                 // the one judgment a raw score could not make comparably.
-                val coverage = InformationGate.measure(pack, groups)
+                val coverage = InformationGate.measure(pack, groups, active.superseded)
                 val kept = hits.filter { coverage.of(it.ref.chunkId) >= gates.lexical }
                 if (kept.isEmpty()) {
                     if (hits.isNotEmpty()) gatedOut += "lexical:${pack.packUid}"

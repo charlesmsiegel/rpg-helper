@@ -76,6 +76,9 @@ class PackBuilder(
     private val chunkKinds = mutableMapOf<Long, Pair<String, String>>()
     private val chunkSpans = mutableMapOf<Long, Anchors.Span>()
 
+    /** Child chunk id to parent, for the expansion redaction. */
+    private val chunkParents = mutableMapOf<Long, Long>()
+
     fun buildTo(path: Path): BuildOutcome {
         Files.deleteIfExists(path)
         DriverManager.getConnection("jdbc:sqlite:${path.toAbsolutePath()}").use { c ->
@@ -290,6 +293,7 @@ class PackBuilder(
         chunkTexts[id] = text
         chunkKinds[id] = chunk.kind to "source"
         chunkSpans[id] = span
+        if (parent != null) chunkParents[id] = parent.first
 
         for (child in chunk.children) writeChunk(c, sourceId, document, child, id to span)
         return span
@@ -465,10 +469,21 @@ class PackBuilder(
                 // Expansions close the query-side phrasing gap: a book says "seizing" and
                 // a player types "how do I grapple". They carry no window because they
                 // embed a generated question rather than a span of the chunk.
-                val (kind, origin) = chunkKinds.getValue(chunkId)
-                val verbatimClass = kind in PackSchema.VERBATIM_ELIGIBLE_KINDS && origin == "source"
-                if (verbatimClass) {
-                    for ((index, question) in expansionsOf(text).withIndex()) {
+                //
+                // **Every chunk gets them, and every one is generated from redacted
+                // prose.** Retrieval's nesting test treats an `expansion` hit on a
+                // route-3 parent as independent evidence *by construction* -- on the
+                // stated ground that an expansion is generated from text with the nested
+                // verbatim children already excised. Emitting them only for
+                // verbatim-class chunks left that branch dead for the one kind of chunk
+                // it exists to judge, so a `setting` parent could never present the
+                // strongest evidence available to it; emitting them from raw text would
+                // have made the branch live and its premise false, letting a question
+                // generated from the nested table certify the parent as independent of
+                // it. Redacting first is what makes the sentence in `Nesting` true.
+                val prose = expansionProse(text, verbatimChildSpans(chunkId))
+                if (prose.isNotBlank()) {
+                    for ((index, question) in expansionsOf(prose).withIndex()) {
                         statement.setLong(1, chunkId)
                         statement.setString(2, "expansion")
                         statement.setInt(3, index)
@@ -511,9 +526,17 @@ class PackBuilder(
      * keeps the *shape* honest — an expansion is question-phrased text with no window —
      * without pretending this project has generated them.
      */
-    private fun expansionsOf(text: String): List<String> {
-        val opening = text.take(160).substringBefore('\n')
-        return listOf("what are the rules for $opening", "how does $opening work")
+    /** The local, parent-relative spans of this chunk's verbatim-class children. */
+    private fun verbatimChildSpans(chunkId: Long): List<Pair<Int, Int>> {
+        val base = chunkSpans[chunkId] ?: return emptyList()
+        return chunkParents.filterValues { it == chunkId }.keys
+            .filter { child ->
+                val (kind, origin) = chunkKinds.getValue(child)
+                origin == "source" && kind in PackSchema.VERBATIM_ELIGIBLE_KINDS
+            }
+            .mapNotNull { chunkSpans[it] }
+            .map { it.start - base.start to it.end - base.start }
+            .sortedBy { it.first }
     }
 
     // ------------------------------------------------------------------ the rest
@@ -719,3 +742,55 @@ internal fun Connection.prepare(sql: String, bind: (PreparedStatement) -> Unit) 
 internal fun PreparedStatement.setNullableString(index: Int, value: String?) {
     if (value == null) setNull(index, Types.VARCHAR) else setString(index, value)
 }
+
+/**
+ * A chunk's own prose: its text with every verbatim-class child excised.
+ *
+ * No marker is inserted, unlike the redaction that feeds generation. This string is never
+ * shown and never sent to a model — it is the input a question is derived from — and
+ * *"how does [table omitted] work"* is a worse expansion than one built from the prose
+ * around it.
+ *
+ * @param childSpans parent-relative UTF-8 byte spans, ascending. They are inside the
+ * parent by construction: a child's anchors are resolved *within* the parent's span, so
+ * this needs no fail-closed branch the way retrieval's redaction of a third party's pack
+ * does.
+ */
+internal fun expansionProse(text: String, childSpans: List<Pair<Int, Int>>): String {
+    if (childSpans.isEmpty()) return text
+    val bytes = text.toByteArray(Charsets.UTF_8)
+    val kept = StringBuilder()
+    var cursor = 0
+    for ((start, end) in childSpans) {
+        if (start > cursor) kept.append(String(bytes, cursor, start - cursor, Charsets.UTF_8))
+        cursor = maxOf(cursor, end)
+    }
+    if (cursor < bytes.size) {
+        kept.append(String(bytes, cursor, bytes.size - cursor, Charsets.UTF_8))
+    }
+    return kept.toString()
+}
+
+/** How many of a chunk's paragraphs get a question. */
+private const val EXPANSION_BLOCKS = 3
+
+/**
+ * Stand-in expansions: a chunk's paragraph openings, phrased as questions.
+ *
+ * A real builder generates these with a frontier model. Deriving them mechanically keeps
+ * the *shape* honest — an expansion is question-phrased text with no window — without
+ * pretending this project has generated them.
+ *
+ * Blank blocks are skipped rather than counted: excising a nested child leaves the prose
+ * with a hole in it, and taking that literally would embed *"how does  work"* once per
+ * pack and call it a phrasing bridge.
+ */
+internal fun expansionsOf(text: String): List<String> =
+    text.split(Regex("\\n\\s*\\n"))
+        .mapNotNull { block -> block.lineSequence().firstOrNull { it.isNotBlank() }?.trim() }
+        .filter { it.isNotEmpty() }
+        .take(EXPANSION_BLOCKS)
+        .flatMap { opening ->
+            val head = opening.take(160)
+            listOf("what are the rules for $head", "how does $head work")
+        }

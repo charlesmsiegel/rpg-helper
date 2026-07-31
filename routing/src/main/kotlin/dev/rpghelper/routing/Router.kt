@@ -47,6 +47,19 @@ class Router(
     /** At most this many route-3 chunks enter the generation context, in fused rank order. */
     private val maxContextChunks = 5
 
+    /**
+     * And at most this many bytes of redacted text across them.
+     *
+     * A count alone is not a budget. The pack contract caps a chunk's text at a size
+     * chosen so a *valid* pack cannot be rejected for being verbose, not so five of them
+     * fit in a phone-sized context window — five chunks at that ceiling is megabytes, and
+     * the model would either truncate the prompt itself (silently losing the last chunks,
+     * and any instruction after them) or fail to run at all. 16 KiB of prose is roughly
+     * four thousand tokens, which leaves an E2B-class window room for the prompt scaffold,
+     * the question, and the answer.
+     */
+    private val maxContextBytes = 16 * 1024
+
     fun route(
         retrieved: Retrieved,
         generator: Generator?,
@@ -70,6 +83,12 @@ class Router(
         val derived = mutableListOf<Card>()
         val settings = mutableListOf<Candidate>()
 
+        // What the user will actually see answered. Built as cards are *emitted*, not from
+        // the candidate list, because a card suppressed for an unresolvable citation covers
+        // nothing on screen -- subtracting its intent from the residual would leave the one
+        // part of the question nobody answered missing from both halves of the split.
+        val covered = mutableListOf<CardSummary>()
+
         for (candidate in retrieved.candidates) {
             diagnostics += "${candidate.stableKey ?: candidate.ref}: " +
                 "${candidate.kind}/${candidate.origin} via ${candidate.contributions}"
@@ -77,7 +96,10 @@ class Router(
             when {
                 candidate.origin == "source" &&
                     candidate.kind in PackSchema.VERBATIM_ELIGIBLE_KINDS -> {
-                    quoteCard(candidate)?.let { quotes += it }
+                    quoteCard(candidate)?.let {
+                        quotes += it
+                        covered += CardSummary(candidate.kind, candidate.headingPath)
+                    }
                         ?: diagnostics.plusAssign("${candidate.ref}: citation unresolved, card suppressed")
                 }
 
@@ -89,7 +111,10 @@ class Router(
                 // generation between the user and text a frontier model already produced
                 // and the builder already claim-checked.
                 candidate.origin == "derived" -> {
-                    derivedCard(candidate)?.let { derived += it }
+                    derivedCard(candidate)?.let {
+                        derived += it
+                        covered += CardSummary(candidate.kind, candidate.headingPath)
+                    }
                         ?: diagnostics.plusAssign("${candidate.ref}: citation unresolved, card suppressed")
                 }
 
@@ -97,7 +122,8 @@ class Router(
             }
         }
 
-        val generatedCard = generate(settings, retrieved, generator, downloadBytes, diagnostics)
+        val generatedCard =
+            generate(settings, covered, retrieved.normalizedQuery, generator, downloadBytes, diagnostics)
 
         // Quotes lead because a rules answer is what the user most likely came for, and
         // because quotes are free. The generated card is last because it is the
@@ -154,7 +180,8 @@ class Router(
 
     private fun generate(
         settings: List<Candidate>,
-        retrieved: Retrieved,
+        covered: List<CardSummary>,
+        normalizedQuery: String,
         generator: Generator?,
         downloadBytes: Long?,
         diagnostics: MutableList<String>,
@@ -190,17 +217,34 @@ class Router(
 
         // Chunks are dropped whole, never truncated: a half-sent setting chunk is a passage
         // whose ending -- often the qualification that changes its meaning -- is missing,
-        // and the model has no way to know it was cut.
-        val context = settings.take(maxContextChunks).mapNotNull { candidate ->
-            RedactedChunk.of(
+        // and the model has no way to know it was cut. So the budget is spent in fused rank
+        // order and stops at the first chunk that will not fit; everything below it goes
+        // too, and the count is recorded rather than absorbed silently.
+        val context = mutableListOf<RedactedChunk>()
+        var spent = 0
+        var droppedForBytes = 0
+        for ((index, candidate) in settings.withIndex()) {
+            if (index >= maxContextChunks) break
+            val chunk = RedactedChunk.of(
                 candidate.ref,
                 candidate.headingPath,
                 redactedTextOf(candidate),
-            )
+            ) ?: continue
+            val cost = chunk.redactedText.toByteArray(Charsets.UTF_8).size
+            if (spent + cost > maxContextBytes) {
+                droppedForBytes = minOf(settings.size, maxContextChunks) - index
+                break
+            }
+            context += chunk
+            spent += cost
         }
         if (settings.size > maxContextChunks) {
             diagnostics += "context capped at $maxContextChunks; " +
                 "${settings.size - maxContextChunks} lower-ranked chunks dropped"
+        }
+        if (droppedForBytes > 0) {
+            diagnostics += "context capped at $maxContextBytes bytes ($spent used); " +
+                "$droppedForBytes lower-ranked chunks dropped"
         }
 
         // Redaction can empty the context, and that case is **not a refusal**. Route 3
@@ -221,13 +265,10 @@ class Router(
 
         // The question carries rules intent even when the rules chunks do not enter the
         // context, so generation receives only the residual.
-        val covered = retrieved.candidates
-            .filter { it.verbatim || it.origin == "derived" }
-            .map { CardSummary(it.kind, it.headingPath, it.text.take(120)) }
         val residual = if (covered.isEmpty()) {
-            retrieved.normalizedQuery
+            normalizedQuery
         } else {
-            generator!!.residualIntent(retrieved.normalizedQuery, covered) ?: return null
+            generator!!.residualIntent(normalizedQuery, covered) ?: return null
         }
 
         val answer = generator!!.answer(residual, context)

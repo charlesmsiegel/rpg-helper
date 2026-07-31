@@ -5,8 +5,17 @@ import dev.rpghelper.pack.ChunkRef
 /** One turn of the conversation window normalization may resolve against. */
 data class Turn(val query: String, val answer: String)
 
-/** What a quote or derived card already covers, for the residual-intent pass. */
-data class CardSummary(val kind: String, val headingPath: String?, val summary: String)
+/**
+ * What a quote or derived card already covers, for the residual-intent pass.
+ *
+ * **Kind and heading path, and deliberately no text field.** `residualIntent` is a
+ * generative call, and the cards it describes are the verbatim ones — handing it their
+ * bodies would feed exact rules text to the model through the one call that exists to
+ * keep rules *intent* away from it (`05-routing-and-cards-spec.md` §2.3). As with
+ * [RedactedChunk], the type is the enforcement: there is no field to put the text in, so
+ * a later caller cannot pass it by forgetting not to.
+ */
+data class CardSummary(val kind: String, val headingPath: String?)
 
 /**
  * A `('setting', 'source')` chunk with its nested verbatim spans already excised.

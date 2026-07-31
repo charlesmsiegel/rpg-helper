@@ -230,6 +230,66 @@ class CorpusBuildTest {
     }
 
     @Test
+    fun `every chunk carries expansions, including the setting parents`() {
+        // Retrieval's nesting test treats an `expansion` hit on a route-3 parent as
+        // independent evidence by construction. Emitting expansions only for
+        // verbatim-class chunks left that branch dead for the one kind of chunk it exists
+        // to judge -- a `setting` parent could never present the strongest evidence
+        // available to it, and the branch would have gone on looking implemented.
+        db().use { database ->
+            val withExpansions = database.map(
+                "SELECT DISTINCT chunk_id FROM vectors WHERE role = 'expansion'",
+            ) { it.long(0) }.toSet()
+            val all = database.map("SELECT chunk_id FROM chunks") { it.long(0) }.toSet()
+            assertEquals(all, withExpansions)
+        }
+    }
+
+    @Test
+    fun `a setting parent's expansions are generated from its redacted prose`() {
+        // What makes the sentence in `Nesting` true rather than merely written down.
+        // Generated from raw text, an expansion embedding a question about the nested
+        // table would certify the parent as independent of the child it quotes -- through
+        // the branch specifically designed to be safe.
+        db().use { database ->
+            val parent = database.map(
+                "SELECT chunk_id FROM chunks WHERE stable_key = 'srd:core:marches'",
+            ) { it.long(0) }.single()
+            val childText = database.map(
+                "SELECT text FROM chunks WHERE stable_key = 'srd:core:marches-rumours'",
+            ) { it.string(0) }.single()
+            val text = database.map(
+                "SELECT text FROM chunks WHERE chunk_id = $parent",
+            ) { it.string(0) }.single()
+            assertTrue(childText in text, "the fixture's parent must contain its child")
+
+            val childStart = text.substringBefore(childText).toByteArray(Charsets.UTF_8).size
+            val redacted = expansionProse(
+                text,
+                listOf(childStart to childStart + childText.toByteArray(Charsets.UTF_8).size),
+            )
+            val fromRaw = expansionsOf(text)
+            val fromRedacted = expansionsOf(redacted)
+            assertTrue(
+                fromRaw != fromRedacted,
+                "the fixture must be one where redaction changes the questions, or this " +
+                    "test would pass against a builder that never redacted",
+            )
+
+            val stored = database.map(
+                "SELECT embedding FROM vectors WHERE role = 'expansion' AND chunk_id = $parent " +
+                    "ORDER BY subchunk_index",
+            ) { it.bytes(0).toList() }
+            assertEquals(
+                fromRedacted.map {
+                    dev.rpghelper.pack.Float16.encodeVector(CorpusPack.EMBEDDER.embed(it)).toList()
+                },
+                stored,
+            )
+        }
+    }
+
+    @Test
     fun `an anchor that is not unique fails the build rather than picking one`() {
         // "First match" is exactly how a fixture starts pointing somewhere plausible and
         // wrong, so ambiguity is refused instead of resolved.

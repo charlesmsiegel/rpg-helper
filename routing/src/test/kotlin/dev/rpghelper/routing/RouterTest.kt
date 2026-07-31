@@ -418,4 +418,85 @@ class RouterTest {
         assertFalse(cards.single { it.ref.chunkId == 1L }.rollable)
         assertTrue(cards.single { it.ref.chunkId == 2L }.rollable)
     }
+
+    // ---------------------------------------------------------------- the residual split
+
+    /** Records what the residual pass was told the quote cards cover. */
+    private class RecordingGenerator : Generator by CountingGenerator() {
+        override val availability = Availability.Ready
+        var described: List<CardSummary> = emptyList()
+
+        override fun residualIntent(query: String, covered: List<CardSummary>): String {
+            described = covered
+            return "the residual"
+        }
+
+        override fun answer(residual: String, context: List<RedactedChunk>) =
+            GeneratedAnswer("prose", emptyList())
+    }
+
+    @Test
+    fun `the residual pass is told kinds and heading paths, and there is nowhere to put text`() {
+        // Route 2.3's boundary. residualIntent is itself a generative call, so handing it
+        // the quote cards' bodies would feed exact rules text to the model through the one
+        // call that exists to keep rules *intent* away from it.
+        val generator = RecordingGenerator()
+        router().route(
+            retrieved(
+                candidate(1, "rules", text = "A seizing attempt is a contested check."),
+                candidate(8, "setting", text = "lore about ash"),
+            ),
+            generator, listOf(pack),
+        )
+        assertEquals(
+            listOf(CardSummary("rules", "Somewhere")),
+            generator.described,
+            "kind and heading path, and the type has no third field to leak the body through",
+        )
+    }
+
+    @Test
+    fun `a card suppressed for an unresolved citation covers nothing`() {
+        // Subtracting a suppressed card's intent from the residual leaves the one part of
+        // the question nobody answered missing from both halves of the split: no quote card
+        // renders it, and generation was told not to address it.
+        val generator = RecordingGenerator()
+        val answer = router(citations = { if (it.chunkId == 1L) null else citation(it.chunkId) })
+            .route(
+                retrieved(candidate(1, "rules"), candidate(8, "setting", text = "lore")),
+                generator, listOf(pack),
+            )
+        assertTrue(answer.cards.none { it is Card.Verbatim }, "got ${answer.cards}")
+        assertEquals(emptyList(), generator.described, "nothing reached the screen to subtract")
+    }
+
+    @Test
+    fun `the generation context is capped in bytes, not only in chunks`() {
+        // A valid pack may carry chunks far larger than a phone-sized context window; five
+        // of them would either truncate the prompt silently or fail to run at all.
+        var sent: List<RedactedChunk> = emptyList()
+        val generator = object : Generator by CountingGenerator() {
+            override val availability = Availability.Ready
+            override fun residualIntent(query: String, covered: List<CardSummary>) = query
+            override fun answer(residual: String, context: List<RedactedChunk>): GeneratedAnswer {
+                sent = context
+                return GeneratedAnswer("prose", emptyList())
+            }
+        }
+        val big = "ash ".repeat(3_000) // 12 KB apiece: two fit in 16 KiB, three do not.
+        val answer = router().route(
+            retrieved(
+                candidate(8, "setting", text = big),
+                candidate(9, "setting", text = big),
+                candidate(10, "setting", text = big),
+            ),
+            generator, listOf(pack),
+        )
+        assertEquals(1, sent.size, "the second chunk does not fit and is dropped whole")
+        assertEquals(big, sent.single().redactedText, "and the first is not truncated")
+        assertTrue(
+            answer.diagnostics.any { "bytes" in it && "2 lower-ranked chunks dropped" in it },
+            "the drop is recorded rather than absorbed: ${answer.diagnostics}",
+        )
+    }
 }
