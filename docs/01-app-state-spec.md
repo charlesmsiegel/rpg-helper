@@ -105,14 +105,27 @@ it off the open path is what makes it survivable enough to keep.
 
 ### One version of a pack at a time
 
-`pack_uid` is the primary key of `installed_packs`. Installing a pack whose uid is already
-present **replaces** it, after validating the incoming file, and preserves its activation
-state and priority.
+`pack_uid` is unique in `installed_packs`. Installing a pack whose uid is already present
+**replaces** it, after validating the incoming file.
 
 Two versions of one book installed at once would compete in retrieval as if they were
 different sources, producing duplicate quotes with different page numbers and no way for
 a user to tell which is current. Supersession exists for corrections; parallel versions
 are not a feature.
+
+**Replacement is confirmed, and never grants activation.** `pack_uid` is a `TEXT` column
+in a file a third party built, so a pack can claim any identity it likes — including the
+bundled starter pack's. Silent replacement would let an imported file inherit an active
+pack's activation state and priority without the user ever deciding to activate it.
+
+So replacing an installed pack requires an explicit confirmation naming both sides —
+title, version, and publisher, old and new — and a replacement of an **inactive** pack
+stays inactive. A replacement of an active one may keep its activation, since that is what
+updating a book means, but only through that confirmation.
+
+This is not a substitute for signing, which is open on both sides. It bounds what an
+unsigned install can do without the user seeing it, which is the most this format can
+honestly promise today.
 
 ---
 
@@ -382,6 +395,38 @@ re-importing one is the same operation as importing it the first time.
 
 ---
 
+## 5a. Concurrency
+
+One database, one process, and a phone that will suspend the app mid-query.
+
+- `state.db` runs in **WAL mode** with a single writer. Retrieval reads; installs,
+  document edits, and migrations write.
+- **A query captures the active set once, at its start**, and completes against that
+  snapshot — the active pack list, their priority order, and the precomputed superseded
+  set. A pack deactivated while a query is in flight does not half-affect its results,
+  which would otherwise produce an answer citing a book the user just switched off.
+- **An installed pack's file is not deleted while a reader holds it.** Uninstall marks the
+  row and defers deletion until no query has it open, then reconciles on next startup
+  (§1). Unlinking a SQLite file out from under an open connection is not a crash on every
+  platform, which is worse than if it were.
+- Migrations run **before any pack is opened**, at startup, with no query in flight.
+
+## 5b. Bounds on a hostile pack
+
+A pack is a file someone else built, and activation and retrieval are both linear in its
+size. Nothing above stops a pack declaring ten million vectors or a million aliases, and
+the result is not a wrong answer but an app that stops responding.
+
+So activation enforces ceilings on chunk count, vector count, and `entities` row count,
+and refuses a pack that exceeds them with a message naming the limit. The numbers are
+sized well above any real book and are **pending measurement** against the corpus, like
+the retrieval thresholds — a ceiling set by guesswork either rejects real content or
+fails to bound anything.
+
+This is deliberately crude. It is not a defence against a determined attacker, who is
+already installing a file the user chose to trust; it bounds the damage a malformed or
+malicious pack can do to the app's responsiveness before the user can uninstall it.
+
 ## 6. Migrations
 
 The rule from `07-documents-and-constraints-spec.md` §2 governs here too: a character sheet
@@ -451,6 +496,10 @@ it is stated again here because uninstall is where it would actually get broken.
 | Cache keying, follow-ups | the same elliptical follow-up after two different conversations produces two different keys |
 | Cache keying, rebuilds | a replacement pack with an unchanged `pack_version` but different bytes produces a different key |
 | Extensions round-trip | unknown top-level keys survive import, an app restart, and re-export |
+| Replacement confirmation | installing a pack whose uid matches an inactive one leaves it inactive; no install activates a pack without confirmation |
+| Query snapshot | deactivating a pack mid-query does not change that query's results |
+| Deferred deletion | uninstalling a pack whose file a query holds open does not delete it until the reader finishes |
+| Hostile bounds | a pack exceeding a declared ceiling is refused, naming the limit |
 
 That last row is deliberately a test rather than a review checklist item. It is a single
 boolean in a manifest, its default is the wrong value, and nothing about the app's

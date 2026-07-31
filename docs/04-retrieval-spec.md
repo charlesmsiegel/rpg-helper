@@ -222,6 +222,22 @@ thousands, far below the noise the gates are calibrated against.
 It becomes wrong at scale. A pack superseding a large fraction of its target is a
 replacement edition, not errata, and should be modelled as one.
 
+### 5.3.1 Supersession is unbounded, so it is made visible
+
+Any active pack may supersede any chunk of any other, cascading through tables,
+constraints, capabilities, and derived chunks. Nothing in the format restricts what a pack
+may claim to correct, and until packs are signed nothing can.
+
+What the app can do is refuse to let it happen quietly:
+
+- **At install**, a pack carrying `supersessions` rows reports how many passages it amends
+  and in which books, before the user activates it.
+- **A supersession set covering more than a small fraction of its target requires explicit
+  acknowledgement** — at that size it is a replacement edition, and the honest action is to
+  deactivate the old pack rather than have a second one hollow it out.
+- **The Packs surface lists what is in effect**, from each row's citation snapshot, so the
+  state is inspectable rather than inferred from missing search results.
+
 ### 5.4 Priority is a different mechanism
 
 Priority breaks genuine score ties and decides which book leads when two unrelated
