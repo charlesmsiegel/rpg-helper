@@ -124,13 +124,17 @@ PRAGMA user_version = 1;
 -- Installed packs -------------------------------------------------------------
 
 CREATE TABLE installed_packs (
-    pack_uid     TEXT PRIMARY KEY,
+    install_id   INTEGER PRIMARY KEY,
+    pack_uid     TEXT    NOT NULL UNIQUE,
     pack_version TEXT    NOT NULL,
     title        TEXT    NOT NULL,
     ruleset_id   TEXT,
     embedder_id  TEXT    NOT NULL,
     byte_size    INTEGER NOT NULL,
+    file_sha256  TEXT,
+    state        TEXT    NOT NULL CHECK (state IN ('installing', 'ready')),
     installed_at TEXT    NOT NULL,
+    verified_at  TEXT,
     active       INTEGER NOT NULL DEFAULT 0,
     priority     INTEGER NOT NULL
 );
@@ -145,6 +149,7 @@ CREATE TABLE documents (
     campaign    TEXT,
     ruleset_id  TEXT,
     draft       INTEGER NOT NULL DEFAULT 1,
+    extensions  TEXT,
     created_at  TEXT    NOT NULL,
     updated_at  TEXT    NOT NULL
 );
@@ -152,17 +157,21 @@ CREATE TABLE documents (
 CREATE TABLE trackers (
     document_id  INTEGER NOT NULL REFERENCES documents(document_id) ON DELETE CASCADE,
     key          TEXT    NOT NULL,
-    type         TEXT    NOT NULL,
+    type         TEXT    NOT NULL CHECK (type IN ('number', 'flag', 'text')),
     number_value REAL,
     flag_value   INTEGER,
     text_value   TEXT,
     ordinal      INTEGER NOT NULL,
-    PRIMARY KEY (document_id, key)
+    PRIMARY KEY (document_id, key),
+    CHECK ((type = 'number') = (number_value IS NOT NULL)),
+    CHECK ((type = 'flag')   = (flag_value   IS NOT NULL)),
+    CHECK ((type = 'text')   = (text_value   IS NOT NULL))
 );
 
 CREATE TABLE accepted_violations (
     document_id INTEGER NOT NULL REFERENCES documents(document_id) ON DELETE CASCADE,
     fingerprint TEXT    NOT NULL,
+    ruleset_id  TEXT    NOT NULL,
     note        TEXT,
     accepted_at TEXT    NOT NULL,
     PRIMARY KEY (document_id, fingerprint)
@@ -198,12 +207,43 @@ CREATE TABLE models (
 );
 ```
 
+### Every connection sets its pragmas
+
+```sql
+PRAGMA foreign_keys = ON;
+```
+
+**SQLite disables foreign-key enforcement by default, per connection.** Without this the
+`ON DELETE CASCADE` clauses above are decoration: deleting a document leaves its trackers
+and accepted violations behind forever, and nothing reports it.
+
+This is the same trap the pack validator documents from the other direction — a pack's
+`REFERENCES` clauses guarantee nothing about rows inserted while enforcement was off.
+Here the app owns the database and *can* rely on the constraints, but only if it turns
+them on, on every connection, including the ones a migration opens.
+
 ### Notes on choices that are not obvious
 
 **Trackers use typed columns, not one value column.** `sum_range` sums numeric trackers;
 a single TEXT column would make that a scan-and-parse, and would let a `flag` silently
 sum as text. Three nullable columns with a `type` discriminator keeps the arithmetic in
-SQLite and makes a type error a schema violation rather than a runtime surprise.
+SQLite.
+
+The `CHECK` clauses are what make that a schema violation rather than a runtime surprise —
+without them SQLite accepts an unknown `type`, a `number` carrying only `text_value`, or
+several populated value columns at once, after which constraint evaluation silently reads
+NULL or the wrong representation. Unlike a pack's DDL, this one is written and created by
+the app, so its constraints are worth something.
+
+**`accepted_violations.ruleset_id` is stored as well as hashed.** The fingerprint already
+covers the ruleset (`07-documents-and-constraints-spec.md` §4.7), which is what stops an
+acceptance from one game suppressing an identical generic predicate in another after a
+rebinding. The column exists so the Documents surface can list a document's deliberate
+deviations by game without reversing a hash.
+
+**`documents.extensions` holds unknown top-level keys from an imported `.rpgdoc`.** §6 of
+the documents spec promises they survive a round trip, and a promise kept only in the
+importer's transient object is broken by the next app restart.
 
 **`trackers.ordinal` is display order.** Constraints never read it. It exists because a
 character sheet has an order the user chose and losing it on every edit is the kind of
@@ -251,6 +291,18 @@ So:
 - The feed persists across app restarts, so backgrounding the app mid-lookup at a table
   does not lose the thread.
 
+**Persisted cards are history, not live content.** A quote card already on screen stays
+there after its chunk is superseded or its pack uninstalled — the feed records what the
+app said at the time it said it. That does not weaken the supersession guarantee, which is
+about what retrieval can *reach*: no new answer will contain the superseded text, and
+scrolling back to an old one shows what was true when it was asked.
+
+Two things follow. A card whose pack is no longer active is marked as such rather than
+re-resolved, since its citation can no longer be opened. And serialising a quote card must
+round-trip its text byte-for-byte, because the feed is now a second path by which a
+quotation reaches the screen — the verbatim-identity test covers rendering from the pack,
+and has to cover this too.
+
 The alternative — an internal window with its own lifetime — would need its own clear
 control, its own explanation, and would still leave a user unable to answer "why did it
 think I meant that?"
@@ -268,15 +320,33 @@ normal.
 
 The key is a hash over:
 
-- the **normalized** query, after deterministic folding and alias rewrite
-- the **active-set fingerprint**: the ordered list of `(pack_uid, pack_version)` for every
+- **the query retrieval actually ran** — after deterministic folding, the alias rewrite,
+  *and* any generative rewrite (`04-retrieval-spec.md` §3.2)
+- the **active-set fingerprint**: the ordered list of `(pack_uid, file_sha256)` for every
   active pack, in priority order
 - the generative model's identity and quantization
 
-Which means **there is no invalidation logic**. Activate a pack, deactivate one, reorder
-priority, update a book, or change models, and the key changes — old entries stop being
-reachable rather than needing to be found and deleted. Invalidation logic is where cache
-bugs live, and the surest way to have none is to have nothing to invalidate.
+Both of the first two are more specific than they first appear, and each was wrong in an
+earlier version of this section.
+
+**The key is the rewritten query, not the typed one.** A follow-up is resolved against the
+conversation window before retrieval sees it, so *"what about at level 5?"* means
+different things after a grappling question and after a stealth question. Keying on the
+pre-rewrite text hashes both to the same entry, and the second user is served the first
+conversation's card — a wrong answer with well-formed citations, indistinguishable from a
+fresh generation. Using the query that was actually run also covers voice and camera
+input, which reach retrieval only after a rewrite.
+
+**The active set is fingerprinted by content, not by declared version.** Installing a pack
+whose `pack_uid` already exists replaces it (§1), and nothing requires the replacement to
+declare a new `pack_version` — a corrected rebuild may keep it. `file_sha256` changes
+whenever the bytes do, which is the property the cache actually needs.
+
+With both, **there is no invalidation logic**. Activate a pack, deactivate one, reorder
+priority, replace a book with a corrected rebuild, ask a differently-resolved follow-up,
+or change models, and the key changes — old entries stop being reachable rather than
+needing to be found and deleted. Invalidation logic is where cache bugs live, and the
+surest way to have none is to have nothing to invalidate.
 
 That includes the case that would otherwise be subtle: installing an errata pack changes
 the active set, so answers generated before the correction cannot be served after it.
@@ -347,6 +417,10 @@ have different remedies:
 | models | size of `models/` | delete the generative model; retrieval keeps working |
 | app data | size of `state.db` plus the cache | clear the answer cache |
 
+Verification state is visible here too: a pack whose background digest check has not run
+since install is marked as pending rather than silently unverified, and one that failed is
+deactivated with an explanation (§1).
+
 A single total would tell a user their library is large without telling them that most of
 it is one model they can delete and re-download, or a cache that costs nothing to clear.
 
@@ -370,6 +444,13 @@ it is stated again here because uninstall is where it would actually get broken.
 | Migrations | per-version fixture databases; every document and tracker survives byte-identically |
 | Uninstall | documents byte-identical before and after; reinstall restores validation and acceptances exactly |
 | Backup opt-out | the manifest disables auto-backup — asserted by a test, since this is one flag away from silently regressing |
+| Foreign keys | deleting a document removes its trackers and acceptances, on a connection opened the way the app opens them |
+| Tracker discriminator | an unknown `type`, a mismatched value column, and two populated value columns are all rejected by the schema |
+| Install reconciliation | a crash simulated between each pair of install steps leaves no `installing` row and no orphan file, in either direction |
+| Digest verification | flipping one byte of an installed pack's `chunks.text` is caught by the background check and deactivates the pack |
+| Cache keying, follow-ups | the same elliptical follow-up after two different conversations produces two different keys |
+| Cache keying, rebuilds | a replacement pack with an unchanged `pack_version` but different bytes produces a different key |
+| Extensions round-trip | unknown top-level keys survive import, an app restart, and re-export |
 
 That last row is deliberately a test rather than a review checklist item. It is a single
 boolean in a manifest, its default is the wrong value, and nothing about the app's
