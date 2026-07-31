@@ -540,13 +540,14 @@ violation is visible the builder's guarantees have demonstrably not held.
 | spans | `span_end - span_start` equals the UTF-8 byte length of `text`; spans not inverted |
 | nested text | a child's `text` byte-equals its parent's `text` sliced at the child's offset |
 | stable keys | `(source_uid, stable_key)` is unique |
-| source identity | `sources.source_uid` is unique |
+| source identity | `sources.source_uid` is unique, and so is `sources.source_id` |
 | dice expressions | every `tables.dice_expr` parses under the pinned grammar |
 | table rows | every `table_id` resolves; ranges are non-overlapping, not inverted, and **cover the expression's outcome range exactly**; each row's span lies inside its table chunk's span, and its `text` byte-equals that slice |
 | nesting | child contained in parent; same source; at most one level; siblings do not overlap |
 | derivation | derived chunks cite at least one chunk; every cited chunk exists and has `origin='source'` |
 | claim spans | in range of the derived text, non-empty, not inverted, on UTF-8 boundaries |
 | chunk references | `entities`, `tables`, `capabilities`, `constraints`, `supersessions` resolve to chunks that exist |
+| supersession self-reference | no `supersessions` row names as its correction a chunk carrying the `(source_uid, stable_key)` that same row withdraws |
 | source references | `chunks`, `source_page_labels`, `source_gaps` resolve to sources that exist |
 | closed vocabularies | `locator_scheme`, page-label `scheme`, and gap `reason` are all in their sets |
 | ruleset binding | a pack shipping `constraints` rows declares a `ruleset_id` |

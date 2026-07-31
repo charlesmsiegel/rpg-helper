@@ -152,6 +152,16 @@ enum class ViolationCode {
     /** A row is NULL in a reference column the format requires. */
     MISSING_CHUNK_REFERENCE,
 
+    /**
+     * A `supersessions` row whose superseding chunk is one the same row withdraws.
+     *
+     * The correction is the one thing that must survive its own application. A row
+     * naming a chunk carrying the targeted `(source_uid, stable_key)` deactivates the
+     * replacement text along with the text it replaces, so the user is left with the
+     * rule silently gone and no notice of why — strictly worse than shipping no errata.
+     */
+    SUPERSESSION_WITHDRAWS_ITSELF,
+
     // --- Structured tables -------------------------------------------------------
     /** A `table_rows` row names a `table_id` with no matching `tables` row. */
     DANGLING_TABLE_REFERENCE,

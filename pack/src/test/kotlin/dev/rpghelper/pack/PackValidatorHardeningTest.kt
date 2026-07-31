@@ -308,6 +308,20 @@ class PackValidatorHardeningTest {
     }
 
     @Test
+    fun `rejects an erratum that withdraws its own correction`() {
+        // Supersession applies to every active pack carrying the targeted source,
+        // including the pack the erratum lives in -- so a row naming its own target takes
+        // the replacement down with what it replaces. The rule goes silently missing and
+        // nothing explains why, which is worse than shipping no errata.
+        assertRejects(ViolationCode.SUPERSESSION_WITHDRAWS_ITSELF) {
+            it.exec(
+                "UPDATE supersessions SET target_source_uid = 'test:core:1e', " +
+                    "target_stable_key = 'core:grapple'",
+            )
+        }
+    }
+
+    @Test
     fun `rejects a rollable table with no rows at all`() {
         // The empty table reaches no row, so a coverage check keyed off the rows that
         // exist never looks at it -- and it activates as a table the app offers to roll

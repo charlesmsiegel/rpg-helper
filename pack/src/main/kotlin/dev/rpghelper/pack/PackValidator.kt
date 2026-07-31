@@ -128,6 +128,7 @@ class PackValidator(private val supportedEmbedders: Set<EmbedderContract>) {
         checkChunkReferences(db, chunks, violations)
         checkSourceReferences(db, chunks, violations)
         checkSourceUids(db, violations)
+        checkSupersessions(db, violations)
         checkTableRows(db, chunks, violations)
         checkAliasNormalization(db, violations)
         checkClosedVocabularies(db, violations)

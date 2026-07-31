@@ -15,6 +15,7 @@ import dev.rpghelper.pack.ViolationCode.TABLE_ROW_SPAN_OUTSIDE_CHUNK
 import dev.rpghelper.pack.ViolationCode.TABLE_ROW_TEXT_MISMATCH
 import dev.rpghelper.pack.ViolationCode.LOCATOR_SCHEME_INVALID
 import dev.rpghelper.pack.ViolationCode.PAGE_LABEL_SCHEME_INVALID
+import dev.rpghelper.pack.ViolationCode.SUPERSESSION_WITHDRAWS_ITSELF
 
 /**
  * Rows that address a chunk or a source directly, never through retrieval.
@@ -64,6 +65,48 @@ internal fun checkChunkReferences(
                     "$table ${row.long(0)} references chunk $chunkId, which is not in this pack",
                 )
             }
+        }
+    }
+}
+
+/**
+ * A correction must survive its own application.
+ *
+ * Supersession targets `(source_uid, stable_key)` and applies to every active pack
+ * carrying that source — including the pack the errata itself lives in, which is the
+ * ordinary case for a book shipping with its own corrections. A row whose superseding
+ * chunk *is* one of the chunks it withdraws therefore deactivates the replacement text
+ * along with the text it replaces: the rule goes silently missing and nothing explains
+ * why, which is strictly worse than shipping no errata at all.
+ */
+internal fun checkSupersessions(db: Db, out: MutableList<Violation>) {
+    val sourceUids = mutableMapOf<Long, String>()
+    db.forEachRow("SELECT source_id, source_uid FROM sources") {
+        sourceUids[it.long(0)] = it.string(1)
+    }
+
+    // (source_uid, stable_key) for each chunk that has both -- the coordinates a
+    // supersession names, resolved the way the retrieval filter resolves them.
+    val coordinates = mutableMapOf<Long, Pair<String, String>>()
+    db.forEachRow(
+        "SELECT chunk_id, source_id, stable_key FROM chunks WHERE stable_key IS NOT NULL",
+    ) { row ->
+        val uid = row.longOrNull(1)?.let { sourceUids[it] } ?: return@forEachRow
+        coordinates[row.long(0)] = uid to row.string(2)
+    }
+
+    db.forEachRow(
+        "SELECT supersession_id, superseding_chunk_id, target_source_uid, target_stable_key " +
+            "FROM supersessions",
+    ) { row ->
+        val superseding = row.longOrNull(1) ?: return@forEachRow
+        val target = row.string(2) to row.string(3)
+        if (coordinates[superseding] == target) {
+            out += Violation(
+                SUPERSESSION_WITHDRAWS_ITSELF,
+                "supersessions ${row.long(0)} names chunk $superseding as the correction for " +
+                    "(${target.first}, ${target.second}), which is what that chunk is",
+            )
         }
     }
 }

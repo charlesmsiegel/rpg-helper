@@ -89,13 +89,27 @@ object Supersession {
         // of three rules, one of which was corrected, is wrong in exactly the place someone
         // would rely on it. Losing a summary is cheap; keeping a stale one costs the
         // guarantee that a correction actually corrects.
+        //
+        // Run to a fixpoint, not once: a derived chunk can itself be cited by another
+        // derived chunk, and a single pass would deactivate the summary while leaving the
+        // summary-of-summaries standing on it. Bounded by the row count, since each round
+        // that changes nothing ends the loop and each round that changes something adds at
+        // least one chunk to a set that cannot exceed the pack's chunks.
         for (pack in packs) {
-            val victims = pack.db.map(
+            val citations = pack.db.map(
                 "SELECT derived_chunk_id, source_chunk_id FROM chunk_derivation",
             ) { it.long(0) to it.long(1) }
-                .filter { (_, cited) -> ChunkRef(pack.packUid, cited) in superseded }
-                .map { (derived, _) -> ChunkRef(pack.packUid, derived) }
-            superseded += victims
+
+            while (true) {
+                val victims = citations
+                    .filter { (derived, cited) ->
+                        ChunkRef(pack.packUid, cited) in superseded &&
+                            ChunkRef(pack.packUid, derived) !in superseded
+                    }
+                    .map { (derived, _) -> ChunkRef(pack.packUid, derived) }
+                if (victims.isEmpty()) break
+                superseded += victims
+            }
         }
 
         return SupersededSet(superseded)
