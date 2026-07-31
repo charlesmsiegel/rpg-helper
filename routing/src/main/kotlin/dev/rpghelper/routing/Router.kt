@@ -223,24 +223,40 @@ class Router(
         val context = mutableListOf<RedactedChunk>()
         var spent = 0
         var droppedForBytes = 0
-        for ((index, candidate) in settings.withIndex()) {
-            if (index >= maxContextChunks) break
+        var unredactable = 0
+        var considered = 0
+        for (candidate in settings) {
+            // **The cap counts chunks that made it in**, not positions in the candidate
+            // list. Counting positions let a candidate that could not be redacted safely
+            // consume a slot on its way to being skipped, so five unredactable candidates
+            // in a row ended generation before it reached usable evidence sitting at rank
+            // six -- and reported it as "every chunk redacted to nothing", which was true
+            // of the five it looked at and false of the answer.
+            if (context.size >= maxContextChunks) break
+            considered++
             val chunk = RedactedChunk.of(
                 candidate.ref,
                 candidate.headingPath,
                 redactedTextOf(candidate),
-            ) ?: continue
+            )
+            if (chunk == null) {
+                unredactable++
+                continue
+            }
             val cost = chunk.redactedText.toByteArray(Charsets.UTF_8).size
             if (spent + cost > maxContextBytes) {
-                droppedForBytes = minOf(settings.size, maxContextChunks) - index
+                droppedForBytes = settings.size - considered + 1
                 break
             }
             context += chunk
             spent += cost
         }
-        if (settings.size > maxContextChunks) {
+        if (unredactable > 0) {
+            diagnostics += "$unredactable chunk(s) could not be redacted safely and were skipped"
+        }
+        if (settings.size > considered && droppedForBytes == 0) {
             diagnostics += "context capped at $maxContextChunks; " +
-                "${settings.size - maxContextChunks} lower-ranked chunks dropped"
+                "${settings.size - considered} lower-ranked chunks dropped"
         }
         if (droppedForBytes > 0) {
             diagnostics += "context capped at $maxContextBytes bytes ($spent used); " +

@@ -56,6 +56,22 @@ class PackBuilder(
      */
     private val judge: dev.rpghelper.model.Judge? = null,
     private val claimThreshold: Double = 1.0,
+    /**
+     * Ships derived prose that **no judge has adjudicated**.
+     *
+     * Off by default, and it has to be, because the failure is invisible from the outside.
+     * A derived chunk renders as attributed prose with well-formed citation chips: the
+     * identical trust claim a generated answer makes, and one the app cannot re-check,
+     * since `chunk_derivation` guarantees the cited chunks *exist* and nothing more. The
+     * `unchecked` build note went to the builder's operator; nothing at runtime reads
+     * `build_report`, so the person holding the pack was never told.
+     *
+     * So with no judge the summaries are dropped and the drop is recorded — the book still
+     * ships, minus the enrichment nobody vouched for. This flag exists for the tests that
+     * need an unadjudicated pack on purpose, and for an operator who has decided to ship
+     * one with their eyes open.
+     */
+    private val shipUnadjudicatedDerived: Boolean = false,
 ) {
 
     private val notes = mutableListOf<BuildNote>()
@@ -408,11 +424,24 @@ class PackBuilder(
      */
     private fun supported(derived: CorpusSpec.DerivedSpec): Boolean {
         if (judge == null) {
+            if (shipUnadjudicatedDerived) {
+                notes += BuildNote(
+                    "unchecked", "chunk", null, "claim-support",
+                    "no judge was supplied and unadjudicated derived prose was explicitly " +
+                        "permitted, so this summary ships unchecked",
+                )
+                return true
+            }
+            // Dropped rather than shipped. The note reaches the operator; nothing at
+            // runtime reads `build_report`, so a summary shipped unchecked reaches the
+            // person holding the pack with no warning at all -- as attributed prose with
+            // well-formed citation chips, which the app has no way to re-check.
             notes += BuildNote(
-                "unchecked", "chunk", null, "claim-support",
-                "no judge was supplied, so this summary ships unadjudicated",
+                "dropped", "chunk", null, "claim-support",
+                "no judge was supplied, so this summary was dropped rather than shipped " +
+                    "unadjudicated; pass one, or set shipUnadjudicatedDerived",
             )
-            return true
+            return false
         }
 
         // Each region is judged against the chunks *that region* cites -- not against the

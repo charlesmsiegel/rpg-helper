@@ -277,7 +277,17 @@ object Nesting {
             .toSet()
         val outside = Tokenizer.tokenize(redaction.ownProse).toSet()
 
-        val matchedInside = queryTerms.map { Tokenizer.fold(it) }.filter { it in inside }
+        val folded = queryTerms.map { Tokenizer.fold(it) }
+
+        // A term found in the parent's own prose and *not* in the child is direct evidence
+        // that the parent matched on its own: nothing about it came from the nested chunk,
+        // so there is nothing to attribute elsewhere. Asked `haunted Vashenko`, where the
+        // rumour table holds `haunted` and the surrounding lore holds `Vashenko`, the
+        // earlier rule dropped the parent for failing to repeat `haunted` outside -- and
+        // the user got the table without the passage it sits in.
+        if (folded.any { it in outside && it !in inside }) return true
+
+        val matchedInside = folded.filter { it in inside }
         if (matchedInside.isEmpty()) return false
         return matchedInside.all { it in outside }
     }

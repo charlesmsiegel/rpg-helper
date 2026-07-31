@@ -27,7 +27,10 @@ object CorpusPack {
     private val built: BuildOutcome by lazy {
         val target = Files.createTempDirectory("corpus-pack").resolve("srd.rpgpack")
         target.toFile().deleteOnExit()
-        PackBuilder(spec, EMBEDDER).buildTo(target)
+        // Ships its derived summary without a judge on purpose: the fixture exists to
+        // exercise route 2, and every consumer of it needs a derived chunk to be there.
+        // `DerivedClaimTest` covers the production default, which is to drop it.
+        PackBuilder(spec, EMBEDDER, shipUnadjudicatedDerived = true).buildTo(target)
     }
 
     val path: Path get() = built.path

@@ -126,14 +126,50 @@ class DerivedClaimTest {
     }
 
     @Test
-    fun `building with no judge records that nothing was adjudicated`() {
+    fun `building with no judge drops the summary rather than shipping it unchecked`() {
+        // The production `build` command supplies no judge. Shipping unadjudicated prose
+        // there means a fabricated summary activates and renders as attributed text with
+        // well-formed citation chips -- and the `unchecked` note reaches the operator,
+        // never the person holding the pack, because nothing at runtime reads
+        // `build_report`. The book still ships; the enrichment nobody vouched for does not.
+        val outcome = PackBuilder(CorpusPack.spec, CorpusPack.EMBEDDER)
+            .buildTo(directory.resolve("no-judge-drops.rpgpack"))
+
+        val note = outcome.notes.single { it.validation == "claim-support" }
+        assertEquals("dropped", note.severity)
+        assertTrue(note.detail.contains("no judge"), note.detail)
+
+        JdbcDb.openReadOnly(outcome.path).use { db ->
+            assertEquals(
+                0L,
+                db.map("SELECT count(*) FROM chunks WHERE origin = 'derived'") { it.long(0) }
+                    .single(),
+            )
+        }
+        assertTrue(
+            Packs.validateFile(outcome.path, setOf(CorpusPack.EMBEDDER.contract)).isValid,
+            "and the book still activates",
+        )
+    }
+
+    @Test
+    fun `an operator can ship unadjudicated prose with their eyes open`() {
         // Honest rather than silent. A build that shipped unchecked summaries and said
         // nothing would be indistinguishable from one that checked them and found them
         // sound, which is the distinction the whole harness exists to make.
-        val outcome = build(null)
+        val outcome = PackBuilder(CorpusPack.spec, CorpusPack.EMBEDDER, shipUnadjudicatedDerived = true)
+            .buildTo(directory.resolve("no-judge-permitted.rpgpack"))
         val note = outcome.notes.single { it.validation == "claim-support" }
         assertEquals("unchecked", note.severity)
-        assertTrue(note.detail.contains("no judge"))
+        assertTrue(note.detail.contains("explicitly"), note.detail)
+
+        JdbcDb.openReadOnly(outcome.path).use { db ->
+            assertEquals(
+                1L,
+                db.map("SELECT count(*) FROM chunks WHERE origin = 'derived'") { it.long(0) }
+                    .single(),
+            )
+        }
     }
 }
 

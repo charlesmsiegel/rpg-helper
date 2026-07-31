@@ -21,6 +21,7 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import dev.rpghelper.routing.Card
+import dev.rpghelper.routing.Chip
 import dev.rpghelper.routing.Citation
 import dev.rpghelper.routing.render
 
@@ -50,13 +51,15 @@ fun AnswerCard(card: Card, modifier: Modifier = Modifier) {
         is Card.Derived -> ProseCard(
             label = "Summary — written by this pack's builder, not quoted",
             body = card.body,
-            citations = card.chips.map { it.citation } + card.footer,
+            chips = card.chips,
+            footer = card.footer,
             modifier = modifier,
         )
         is Card.Generated -> ProseCard(
             label = "Generated on this device from setting text",
             body = card.body,
-            citations = card.chips.map { it.citation } + card.footer,
+            chips = card.chips,
+            footer = card.footer,
             modifier = modifier,
         )
         is Card.ModelUnavailable -> StatementCard(card.statement, card.wouldHaveUsed, modifier)
@@ -119,9 +122,17 @@ private fun quoteHeight(body: String) = (20 * (body.count { it == '\n' } + 1)).d
 private fun ProseCard(
     label: String,
     body: String,
-    citations: List<Citation>,
+    chips: List<Chip>,
+    footer: List<Citation>,
     modifier: Modifier,
 ) {
+    // A chip's whole content is *which run of text* a citation supports. Collapsing chips
+    // into the footer throws the span away, and a card drawing two claims from two books
+    // becomes two citations with no way to tell which supports which -- the one
+    // distinction inline chips exist to carry. Each chipped run gets a superscript marker
+    // and the markers appear again below.
+    val marked = markChips(body, chips)
+
     Surface(modifier = modifier.fillMaxWidth(), color = Color.Transparent) {
         Column(Modifier.padding(12.dp)) {
             Text(
@@ -131,15 +142,51 @@ private fun ProseCard(
             )
             Spacer(Modifier.height(6.dp))
             Text(
-                text = body,
+                text = marked,
                 // Italic, proportional, no gutter: everything the quote card is not.
                 fontStyle = FontStyle.Italic,
                 style = MaterialTheme.typography.bodyLarge,
             )
             Spacer(Modifier.height(8.dp))
-            citations.distinct().forEach { CitationLine(it) }
+            chips.sortedBy { it.start }.forEachIndexed { index, chip ->
+                CitationLine(chip.citation, marker = "${index + 1}")
+            }
+            if (footer.isNotEmpty()) {
+                Text(
+                    text = "drawn as a whole from ${footer.size} source" +
+                        if (footer.size == 1) "" else "s",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                footer.distinct().forEach { CitationLine(it) }
+            }
         }
     }
+}
+
+/**
+ * [body] with a numbered marker after each chipped run.
+ *
+ * Offsets are UTF-8 byte spans, so the string is walked as bytes and decoded back —
+ * indexing a Kotlin `String` by them would place markers wrongly the moment a card
+ * contains an em-dash, which game text does constantly.
+ */
+internal fun markChips(body: String, chips: List<Chip>): String {
+    if (chips.isEmpty()) return body
+    val bytes = body.toByteArray(Charsets.UTF_8)
+    val out = StringBuilder()
+    var cursor = 0
+    for ((index, chip) in chips.sortedBy { it.start }.withIndex()) {
+        val start = chip.start.coerceIn(cursor, bytes.size)
+        val end = chip.end.coerceIn(start, bytes.size)
+        out.append(String(bytes, cursor, end - cursor, Charsets.UTF_8))
+        out.append(" [${index + 1}]")
+        cursor = end
+    }
+    if (cursor < bytes.size) {
+        out.append(String(bytes, cursor, bytes.size - cursor, Charsets.UTF_8))
+    }
+    return out.toString()
 }
 
 @Composable
@@ -158,9 +205,9 @@ private fun StatementCard(statement: String, listed: List<Citation>, modifier: M
 }
 
 @Composable
-private fun CitationLine(citation: Citation) {
+private fun CitationLine(citation: Citation, marker: String? = null) {
     Text(
-        text = render(citation),
+        text = if (marker == null) render(citation) else "[$marker] ${render(citation)}",
         style = MaterialTheme.typography.labelMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.background(Color.Transparent),

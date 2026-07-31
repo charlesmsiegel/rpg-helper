@@ -6,6 +6,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -77,7 +78,10 @@ fun AskScreen(turns: List<Turn> = emptyList()) {
                 value = question,
                 onValueChange = { question = it },
                 placeholder = { Text("Ask about your books") },
-                modifier = Modifier.fillMaxSize().padding(8.dp),
+                // Width, not size. `fillMaxSize` on a non-weighted child is measured
+                // first and takes the whole column, leaving the weighted feed above it
+                // zero height -- so every answer was rendered behind a full-screen input.
+                modifier = Modifier.fillMaxWidth().padding(8.dp),
             )
         }
     }

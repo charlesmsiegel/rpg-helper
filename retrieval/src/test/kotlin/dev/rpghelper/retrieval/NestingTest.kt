@@ -316,4 +316,33 @@ class NestingTest {
         val (_, child) = setting()
         assertEquals(listOf(child.ref), survivors(listOf(child)).map { it.candidate.ref })
     }
+
+    // ---------------------------------------------------------------- mixed queries
+
+    @Test
+    fun `a term found only in the parent's own prose keeps the parent`() {
+        // `haunted Vashenko`: the rumour table holds `haunted`, the lore around it holds
+        // `Vashenko`. Requiring the *child's* term to also appear outside dropped the
+        // parent for failing to repeat `haunted`, and the user got the table without the
+        // passage it sits in -- when a term matching only outside the child is as direct
+        // as lexical evidence gets that the parent matched on its own.
+        val (parent, child) = setting()
+        val kept = survivors(listOf(parent, child), terms = listOf("haunted", "vashenko"))
+        assertTrue(
+            kept.any { it.candidate.ref == parent.ref },
+            "the parent must survive: ${kept.map { it.candidate.ref }}",
+        )
+    }
+
+    @Test
+    fun `a query matching only inside the child still absorbs the parent`() {
+        // The rule this exists for, unchanged: nothing about the parent matched except
+        // through the chunk it contains, so shipping both is shipping the same text twice.
+        val (parent, child) = setting()
+        val kept = survivors(listOf(parent, child), terms = listOf("haunted"))
+        assertFalse(
+            kept.any { it.candidate.ref == parent.ref },
+            "the parent matched only through its child: ${kept.map { it.candidate.ref }}",
+        )
+    }
 }

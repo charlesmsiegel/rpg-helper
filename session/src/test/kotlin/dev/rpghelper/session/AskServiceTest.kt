@@ -61,10 +61,17 @@ class AskServiceTest {
     }
 
     /** Counts calls, so "the model did not run" is asserted rather than assumed. */
-    private class CountingGenerator : Generator {
+    private class CountingGenerator(
+        /** What `normalize` resolves an elliptical follow-up to. */
+        private val resolveTo: String? = null,
+    ) : Generator {
         var answers = 0
+        var normalized: Pair<String, List<Turn>>? = null
         override val availability = Availability.Ready
-        override fun normalize(query: String, history: List<Turn>) = query
+        override fun normalize(query: String, history: List<Turn>): String {
+            normalized = query to history
+            return resolveTo ?: query
+        }
         override fun residualIntent(query: String, covered: List<CardSummary>) = query
         override fun answer(residual: String, context: List<RedactedChunk>): GeneratedAnswer {
             answers++
@@ -151,6 +158,57 @@ class AskServiceTest {
         val asked = withLibrary { service.ask("how much does a warhorse cost", it) }
         assertTrue(asked.answer!!.refused)
         assertEquals(1, conversation.feed().size)
+    }
+
+    // ---------------------------------------------------------------- follow-ups
+
+    @Test
+    fun `an elliptical follow-up is resolved against the window before retrieval`() {
+        // "what about seizing?" is not a query; it is a query minus its subject, and the
+        // subject is in the feed. Sending it unresolved searches a fragment -- and stores
+        // that fragment as the resolved query in the cache key, so the same wording asked
+        // after a different conversation can be served the first conversation's card.
+        val generator = CountingGenerator(resolveTo = "how do I grapple someone")
+        withLibrary { service.ask("what is the hardest difficulty", it, generator) }
+        val asked = withLibrary { service.ask("what about seizing?", it, generator) }
+
+        val (query, history) = generator.normalized!!
+        assertEquals("what about seizing?", query)
+        assertEquals(
+            listOf("what is the hardest difficulty"),
+            history.map { it.query },
+            "resolved against the window, which is the feed",
+        )
+        assertTrue(
+            asked.answer!!.cards.any { it is Card.Verbatim },
+            "and the resolved query is what retrieval ran: ${asked.answer!!.cards}",
+        )
+    }
+
+    @Test
+    fun `a self-contained question never wakes the model to rewrite it`() {
+        val generator = CountingGenerator()
+        withLibrary { service.ask("how do I grapple someone", it, generator) }
+        withLibrary { service.ask("what is the hardest difficulty", it, generator) }
+        assertNull(generator.normalized, "neither question is elliptical")
+    }
+
+    @Test
+    fun `the first question is never a follow-up, however it is phrased`() {
+        // With an empty feed there is nothing to resolve *against*, so a rewrite would be
+        // the model inventing a subject.
+        val generator = CountingGenerator(resolveTo = "something invented")
+        withLibrary { service.ask("what about at level 5?", it, generator) }
+        assertNull(generator.normalized)
+    }
+
+    @Test
+    fun `with no model the follow-up is searched as typed`() {
+        // A rewrite is a generative call. Without one the honest behaviour is to search
+        // what the user actually typed, not to guess at what they meant.
+        withLibrary { service.ask("how do I grapple someone", it) }
+        val asked = withLibrary { service.ask("what about seizing?", it) }
+        assertEquals("what about seizing?", asked.resolvedQuery)
     }
 
     @Test

@@ -471,6 +471,40 @@ class RouterTest {
     }
 
     @Test
+    fun `an unredactable chunk does not consume a context slot`() {
+        // Counting positions rather than admitted chunks meant five candidates that could
+        // not be redacted safely ended generation before it reached usable evidence at
+        // rank six -- reported as "every chunk redacted to nothing", which was true of the
+        // five it looked at and false of the answer.
+        var sent: List<RedactedChunk> = emptyList()
+        val generator = object : Generator by CountingGenerator() {
+            override val availability = Availability.Ready
+            override fun residualIntent(query: String, covered: List<CardSummary>) = query
+            override fun answer(residual: String, context: List<RedactedChunk>): GeneratedAnswer {
+                sent = context
+                return GeneratedAnswer("prose", emptyList())
+            }
+        }
+        val unredactable = (1..5).map {
+            candidate(it.toLong() + 10, "setting", text = "lore $it", redactedText = null)
+        }
+        val usable = candidate(99, "setting", text = "the passage that answers it")
+
+        val answer = router().route(
+            retrieved(*(unredactable + usable).toTypedArray()),
+            generator, listOf(pack),
+        )
+
+        assertEquals(1, sent.size, "the sixth candidate reached the context")
+        assertEquals("the passage that answers it", sent.single().redactedText)
+        assertTrue(answer.cards.any { it is Card.Generated }, "got ${answer.cards}")
+        assertTrue(
+            answer.diagnostics.any { "could not be redacted safely" in it },
+            "and the five skips are recorded: ${answer.diagnostics}",
+        )
+    }
+
+    @Test
     fun `the generation context is capped in bytes, not only in chunks`() {
         // A valid pack may carry chunks far larger than a phone-sized context window; five
         // of them would either truncate the prompt silently or fail to run at all.

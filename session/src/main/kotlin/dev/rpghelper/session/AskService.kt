@@ -1,6 +1,9 @@
 package dev.rpghelper.session
 
+import dev.rpghelper.model.Availability
 import dev.rpghelper.model.Generator
+import dev.rpghelper.model.Turn
+import dev.rpghelper.retrieval.QueryNormalizer
 import dev.rpghelper.retrieval.Pipeline
 import dev.rpghelper.routing.Answer
 import dev.rpghelper.routing.Card
@@ -76,8 +79,31 @@ class AskService(
         render: (Answer) -> String = { it.cards.joinToString("\n") },
         hasInactivePacks: Boolean = false,
     ): Asked {
+        // **The follow-up is resolved before retrieval sees it.** `what about at level 5?`
+        // is not a query; it is a query minus its subject, and the subject is in the feed.
+        // Sending it unresolved searches a fragment, and -- worse -- stores that fragment
+        // as the resolved query in the cache key, so the same wording asked after a
+        // different conversation can be served the first conversation's card.
+        //
+        // Only when the model is *ready*: a rewrite is a generative call, and without one
+        // the honest behaviour is to search what the user typed. Only when the feed is
+        // non-empty, because with nothing to resolve against a rewrite is the model
+        // inventing a subject. And only for a query that reads as dependent -- a
+        // self-contained question never wakes the model, however it is phrased.
+        val window = conversation.window()
+        val resolved = if (
+            generator != null &&
+            generator.availability is Availability.Ready &&
+            QueryNormalizer.needsRewrite(question, window.size)
+        ) {
+            val turns = window.map { Turn(it.query, it.cards) }
+            generator.normalize(question, turns).takeIf { it.isNotBlank() } ?: question
+        } else {
+            question
+        }
+
         val retrieved = Pipeline.retrieve(
-            question,
+            resolved,
             library.active,
             gates = GATES,
             embed = { rewritten, contracts -> BUNDLED.embedPerContract(rewritten, contracts) },
