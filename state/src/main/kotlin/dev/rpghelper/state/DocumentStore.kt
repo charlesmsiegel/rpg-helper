@@ -60,6 +60,16 @@ class DocumentStore(
     private val clock: () -> String = { java.time.Instant.now().toString() },
 ) {
 
+    /**
+     * Runs [body] as one database transaction.
+     *
+     * Exposed because whole-file import is an all-or-nothing operation across three tables,
+     * and a caller cannot promise that without the connection that owns it. Reentrant, so a
+     * store method that opens its own transaction inside this one joins rather than
+     * committing early.
+     */
+    fun <T> transaction(body: () -> T): T = db.transaction(body)
+
     fun create(
         title: String,
         campaign: String? = null,

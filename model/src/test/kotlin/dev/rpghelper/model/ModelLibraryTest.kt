@@ -155,6 +155,56 @@ class ModelLibraryTest {
     }
 
     @Test
+    fun `two ids that fold to the same filename stay distinct`() {
+        // `vendor/a` and `vendor?a` both fold to `vendor_a`. Without a digest suffix the
+        // second manifest overwrote the first and shared its artifact directory, so deleting
+        // either model's files deleted the other's.
+        val library = library()
+        library.add(manifestText(id = "vendor/a"))
+        library.add(manifestText(id = "vendor?a"))
+
+        assertEquals(2, library.list().size, "two manifests, two entries")
+        assertEquals(
+            2,
+            library.list().map { library.fileOf(it.manifest, "weights.gguf") }.toSet().size,
+            "and two artifact directories",
+        )
+    }
+
+    @Test
+    fun `cancelling gives back every byte this call fetched, not only the last one`() {
+        // A multi-file manifest cancelled during file two used to leave all of file one on
+        // disk: the cancellation contract says it costs no storage, and gigabytes are
+        // exactly the case where that promise matters.
+        val second = ByteArray(2_048) { (it * 7 % 251).toByte() }
+        val text = """
+            {
+              "id": "two-files", "display_name": "Two", "license": "CC0",
+              "files": [
+                {"name":"a.gguf","url":"https://example.invalid/a","bytes":${weights.size},
+                 "sha256":"${digestOf(weights)}"},
+                {"name":"b.gguf","url":"https://example.invalid/b","bytes":${second.size},
+                 "sha256":"${digestOf(second)}"}
+              ]
+            }
+        """.trimIndent()
+        val cancel = java.util.concurrent.atomic.AtomicBoolean(false)
+        val library = ModelLibrary(root, RangeFetcher { url, from ->
+            val body = if (url.endsWith("/a")) weights else second
+            // Cancel once the first file is done and the second is being asked for.
+            if (url.endsWith("/b")) cancel.set(true)
+            ByteArrayInputStream(body.copyOfRange(from.toInt(), body.size)) to from
+        })
+        val manifest = library.add(text)
+
+        assertEquals(DownloadResult.Cancelled, library.download(manifest, cancel))
+        assertFalse(
+            Files.exists(library.fileOf(manifest, "a.gguf")),
+            "the file finished before the cancel is this call's to remove",
+        )
+    }
+
+    @Test
     fun `a manifest file that no longer parses drops out rather than taking the list down`() {
         val library = library()
         library.add(manifestText())

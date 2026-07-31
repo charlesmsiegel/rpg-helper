@@ -156,6 +156,18 @@ object Rules {
      * constraint leaves a document displaying as validated against a rule that never
      * loaded.
      */
+    /**
+     * Whether any **active** pack declares this ruleset at all.
+     *
+     * Asked separately from whether it produced constraints, because a pack legitimately
+     * carrying zero constraint rows is still a pack that is present. Deriving presence from
+     * rows — parsed *or* dropped — reported such a document as "install or activate the
+     * pack", which sends the user to fix something that is not broken. The pack's own
+     * declaration is the fact; the rows are a consequence of it.
+     */
+    fun supplied(library: Library, rulesetId: String): Boolean =
+        library.packs.any { library.rulesets[it.packUid] == rulesetId }
+
     fun constraintsFor(library: Library, rulesetId: String): ConstraintSet {
         val constraints = mutableListOf<Constraint>()
         val dropped = mutableListOf<DroppedConstraint>()
@@ -220,16 +232,15 @@ object Rules {
 
         val set = constraintsFor(library, rulesetId)
         if (set.constraints.isEmpty()) {
-            // **Two different states, and only one of them is "unchecked".** A ruleset no
-            // active pack supplies has nothing to evaluate. A ruleset whose every row failed
-            // to parse has a pack, right here, reporting its own failure — calling that
+            // **Unchecked is about the pack, not about the rows.** Three situations reach
+            // here and only one of them is "not checked": no active pack declares this
+            // ruleset. A pack whose every row failed to parse, and a pack that legitimately
+            // carries no constraints at all, are both present — and reporting either as
             // "install or activate the pack" sends the user to fix something that is not
-            // broken while the actual fault sits in the dropped list. `unchecked` is
-            // therefore about whether a pack supplies the ruleset at all, which is a
-            // question the dropped rows themselves answer.
+            // broken while the real state sits in the dropped list, or in the book.
             return RuleCheck(
                 emptyList(), emptyList(), set.dropped,
-                unchecked = set.dropped.isEmpty(),
+                unchecked = !supplied(library, rulesetId),
             )
         }
 
@@ -295,10 +306,11 @@ object Rules {
                 campaign = document.campaign,
                 draft = document.draft,
                 validation = when {
-                    // A pack is present iff it produced rows -- parsed or dropped. All
-                    // dropped is *partly validated with nothing loaded*, not "no pack": the
-                    // remedy is the Packs surface's dropped list, not an install.
-                    set.constraints.isEmpty() && set.dropped.isEmpty() -> Validation.UNVALIDATED
+                    // Presence is the pack's declaration, never the row count: a pack may
+                    // declare a ruleset and carry no constraints, and a document bound to it
+                    // has been checked against everything that game states — which is
+                    // nothing, and is not the same as unchecked.
+                    !supplied(library, rulesetId) -> Validation.UNVALIDATED
                     set.dropped.isNotEmpty() -> Validation.PARTLY_VALIDATED
                     else -> Validation.VALIDATED
                 },

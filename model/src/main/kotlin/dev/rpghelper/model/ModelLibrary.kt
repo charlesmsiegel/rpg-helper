@@ -158,11 +158,24 @@ class ModelLibrary(
     /**
      * A manifest chooses its own id, and an id becomes a filename.
      *
-     * `../../state.db` is a legal JSON string. Everything outside the allowed set becomes
-     * `_`, so the id can name a file in this directory and cannot name one anywhere else —
-     * the same reason `ModelManifest` refuses a file name that starts with a dot.
+     * `../../state.db` is a legal JSON string, so everything outside the allowed set becomes
+     * `_` — the id can name a file in this directory and cannot name one anywhere else, the
+     * same reason [ModelManifest] refuses a file name that starts with a dot.
+     *
+     * **And a digest suffix, because the folding is not injective.** `vendor/a` and
+     * `vendor?a` both fold to `vendor_a`: adding the second manifest overwrote the first and
+     * shared its artifact directory, so deleting either model's files deleted the other's.
+     * Eight hex characters of SHA-256 over the *original* id restores the distinction while
+     * keeping the readable part readable.
      */
-    private fun sanitize(id: String): String = id.map {
-        if (it.isLetterOrDigit() || it == '-' || it == '_' || it == '.') it else '_'
-    }.joinToString("").trimStart('.').ifEmpty { "model" }
+    private fun sanitize(id: String): String {
+        val folded = id.map {
+            if (it.isLetterOrDigit() || it == '-' || it == '_' || it == '.') it else '_'
+        }.joinToString("").trimStart('.').take(48).ifEmpty { "model" }
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(id.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
+            .take(8)
+        return "$folded-$digest"
+    }
 }

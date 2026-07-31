@@ -15,6 +15,10 @@ dependencies {
     // The one module allowed to know about all the others: it is the wiring, and every
     // seam it crosses is a seam the app will have to cross too.
     implementation(project(":session"))
+    // The inference runtime. `:cli` is the surface that can afford twelve megabytes of
+    // native libraries, and it is where a model can be exercised against a real corpus
+    // before anything is asked of a phone.
+    implementation(project(":runtime-llamacpp"))
     implementation(project(":pack"))
     implementation(project(":model"))
     implementation(project(":state"))

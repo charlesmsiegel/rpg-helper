@@ -89,10 +89,10 @@ fun ModelsScreen(
                 "No models. The app answers rules questions out of your books without one — " +
                     "setting questions are answered as citations until a model is here. " +
                     "Add a manifest whose digests were computed from the weights it names.\n\n" +
-                    // Said before the download rather than after it, because three
-                    // gigabytes is a lot to fetch to discover it cannot be run yet.
-                    "This build ships no inference runtime: a model downloaded here is " +
-                    "stored and verified, and cannot answer until one is bundled.",
+                    // Said before the download rather than after it, because a few
+                    // gigabytes is a lot to fetch to discover the format is wrong.
+                    "This build runs GGUF weights with llama.cpp, on arm64 devices. The " +
+                    "context window is sized from this device's memory when the model loads.",
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.padding(16.dp),
             )

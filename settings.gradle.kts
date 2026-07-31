@@ -23,6 +23,7 @@ include(":capabilities")
 include(":routing")
 
 include(":session")
+include(":runtime-llamacpp")
 include(":cli")
 
 include(":app")

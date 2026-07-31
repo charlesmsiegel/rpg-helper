@@ -4,6 +4,9 @@ kotlin = "2.2.0"
 # format requires. The platform's SQLite is not an option on the device side either --
 # see docs/pack-schema.md, "SQLite on the device".
 sqlite-jdbc = "3.50.3.0"
+# llama.cpp via JNI. Ships native libraries for Linux x86-64/aarch64, macOS, Windows and
+# Android arm64 -- which is why one runtime module can serve the CLI and, later, the phone.
+llama = "4.2.0"
 # Runtime-only: constraint `args` is JSON, parsed to JsonElement. No compiler plugin.
 kotlinx-serialization = "1.9.0"
 # The Android Gradle Plugin and Compose. Kept to versions that pair with Kotlin 2.2:
@@ -21,6 +24,7 @@ robolectric = "4.14.1"
 
 [libraries]
 sqlite-jdbc = { module = "org.xerial:sqlite-jdbc", version.ref = "sqlite-jdbc" }
+llama = { module = "de.kherud:llama", version.ref = "llama" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinx-serialization" }
 compose-bom = { module = "androidx.compose:compose-bom", version.ref = "compose-bom" }
 compose-material3 = { module = "androidx.compose.material3:material3" }

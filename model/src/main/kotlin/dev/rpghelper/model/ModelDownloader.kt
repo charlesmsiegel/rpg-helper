@@ -88,6 +88,13 @@ class ModelDownloader(
         val total = manifest.totalBytes
         var fetchedBefore = 0L
         val done = mutableMapOf<String, Path>()
+        // Files *this call* finalized, as opposed to ones that were already here. Cancelling
+        // must cost no storage, and for a multi-file manifest that has to include the
+        // gigabytes finished before the cancel: deleting only the partial left a user who
+        // cancelled during file two holding all of file one, with nothing on screen saying
+        // so and no way to find it. What was on disk beforehand is not this call's to
+        // remove -- it was not fetched here, and it may be another attempt's verified work.
+        val finalizedHere = mutableListOf<Path>()
 
         for (file in manifest.files) {
             val target = fileOf(file.name)
@@ -114,6 +121,7 @@ class ModelDownloader(
             if (outcome != null) {
                 if (outcome == CANCELLED) {
                     discard(partial)
+                    finalizedHere.forEach { discard(it) }
                     return DownloadResult.Cancelled
                 }
                 return DownloadResult.Failed(outcome)
@@ -152,6 +160,7 @@ class ModelDownloader(
                 )
             }
             done[file.name] = target
+            finalizedHere.add(target)
             fetchedBefore += file.bytes
             onProgress(DownloadProgress(fetchedBefore, total))
         }
@@ -307,61 +316,77 @@ class ModelDownloader(
 /** How often the cancellation watcher looks at the flag. */
 private const val WATCH_INTERVAL_MS = 100L
 
-/** [RangeFetcher] over `java.net.http`, which speaks HTTP/2 and follows redirects. */
+/**
+ * [RangeFetcher] over `HttpURLConnection` — **the one HTTP client both platforms have**.
+ *
+ * This was `java.net.http.HttpClient`, which is a cleaner API and does not exist on Android.
+ * `ModelLibrary` constructs a fetcher eagerly, `AskViewModel` constructs a `ModelLibrary` on
+ * the first screen, and the result was a `NoClassDefFoundError` during startup — before any
+ * download had been requested, on a code path that has nothing to do with downloading. A
+ * desktop-only class reached the phone the same way `java.sql` once did, and the lesson is
+ * the same: `:model` ships to Android, so its defaults must be things Android has.
+ *
+ * `HttpURLConnection` is old and unlovely and is on every Android release and every JVM.
+ */
 class HttpRangeFetcher(
-    private val client: java.net.http.HttpClient = java.net.http.HttpClient.newBuilder()
-        .followRedirects(java.net.http.HttpClient.Redirect.NORMAL)
-        // A connect with no timeout can hang for as long as the OS lets it, and the user
-        // sees a download that has neither started nor failed and cannot be cancelled
-        // because nothing is reading yet.
-        .connectTimeout(java.time.Duration.ofSeconds(30))
-        .build(),
+    private val connectTimeoutMillis: Int = 30_000,
+    private val readTimeoutMillis: Int = 60_000,
 ) : RangeFetcher {
 
     override fun open(url: String, from: Long): Pair<InputStream, Long> {
-        val builder = java.net.http.HttpRequest.newBuilder(URI.create(url)).GET()
-            // Bounds the wait for *headers* only; the body may take as long as a few
-            // gigabytes take. Without it a server that accepts the connection and then
-            // says nothing blocks `send` with no way out.
-            .timeout(java.time.Duration.ofSeconds(60))
-        if (from > 0) builder.header("Range", "bytes=$from-")
-
-        val response = client.send(
-            builder.build(),
-            java.net.http.HttpResponse.BodyHandlers.ofInputStream(),
-        )
-        return when (response.statusCode()) {
-            // 206 says *a* range was served; `Content-Range` says which one. A
-            // misconfigured server answering 206 with `bytes 0-…` would otherwise be
-            // reported as starting where we asked, so the caller would append a whole
-            // body to the partial file, fail the digest after spending the bandwidth,
-            // and fail the same way on every retry instead of restarting cleanly.
-            // The stream is closed if the header is unusable. Every other failure branch
-            // closes the body; this one threw past it, so retrying against a misconfigured
-            // mirror leaked one response stream per attempt while reporting an ordinary
-            // download failure -- eventually exhausting connections for a reason nothing
-            // on screen would connect to the mirror.
-            206 -> try {
-                response.body() to rangeStart(response)
-            } catch (e: Throwable) {
-                response.body().close()
-                throw e
+        // Redirects are followed manually, because `HttpURLConnection` will not follow one
+        // that crosses http/https -- and a mirror redirecting to a CDN on the other scheme
+        // is ordinary. Bounded, because a redirect loop is otherwise a hang.
+        var target = URI.create(url)
+        repeat(MAX_REDIRECTS) {
+            val connection = (target.toURL().openConnection() as java.net.HttpURLConnection).apply {
+                requestMethod = "GET"
+                instanceFollowRedirects = false
+                connectTimeout = connectTimeoutMillis
+                // Bounds the wait for *bytes*, not for the whole body: a few gigabytes may
+                // take as long as they take, but a server that says nothing must not block
+                // forever with no way out.
+                readTimeout = readTimeoutMillis
+                if (from > 0) setRequestProperty("Range", "bytes=$from-")
             }
-            // 200 to a ranged request means the range was ignored and the body starts at
-            // zero — reported as such rather than assumed.
-            200 -> response.body() to 0L
-            else -> {
-                response.body().close()
-                throw java.io.IOException("HTTP ${response.statusCode()}")
+            when (val status = connection.responseCode) {
+                // 206 says *a* range was served; `Content-Range` says which one. A
+                // misconfigured server answering 206 with `bytes 0-…` would otherwise be
+                // reported as starting where we asked, so the caller would append a whole
+                // body to the partial file, fail the digest after spending the bandwidth,
+                // and fail the same way on every retry instead of restarting cleanly.
+                206 -> return try {
+                    connection.inputStream to rangeStart(connection)
+                } catch (e: Throwable) {
+                    // Every failure branch closes the body; this one threw past it, so a
+                    // misconfigured mirror leaked one stream per attempt.
+                    runCatching { connection.inputStream.close() }
+                    connection.disconnect()
+                    throw e
+                }
+                // 200 to a ranged request means the range was ignored and the body starts
+                // at zero -- reported as such rather than assumed.
+                200 -> return connection.inputStream to 0L
+                in 300..399 -> {
+                    val location = connection.getHeaderField("Location")
+                        ?: throw java.io.IOException("HTTP $status with no Location")
+                    connection.disconnect()
+                    target = target.resolve(location)
+                }
+                else -> {
+                    connection.disconnect()
+                    throw java.io.IOException("HTTP $status")
+                }
             }
         }
+        throw java.io.IOException("too many redirects")
     }
 
     /** First byte of `Content-Range: bytes <start>-<end>/<total>`. */
-    private fun rangeStart(response: java.net.http.HttpResponse<InputStream>): Long {
-        // A 206 with no Content-Range is not something to guess about: assuming it
-        // starts where we asked is the assumption this method exists to remove.
-        val header = response.headers().firstValue("Content-Range").orElse(null)
+    private fun rangeStart(connection: java.net.HttpURLConnection): Long {
+        // A 206 with no Content-Range is not something to guess about: assuming it starts
+        // where we asked is the assumption this method exists to remove.
+        val header = connection.getHeaderField("Content-Range")
             ?: throw java.io.IOException("206 with no Content-Range; cannot place the bytes")
         return CONTENT_RANGE.find(header)?.groupValues?.get(1)?.toLongOrNull()
             ?: throw java.io.IOException("unparseable Content-Range '$header'")
@@ -369,5 +394,6 @@ class HttpRangeFetcher(
 
     private companion object {
         val CONTENT_RANGE = Regex("bytes\\s+(\\d+)-")
+        const val MAX_REDIRECTS = 5
     }
 }

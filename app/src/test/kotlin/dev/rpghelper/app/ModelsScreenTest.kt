@@ -114,6 +114,9 @@ class ModelsScreenTest {
         compose.setContent { ModelsScreen(models = emptyList()) }
         compose.onNodeWithText("answers rules questions out of your books", substring = true)
             .assertExists()
+        // And says which weights it can run, before three gigabytes are fetched rather
+        // than after.
+        compose.onNodeWithText("GGUF", substring = true).assertExists()
     }
 
     @Test

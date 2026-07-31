@@ -53,6 +53,31 @@ class NoDesktopBindingInProductionTest {
     }
 
     @Test
+    fun `nothing that ships reaches a JDK-only HTTP client`() {
+        // The same mistake as JDBC, in a different package. `java.net.http.HttpClient` is a
+        // cleaner API than `HttpURLConnection` and is **not on Android** -- and `ModelLibrary`
+        // constructs a fetcher eagerly, on a path the first screen touches, so a desktop-only
+        // class produced a `NoClassDefFoundError` during startup rather than on a download.
+        //
+        // Invisible for the third time for the same reason: every test runs on a JVM that has
+        // it. `:model` ships to Android, so its defaults have to be things Android has.
+        // Code, not prose: this file's own explanation of *why* the class is banned names
+        // it, and so does the comment on the replacement. A scan that cannot tell a mention
+        // from a use is a scan that punishes writing the reason down.
+        val offenders = mainSources()
+            .filter { "java.net.http" in withoutComments(it.readText()) }
+            .map { it.toString() }
+
+        if (offenders.isNotEmpty()) {
+            fail(
+                "these shipped sources use java.net.http, which Android does not have:\n" +
+                    offenders.joinToString("\n") { "  $it" } +
+                    "\nUse HttpURLConnection, which both platforms ship.",
+            )
+        }
+    }
+
+    @Test
     fun `nothing that ships reaches JDBC at all`() {
         // Not only the pack reader. `StateDb` opened the app's *writable* database through
         // `DriverManager`, so constructing the Ask view model died at startup with "no
@@ -89,6 +114,11 @@ class NoDesktopBindingInProductionTest {
         .lineSequence()
         .filterNot { it.trimStart().let { line -> line.startsWith("//") || line.startsWith("*") || line.startsWith("/*") } }
         .joinToString("\n")
+
+    /** Line and block comments removed, so a mention in prose is not a use in code. */
+    private fun withoutComments(source: String): String = source
+        .replace(Regex("/\\*.*?\\*/", RegexOption.DOT_MATCHES_ALL), " ")
+        .replace(Regex("//[^\\n]*"), " ")
 
     private fun mainSources(): List<Path> {
         // Walk up to the Gradle root: tests run with the module directory as cwd, and the

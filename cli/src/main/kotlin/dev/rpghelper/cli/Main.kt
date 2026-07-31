@@ -11,10 +11,14 @@ import dev.rpghelper.builder.CorpusSpec
 import dev.rpghelper.builder.PackBuilder
 import dev.rpghelper.capabilities.Roller
 import dev.rpghelper.capabilities.SecureDiceSource
+import dev.rpghelper.model.ContextBudget
 import dev.rpghelper.model.DownloadResult
+import dev.rpghelper.model.ModelLibrary
+import dev.rpghelper.model.ModelRuntimes
 import dev.rpghelper.model.ModelDownloader
 import dev.rpghelper.model.ModelManifest
 import dev.rpghelper.pack.Packs
+import dev.rpghelper.runtime.LlamaCppRuntime
 import dev.rpghelper.state.ActivationResult
 import dev.rpghelper.state.AnswerCache
 import dev.rpghelper.state.Conversation
@@ -58,6 +62,7 @@ rpg-helper — build packs, and answer questions out of them.
                                      keep a deliberate deviation from the book
   sheet <dir> export <id> <file.rpgdoc> | import <file.rpgdoc>
                                      a document as a file, which is how it moves
+  models <dir>                       what weights are here, and what can run them
   fetch-model <manifest.json> <dir>  download a model and verify it against its digests
   make-manifest <id> <name> <license> <base-url> <dir>
                                      pin a manifest to weights you already have
@@ -75,6 +80,12 @@ fun main(arguments: Array<String>) {
     System.setOut(java.io.PrintStream(java.io.FileOutputStream(java.io.FileDescriptor.out), true, "UTF-8"))
     System.setErr(java.io.PrintStream(java.io.FileOutputStream(java.io.FileDescriptor.err), true, "UTF-8"))
 
+    // The inference runtime, registered before anything asks for a generator. Registration
+    // is explicit rather than automatic: loading a native library because it happens to be
+    // on the classpath is not a decision to make implicitly, and `--context` is how a user
+    // says what their machine can hold.
+    LlamaCppRuntime.register(requestedContext = System.getenv("RPG_CONTEXT")?.toIntOrNull())
+
     val command = arguments.firstOrNull()
     val rest = arguments.drop(1)
     val status = runCatching {
@@ -89,6 +100,7 @@ fun main(arguments: Array<String>) {
             "deactivate" -> setActive(rest, false)
             "uninstall" -> uninstall(rest)
             "sheet" -> sheet(rest)
+            "models" -> models(rest)
             "fetch-model" -> fetchModel(rest)
             "make-manifest" -> makeManifest(rest)
             "help", "--help", "-h", null -> {
@@ -665,6 +677,44 @@ private fun roll(arguments: List<String>): Int {
         citation?.let { println("    — ${dev.rpghelper.routing.render(it)}") }
         return 0
     }
+}
+
+// ---------------------------------------------------------------------- models
+
+/**
+ * What weights this machine has, and what a runtime would do with them.
+ *
+ * The command that answers "will a model actually be used?" without asking a question and
+ * guessing from the shape of the answer.
+ */
+private fun models(arguments: List<String>): Int {
+    require(arguments.size == 1) { "usage: models <dir>" }
+    val library = ModelLibrary(Path.of(arguments[0]).resolve("models"))
+    val shelved = library.list()
+    if (shelved.isEmpty()) {
+        println("no manifests. Add one with make-manifest, then fetch-model.")
+        return 0
+    }
+    val ram = LlamaCppRuntime.detectRam()
+    for (model in shelved) {
+        val runtime = ModelRuntimes.runtimeFor(model.manifest)
+        val weights = model.manifest.totalBytes
+        val context = ContextBudget.forDevice(ram, weights)
+        println(
+            "${model.manifest.displayName} (${model.manifest.id})  ${model.availability}" +
+                (runtime?.let { "  runtime: ${it.id}" } ?: "  no runtime can load it"),
+        )
+        println("  ${ContextBudget.describe(context, ram)}")
+    }
+    // The generator is constructed here rather than described, because "a runtime says it
+    // supports this" and "the weights load" are different claims and only one of them is
+    // worth printing.
+    val ready = library.readyGenerator()
+    println(
+        if (ready == null) "no model is loadable right now; questions answer from your books alone"
+        else "loaded ${ready.first.displayName}: setting questions will be answered as prose",
+    )
+    return 0
 }
 
 // ---------------------------------------------------------------------- fetch-model

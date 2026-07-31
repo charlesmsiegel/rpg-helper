@@ -9,6 +9,33 @@ repositories {
     mavenCentral()
 }
 
+/**
+ * The Android `libjllama.so`, lifted out of the llama.cpp jar into `jniLibs`.
+ *
+ * AGP does not package native libraries that live at arbitrary paths inside a jar — they
+ * have to be under `lib/<abi>/` in the APK, which is what `jniLibs` produces. Without this
+ * the classes were in the dex, the loader found no library, and the app declined every
+ * model with "no runtime can load it": correct behaviour, and useless.
+ *
+ * The loader's own Android path is `System.loadLibrary` against the APK's `lib` directory,
+ * so a file placed here is exactly what it goes looking for — no extraction to a temp
+ * directory, and no writable-executable-file question to answer.
+ *
+ * arm64 only. Every Android device that can hold a multi-gigabyte model is arm64; shipping
+ * an x86 build for emulators would add five megabytes to every real user's download.
+ */
+val extractLlamaJni by tasks.registering(Copy::class) {
+    val jni = configurations.named("releaseRuntimeClasspath").map { classpath ->
+        classpath.files.single { it.name.startsWith("llama-") && it.extension == "jar" }
+    }
+    from(jni.map { zipTree(it) }) {
+        include("de/kherud/llama/Linux-Android/aarch64/libjllama.so")
+        eachFile { path = "arm64-v8a/libjllama.so" }
+        includeEmptyDirs = false
+    }
+    into(layout.buildDirectory.dir("generated/jniLibs"))
+}
+
 android {
     namespace = "dev.rpghelper.app"
     compileSdk = 34
@@ -35,8 +62,18 @@ android {
         jvmTarget = "17"
     }
 
+    sourceSets["main"].jniLibs.srcDir(layout.buildDirectory.dir("generated/jniLibs"))
+
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        // The llama.cpp artifact carries native libraries for Linux, macOS, Windows and
+        // Android, as ordinary jar resources. Only the Android ones can ever load on a
+        // phone, and the rest are tens of megabytes of a desktop build that would be
+        // downloaded by every user and executed by none.
+        resources.excludes += "de/kherud/llama/Linux/**"
+        resources.excludes += "de/kherud/llama/Linux-Android/**"
+        resources.excludes += "de/kherud/llama/Mac/**"
+        resources.excludes += "de/kherud/llama/Windows/**"
     }
 
     testOptions {
@@ -56,6 +93,12 @@ android {
 androidComponents {
     beforeVariants(selector().withBuildType("release")) { it.enableUnitTest = false }
 }
+
+// The extraction has to happen before the native libraries are merged, on every variant.
+tasks.matching { it.name.startsWith("merge") && it.name.endsWith("JniLibFolders") }
+    .configureEach { dependsOn(extractLlamaJni) }
+tasks.matching { it.name.startsWith("merge") && it.name.endsWith("NativeLibs") }
+    .configureEach { dependsOn(extractLlamaJni) }
 
 configurations.all {
     // `sqlite-jdbc` ships native libraries for three desktop platforms and cannot load on
@@ -84,6 +127,10 @@ dependencies {
     // APK assembled, installed, and answered nothing -- and every test passed, because
     // every test exercises a layer below the one that was missing.
     implementation(project(":session"))
+    // llama.cpp. The artifact carries native libraries for several platforms; only the
+    // Android ones are packaged -- see the exclusions below, which are what keep a desktop
+    // build's worth of `.so` files out of a phone's APK.
+    implementation(project(":runtime-llamacpp"))
 
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)

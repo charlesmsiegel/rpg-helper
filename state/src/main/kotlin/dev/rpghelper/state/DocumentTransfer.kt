@@ -159,7 +159,15 @@ object DocumentTransfer {
      * **A file it cannot read is refused whole**, never imported partially: half a
      * character is worse than none, because the half that is missing is invisible.
      */
-    fun import(documents: DocumentStore, text: String): Imported {
+    fun import(documents: DocumentStore, text: String): Imported =
+        // **One transaction, or none of it.** The document, its trackers and its acceptances
+        // used to be three separate commits, so storage exhausted partway through left a
+        // half-imported character on screen while the import reported failure -- the exact
+        // partial state this whole function refuses to produce. A refusal has to leave
+        // nothing behind, and only the database can promise that.
+        documents.transaction { readInto(documents, text) }
+
+    private fun readInto(documents: DocumentStore, text: String): Imported {
         val root = runCatching { parser.parseToJsonElement(text).jsonObject }
             .getOrElse { throw DocumentTransferException("this is not a .rpgdoc file: ${it.message}") }
 

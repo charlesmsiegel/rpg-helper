@@ -213,8 +213,24 @@ class PacksViewModel(application: Application) : AndroidViewModel(application) {
             "incoming", ".rpgpack",
         )
         return try {
+            // **Bounded while it is written, not after.** `PackLibrary.install` enforces a
+            // ceiling on the copy *it* makes, and that copy happens after this one -- so a
+            // content provider handing back an oversized or endless stream filled the
+            // device's storage before anything had the chance to refuse it. The same limit,
+            // applied at the first place the bytes touch disk.
+            val limit = dev.rpghelper.state.PackLibrary.PackLimits().maxFileBytes
             application.contentResolver.openInputStream(uri)?.use { input ->
-                java.nio.file.Files.newOutputStream(staged).use { output -> input.copyTo(output) }
+                java.nio.file.Files.newOutputStream(staged).use { output ->
+                    val buffer = ByteArray(64 * 1024)
+                    var total = 0L
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read < 0) break
+                        total += read
+                        if (total > limit) error("that file is larger than $limit bytes")
+                        output.write(buffer, 0, read)
+                    }
+                }
             } ?: error("could not read that file")
             store.library.install(staged, confirmReplacing) to staged
         } catch (failure: Throwable) {
@@ -264,9 +280,14 @@ class PacksViewModel(application: Application) : AndroidViewModel(application) {
         return StorageUse(
             packs = sizeOf(root.resolve("library/packs")),
             models = sizeOf(root.resolve("models")),
-            // State minus the packs it indexes: the figure a user can act on by deleting
-            // conversations, not the one they act on by uninstalling a book.
-            appData = sizeOf(root.resolve("library/state.db")),
+            // **The database and its sidecars.** `StateDb` runs in WAL mode, so recent
+            // conversation and answer-cache pages live in `state.db-wal` until a checkpoint
+            // -- and after a few large stored answers that is where most of the bytes are.
+            // Measuring only `state.db` under-reported app data by whatever had not been
+            // checkpointed, which is exactly the figure a user reads when they wonder why
+            // the app is large.
+            appData = listOf("library/state.db", "library/state.db-wal", "library/state.db-shm")
+                .sumOf { sizeOf(root.resolve(it)) },
         )
     }
 

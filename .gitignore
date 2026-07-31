@@ -2,3 +2,7 @@
 build/
 local.properties
 *.rpgpack
+
+# JVM heap dumps. A Gradle daemon that runs out of memory drops a several-hundred-
+# megabyte .hprof in the working directory, and `git add -A` will happily commit it.
+*.hprof
