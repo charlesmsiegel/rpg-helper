@@ -1,0 +1,1375 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ludex RPG — Codebase Atlas</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0d1420; --bg-grid:rgba(120,160,220,0.05); --surface:#141d2e; --surface-2:#1a2538;
+  --border:rgba(150,180,230,0.14); --border-strong:rgba(150,180,230,0.30);
+  --text:#dbe4f3; --text-dim:#8fa1bd; --text-faint:#5f7191;
+  --accent:#5aa7e8; --accent-dim:rgba(90,167,232,0.14);
+  --good:#59c98f; --good-dim:rgba(89,201,143,0.14);
+  --warn:#e0b25a; --warn-dim:rgba(224,178,90,0.14);
+  --bad:#e06a6a; --bad-dim:rgba(224,106,106,0.15);
+  --violet:#a08fd8;
+  --heat-lo:#27405e; --heat-hi:#e0703f;
+  --mono:'IBM Plex Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+  --sans:'IBM Plex Sans',system-ui,-apple-system,sans-serif;
+}
+@media (prefers-color-scheme: light){
+  :root{
+    --bg:#f3f5f9; --bg-grid:rgba(40,70,120,0.055); --surface:#ffffff; --surface-2:#eef1f7;
+    --border:rgba(30,55,95,0.14); --border-strong:rgba(30,55,95,0.30);
+    --text:#1d2838; --text-dim:#51617a; --text-faint:#8593a8;
+    --accent:#1f6fbd; --accent-dim:rgba(31,111,189,0.10);
+    --good:#1f8f5c; --good-dim:rgba(31,143,92,0.10);
+    --warn:#a87418; --warn-dim:rgba(168,116,24,0.12);
+    --bad:#bd3f3f; --bad-dim:rgba(189,63,63,0.10);
+    --violet:#6a55b0;
+    --heat-lo:#c9d8ec; --heat-hi:#cf5a26;
+  }
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{
+  font-family:var(--sans); background:var(--bg); color:var(--text);
+  background-image:linear-gradient(var(--bg-grid) 1px,transparent 1px),linear-gradient(90deg,var(--bg-grid) 1px,transparent 1px);
+  background-size:32px 32px; line-height:1.55; font-size:15px;
+}
+header.doc{padding:34px 28px 0; max-width:1280px; margin:0 auto}
+.doc-label{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);display:flex;align-items:center;gap:8px}
+.doc-label::before{content:"";width:8px;height:8px;background:var(--accent);border-radius:2px;display:inline-block}
+h1.doc-title{font-size:30px;font-weight:700;letter-spacing:-.02em;margin-top:8px}
+.doc-sub{color:var(--text-dim);margin-top:6px;max-width:900px}
+.doc-meta{font-family:var(--mono);font-size:12px;color:var(--text-faint);margin-top:10px}
+nav.tabs{
+  position:sticky;top:0;z-index:50;background:color-mix(in srgb,var(--bg) 88%,transparent);
+  backdrop-filter:blur(8px);border-bottom:1px solid var(--border);
+  margin-top:22px;padding:0 28px;display:flex;gap:2px;overflow-x:auto;
+  max-width:1280px;margin-left:auto;margin-right:auto;scrollbar-width:thin;
+}
+nav.tabs button{
+  appearance:none;background:none;border:none;border-bottom:2px solid transparent;
+  color:var(--text-dim);font-family:var(--mono);font-size:12.5px;letter-spacing:.02em;
+  padding:12px 14px;cursor:pointer;white-space:nowrap;transition:color .15s;
+}
+nav.tabs button:hover{color:var(--text)}
+nav.tabs button[aria-selected="true"]{color:var(--accent);border-bottom-color:var(--accent)}
+nav.tabs button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+main{max-width:1280px;margin:0 auto;padding:26px 28px 80px}
+.panel{display:none;animation:fadeUp .25s ease both}
+.panel.active{display:block}
+@keyframes fadeUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}}
+
+/* ---------- content primitives ---------- */
+.panel h2{font-size:21px;font-weight:600;letter-spacing:-.01em;margin:26px 0 10px}
+.panel h2:first-child{margin-top:0}
+.panel h3{font-size:16px;font-weight:600;margin:22px 0 8px}
+.panel p{margin:8px 0;max-width:940px;color:var(--text)}
+.panel ul,.panel ol{margin:8px 0 8px 22px;max-width:940px}
+.panel li{margin:4px 0}
+.dim{color:var(--text-dim)} .faint{color:var(--text-faint)}
+code,.mono{font-family:var(--mono);font-size:.92em}
+p code,li code,td code{background:var(--surface-2);border:1px solid var(--border);border-radius:4px;padding:1px 5px}
+pre{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px;overflow-x:auto;font-family:var(--mono);font-size:13px;line-height:1.5;margin:10px 0}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:18px 20px;margin:12px 0}
+.card.hero{border-color:var(--border-strong);background:linear-gradient(180deg,var(--accent-dim),var(--surface) 60%)}
+.grid{display:grid;gap:14px;margin:12px 0}
+.grid.cols-2{grid-template-columns:repeat(auto-fit,minmax(340px,1fr))}
+.grid.cols-3{grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
+.grid>*{min-width:0}
+.kpis{display:flex;flex-wrap:wrap;gap:12px;margin:12px 0}
+.kpi{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px 18px;min-width:130px}
+.kpi .n{font-size:26px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.kpi .l{font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--text-dim);margin-top:2px}
+.kpi.warn .n{color:var(--warn)} .kpi.bad .n{color:var(--bad)} .kpi.good .n{color:var(--good)} .kpi.accent .n{color:var(--accent)}
+.badge{display:inline-block;font-family:var(--mono);font-size:11px;padding:2px 8px;border-radius:999px;border:1px solid var(--border);vertical-align:1px;white-space:nowrap}
+.badge.good{color:var(--good);background:var(--good-dim);border-color:transparent}
+.badge.warn{color:var(--warn);background:var(--warn-dim);border-color:transparent}
+.badge.bad{color:var(--bad);background:var(--bad-dim);border-color:transparent}
+.badge.accent{color:var(--accent);background:var(--accent-dim);border-color:transparent}
+.badge.neutral{color:var(--text-dim);background:var(--surface-2);border-color:transparent}
+.callout{border-left:3px solid var(--accent);background:var(--accent-dim);border-radius:0 8px 8px 0;padding:12px 16px;margin:12px 0;max-width:940px}
+.callout.warn{border-color:var(--warn);background:var(--warn-dim)}
+.callout.bad{border-color:var(--bad);background:var(--bad-dim)}
+.callout.good{border-color:var(--good);background:var(--good-dim)}
+details{border:1px solid var(--border);border-radius:8px;margin:10px 0;background:var(--surface)}
+details summary{cursor:pointer;padding:10px 16px;font-weight:500;color:var(--text-dim)}
+details[open] summary{border-bottom:1px solid var(--border);color:var(--text)}
+details .body{padding:12px 16px}
+
+/* tables */
+.tbl-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:10px;margin:12px 0;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:13.5px}
+thead th{
+  position:sticky;top:0;background:var(--surface-2);text-align:left;font-family:var(--mono);
+  font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-dim);
+  padding:9px 14px;border-bottom:1px solid var(--border-strong);white-space:nowrap;
+}
+tbody td{padding:8px 14px;border-bottom:1px solid var(--border);vertical-align:top;overflow-wrap:break-word}
+tbody tr:last-child td{border-bottom:none}
+tbody tr:nth-child(even){background:color-mix(in srgb,var(--surface-2) 45%,transparent)}
+tbody tr:hover{background:var(--accent-dim)}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;font-family:var(--mono);font-size:12.5px}
+table.sortable thead th{cursor:pointer;user-select:none}
+table.sortable thead th::after{content:"↕";opacity:.35;margin-left:6px;font-size:10px}
+table.sortable thead th.asc::after{content:"↑";opacity:1;color:var(--accent)}
+table.sortable thead th.desc::after{content:"↓";opacity:1;color:var(--accent)}
+
+/* CSS bars inside tables */
+.bar{position:relative;background:var(--surface-2);border-radius:4px;height:14px;min-width:120px;overflow:hidden}
+.bar>i{position:absolute;inset:0 auto 0 0;background:var(--accent);border-radius:4px}
+.bar.warn>i{background:var(--warn)} .bar.bad>i{background:var(--bad)} .bar.good>i{background:var(--good)}
+
+/* ---------- viz containers ---------- */
+.viz{position:relative;border:1px solid var(--border);border-radius:10px;background:var(--surface);margin:12px 0;overflow:hidden}
+.viz svg{display:block;width:100%;height:100%}
+.viz .zoombar{position:absolute;top:10px;right:10px;display:flex;gap:6px;z-index:5}
+.viz .zoombar button{width:28px;height:28px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface-2);color:var(--text);font-family:var(--mono);cursor:pointer;font-size:14px;line-height:1}
+.viz .zoombar button:hover{background:var(--accent-dim);color:var(--accent)}
+.viz .legend{position:absolute;left:12px;bottom:10px;display:flex;flex-wrap:wrap;gap:10px;font-family:var(--mono);font-size:11px;color:var(--text-dim);background:color-mix(in srgb,var(--surface) 80%,transparent);padding:4px 8px;border-radius:6px;max-width:70%}
+.legend .sw{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+.viz-tip{position:fixed;pointer-events:none;z-index:200;background:var(--surface-2);border:1px solid var(--border-strong);border-radius:8px;padding:8px 12px;font-family:var(--mono);font-size:12px;color:var(--text);box-shadow:0 6px 24px rgba(0,0,0,.35);display:none;max-width:380px}
+.mermaid-wrap{position:relative;border:1px solid var(--border);border-radius:10px;background:var(--surface);margin:12px 0;overflow:hidden;min-height:120px}
+.mermaid-wrap .mviewport{overflow:hidden;cursor:grab;padding:14px}
+.mermaid-wrap .mviewport.dragging{cursor:grabbing}
+.mermaid{font-family:var(--sans)}
+.mermaid[data-processed="true"]{display:flex;justify-content:center}
+footer.doc{max-width:1280px;margin:0 auto;padding:0 28px 34px;color:var(--text-faint);font-family:var(--mono);font-size:11.5px}
+@media(max-width:720px){header.doc,main,nav.tabs,footer.doc{padding-left:16px;padding-right:16px} h1.doc-title{font-size:24px}}
+</style>
+</head>
+<body>
+<header class="doc">
+  <div class="doc-label">CODEBASE ATLAS</div>
+  <h1 class="doc-title">Ludex RPG — Codebase Atlas</h1>
+  <p class="doc-sub">An offline, on-device tabletop RPG reference whose one guarantee is that a quote and a paraphrase are never confusable</p>
+  <div class="doc-meta">generated 2026-07-31 · analysed at 0c217cb · 165 source files, 36,130 LOC (28,073 Kotlin) · 11 Gradle modules</div>
+</header>
+<nav class="tabs" role="tablist"><button role="tab" data-tab="overview" aria-selected="true" aria-controls="overview">Overview</button>
+<button role="tab" data-tab="inventory" aria-selected="false" aria-controls="inventory">Inventory</button>
+<button role="tab" data-tab="dependencies" aria-selected="false" aria-controls="dependencies">Dependencies</button>
+<button role="tab" data-tab="hotspots" aria-selected="false" aria-controls="hotspots">Hotspots</button>
+<button role="tab" data-tab="flows" aria-selected="false" aria-controls="flows">Critical Flows</button>
+<button role="tab" data-tab="boundaries" aria-selected="false" aria-controls="boundaries">Boundaries &amp; Ownership</button>
+<button role="tab" data-tab="invariants" aria-selected="false" aria-controls="invariants">Invariants &amp; Risks</button>
+<button role="tab" data-tab="glossary" aria-selected="false" aria-controls="glossary">Glossary</button></nav>
+<main><section class="panel active" id="overview" role="tabpanel">
+
+<div class="card hero">
+  <h2>Ludex RPG is a refusal engine with a quoting front end.</h2>
+  <p>An offline Android/JVM assistant for tabletop roleplaying: it answers rules questions by
+  reproducing the book's bytes under a resolved citation, answers setting questions in generated
+  prose whose every claim is chip-cited back to a passage, and tracks characters against
+  constraints the book itself declares. Everything runs on the device; the only socket the app
+  ever opens is the model download.</p>
+  <p>The whole architecture serves one sentence, stated in <code>README.md:9</code> and again in
+  <code>docs/THEORY.md</code>: <strong>a quote and a paraphrase must never be confusable, anywhere
+  in the app.</strong> That is not a policy enforced by review — it is compiled into the data. A
+  pack chunk carries <code>origin</code> (<code>source</code> vs <code>derived</code>) and
+  <code>kind</code>, and <code>Router.route</code> partitions on exactly those two columns
+  (<code>routing/src/main/kotlin/dev/ludex/routing/Router.kt:96-123</code>). Nothing asks a model
+  "is this a rules question?"</p>
+  <p>Architecturally it is a <strong>strictly layered multi-module Gradle build</strong>: eleven
+  Kotlin modules, one root (<code>:pack</code>) that owns the untrusted file format and its gate,
+  and two thin surfaces (<code>:cli</code>, <code>:app</code>) that render the same
+  <code>Answer</code>. The dependency scan found <span class="badge good">zero cycles</span> at
+  both module and file level across 253 import edges.</p>
+</div>
+
+<div class="kpis">
+  <div class="kpi accent"><div class="n">11</div><div class="l">Gradle modules</div></div>
+  <div class="kpi"><div class="n">28k</div><div class="l">lines of Kotlin</div></div>
+  <div class="kpi good"><div class="n">750</div><div class="l">tests, 59 files</div></div>
+  <div class="kpi good"><div class="n">0</div><div class="l">dependency cycles</div></div>
+</div>
+
+<h2>Entry points</h2>
+<div class="tbl-wrap"><table class="sortable">
+<thead><tr><th>Entry point</th><th>File</th><th>What it kicks off</th></tr></thead>
+<tbody>
+<tr><td><code>main(arguments)</code></td><td><code>cli/src/main/kotlin/dev/ludex/cli/Main.kt:76</code></td><td>13 subcommands: <code>build verify ask roll install packs activate deactivate uninstall sheet models fetch-model make-manifest</code>. Forces UTF-8 on stdout first (<code>:80</code>) — byte-exactness dying at the terminal is still byte-exactness dying.</td></tr>
+<tr><td><code>MainActivity.onCreate</code> → <code>RootScreen</code></td><td><code>app/src/main/kotlin/dev/ludex/app/MainActivity.kt:57</code></td><td>Four Compose surfaces behind one enum (Ask, Documents, Packs, Models), each with its own ViewModel over a single process-wide <code>Store</code>.</td></tr>
+<tr><td><code>AskService.ask</code></td><td><code>session/src/main/kotlin/dev/ludex/session/AskService.kt:70</code></td><td><strong>The one place a question becomes cards.</strong> Follow-up rewrite → retrieve → cache → route → record. Both surfaces call it; two copies would be two places for the cache key to drift.</td></tr>
+<tr><td><code>Packs.validate</code></td><td><code>pack/src/main/kotlin/dev/ludex/pack/Packs.kt:42</code></td><td>The activation gate. Preflight bounds first, then the full <code>PackValidator</code>. Every path that opens an untrusted pack goes through it.</td></tr>
+<tr><td><code>Library.open / openActive / openAll</code></td><td><code>session/src/main/kotlin/dev/ludex/session/Library.kt:169,202,215</code></td><td>Three ways to assemble a validated, leased pack set. <code>open</code> stages a copy first; the installed paths trust the install-time gate instead.</td></tr>
+<tr><td><code>PackLibrary.install</code></td><td><code>state/src/main/kotlin/dev/ludex/state/PackLibrary.kt:205</code></td><td>Journalled three-phase install: intent row → staged copy + gate → one-transaction swap.</td></tr>
+<tr><td><code>ModelDownloader</code></td><td><code>model/src/main/kotlin/dev/ludex/model/ModelDownloader.kt:42</code></td><td>The app's <em>only</em> network operation. Resumable, digest-pinned, verifies the assembled whole rather than the fetched tail.</td></tr>
+</tbody></table></div>
+
+<h2>Reading order</h2>
+<p class="dim">Eight stops. The first three give you the theory; the rest are where it is cashed out.</p>
+<div class="tbl-wrap"><table>
+<thead><tr><th class="num">#</th><th>File</th><th>Why this stop</th></tr></thead>
+<tbody>
+<tr><td class="num">1</td><td><code>docs/THEORY.md</code></td><td>What each module <em>models</em>, in one table. Read §1 and the module table; it predicts behaviour the tests don't cover. <span class="badge accent">start here</span></td></tr>
+<tr><td class="num">2</td><td><code>pack/src/main/kotlin/dev/ludex/pack/Packs.kt</code></td><td>134 lines, and the doc comment is the load-bearing part: <em>the gate checks shape, never origin</em> (<code>:11</code>). A hostile pack that satisfies every check activates. Knowing that up front stops you reading "validated" as "trusted".</td></tr>
+<tr><td class="num">3</td><td><code>routing/src/main/kotlin/dev/ludex/routing/Router.kt</code></td><td>The guarantee as code. The <code>when</code> at <code>:96</code> is the whole quote/paraphrase decision. Then <code>generate()</code> at <code>:223</code> for the three ways route 3 declines to produce a card.</td></tr>
+<tr><td class="num">4</td><td><code>session/src/main/kotlin/dev/ludex/session/AskService.kt</code></td><td>174 lines that sequence everything. Note <em>when</em> each side effect happens — cache before routing, feed after the answer.</td></tr>
+<tr><td class="num">5</td><td><code>retrieval/src/main/kotlin/dev/ludex/retrieval/Pipeline.kt</code></td><td>Normalize → alias-rewrite → per-pack lexical + per-contract dense → gate → RRF fuse → nest-dedup → cap. Dense read: the term-budget loop at <code>:156-186</code> is where three separate bugs were fixed by making one budgeted list drive both halves.</td></tr>
+<tr><td class="num">6</td><td><code>state/src/main/kotlin/dev/ludex/state/PackLibrary.kt</code></td><td>The riskiest file in the repo (top hotspot by churn×complexity). Install journalling, supersession acknowledgement, and the lease/uninstall race all live here.</td></tr>
+<tr><td class="num">7</td><td><code>state/src/main/kotlin/dev/ludex/state/StateDb.kt</code></td><td>Short, and it explains the concurrency model for the entire app: one connection, one reentrant lock, depth-counted transactions.</td></tr>
+<tr><td class="num">8</td><td><code>pack/src/testFixtures/kotlin/dev/ludex/pack/PackForge.kt</code></td><td>How every hardening test builds a deliberately-broken pack in-process. <code>relax()</code> exists because the honest attack is a builder that simply never wrote the <code>CHECK</code> constraint.</td></tr>
+</tbody></table></div>
+
+<div class="callout">
+  <b>Skip on a first pass:</b> <code>app/src/main/kotlin/dev/ludex/app/*Screen.kt</code> (Compose
+  layout, ~1.4k lines, no decisions in it), <code>pack/…/Float16.kt</code> and
+  <code>Tokenizer.kt</code> (pinned codecs, exhaustively tested, boring by design), and
+  <code>builder/…/PackBuilder.kt</code> unless you are changing the format — it is the largest
+  file in the repo but it is off-device tooling.
+</div>
+
+<h2>Intended architecture</h2>
+<p class="dim">The mental model. The Dependencies tab has the measured graph; it agrees with this
+one, which is worth saying because it usually doesn't.</p>
+<div class="mermaid-wrap"><div class="mviewport"><pre class="mermaid">
+flowchart TD
+  CLI[":cli — command line"]
+  APP[":app — Android / Compose"]
+  SESSION[":session — assembly"]
+  ROUTING[":routing — which kind of card"]
+  RETRIEVAL[":retrieval — narrowing"]
+  STATE[":state — the shelf"]
+  MODEL[":model — speech, under check"]
+  CAP[":capabilities — dice"]
+  BUILDER[":builder — the compiler"]
+  RT[":runtime-llamacpp — inference"]
+  PACK[":pack — format and gate"]
+
+  CLI --> SESSION
+  CLI --> BUILDER
+  CLI --> RT
+  APP --> SESSION
+  APP --> RT
+  SESSION --> ROUTING
+  SESSION --> RETRIEVAL
+  SESSION --> STATE
+  SESSION --> CAP
+  ROUTING --> MODEL
+  ROUTING --> RETRIEVAL
+  RETRIEVAL --> PACK
+  STATE --> PACK
+  MODEL --> PACK
+  CAP --> PACK
+  BUILDER --> MODEL
+  BUILDER --> PACK
+  RT --> MODEL
+</pre></div></div>
+
+<div class="callout good">
+  <b>Two absences in that graph are deliberate and load-bearing.</b>
+  <code>:retrieval</code> does not depend on <code>:state</code> — the pipeline is a function of an
+  <code>ActiveSet</code> value, so it is testable against packs with no app database in the picture
+  (<code>retrieval/…/Pipeline.kt:104-110</code>). And <code>:builder</code> is not a runtime
+  dependency of <code>:session</code> or <code>:app</code>; it appears only as
+  <code>testImplementation</code> in <code>session/build.gradle.kts:30</code>, so the off-device
+  compiler cannot leak onto the device.
+</div>
+
+<h2>Key decisions and constraints</h2>
+<div class="tbl-wrap"><table>
+<thead><tr><th>Decision</th><th>Where it shows</th><th>Why</th></tr></thead>
+<tbody>
+<tr><td><b>Routing is mechanical, never model-judged</b></td><td><code>routing/…/Router.kt:32-40</code></td><td>Asking a model whether something is a rules question reintroduces at query time the failure the pack format spent its whole design budget eliminating at build time.</td></tr>
+<tr><td><b>Two SQLite bindings, one per direction</b></td><td><code>state/…/StateDb.kt:20-26</code> (androidx bundled, read-write) vs <code>pack/…/Db.kt</code> (read-only interface)</td><td>A pack must be non-writable <em>by construction</em>. Sharing one interface is how that stops being true. The bundled driver is also what makes <code>:app</code> loadable — <code>sqlite-jdbc</code>'s natives cannot load on Android.</td></tr>
+<tr><td><b>Cache has no invalidation logic</b></td><td><code>state/…/AnswerCache.kt:79-93</code></td><td>Everything that could change an answer is in the key, so stale entries become unreachable rather than needing to be found. "The surest way to have no invalidation bugs is to have nothing to invalidate."</td></tr>
+<tr><td><b>No model weights are bundled</b></td><td><code>session/…/Library.kt:30</code> — a 128-dim <code>HashingEmbedder</code> stand-in</td><td>Makes the structural test tier possible: activation, routing, redaction, fusion and capabilities all run end-to-end in milliseconds against fakes, before any weights exist.</td></tr>
+<tr><td><b>Concurrency is one lock per store, not per caller</b></td><td><code>state/…/StateDb.kt:44</code>, <code>state/…/PackLibrary.kt:154</code></td><td>SQLite <code>autoCommit</code> and the current transaction are connection-wide state; two threads sharing a connection are not two independent writers.</td></tr>
+<tr><td><b>Refusal is a correct answer</b></td><td><code>retrieval/…/Pipeline.kt:93-101</code>, <code>routing/…/Router.kt:75-80</code></td><td>The app refuses when <em>gating</em> leaves nothing, never when a fused score is low — RRF scores are functions of rank, so thresholding one measures position rather than relevance.</td></tr>
+<tr><td><b>Requires JDK 21 to build, emits 17 bytecode</b></td><td><code>README.md</code> "Building"; <code>.github/workflows/ci.yml:28-31</code></td><td><code>Float16Test</code> checks the hand-written codec against <code>Float.float16ToFloat</code> (JDK 20+), while the module must stay loadable on Android.</td></tr>
+</tbody></table></div>
+
+<div class="callout warn">
+  <b>How the automated tabs were produced (read before trusting the numbers).</b> The bundled
+  dependency analyzer resolves JVM imports with a regex that requires a trailing semicolon and a
+  single-module <code>src/main/kotlin</code> layout — against this Gradle multi-module Kotlin tree
+  it reported <b>zero</b> import edges. The Dependencies tab here comes from a patched analyzer that
+  (a) makes the semicolon optional, (b) indexes files by package path under any
+  <code>src/*/kotlin</code> root, and (c) resolves top-level declarations to their declaring file.
+  Hotspots was likewise patched to follow renames, because the <code>dev.rpghelper</code> →
+  <code>dev.ludex</code> package rename in <code>0c217cb</code> reset every file's churn to 1.
+  Inventory is unmodified.
+</div>
+
+</section>
+<section class="panel" id="inventory" role="tabpanel">
+
+
+<div class="kpis">
+  <div class="kpi accent"><div class="n">165</div><div class="l">source files</div></div>
+  <div class="kpi"><div class="n">36,130</div><div class="l">lines of code</div></div>
+  <div class="kpi"><div class="n">1</div><div class="l">languages</div></div>
+  <div class="kpi good"><div class="n">39%</div><div class="l">test code share</div></div>
+</div>
+
+<h2>Languages</h2>
+<div class="tbl-wrap"><table class="sortable">
+<thead><tr><th>Language</th><th class="num">LOC</th><th class="num">Files</th><th>Share</th><th class="num">%</th></tr></thead>
+<tbody><tr><td>Kotlin</td><td class='num'>28,073</td><td class='num'>143</td><td><div class="bar "><i style="width:100.0%"></i></div></td><td class='num'>77.7%</td></tr>
+<tr><td>Markdown</td><td class='num'>4,738</td><td class='num'>15</td><td><div class="bar "><i style="width:16.9%"></i></div></td><td class='num'>13.1%</td></tr>
+<tr><td>JSON</td><td class='num'>3,243</td><td class='num'>5</td><td><div class="bar "><i style="width:11.6%"></i></div></td><td class='num'>9.0%</td></tr>
+<tr><td>TOML</td><td class='num'>41</td><td class='num'>1</td><td><div class="bar "><i style="width:1.5%"></i></div></td><td class='num'>0.1%</td></tr>
+<tr><td>YAML</td><td class='num'>35</td><td class='num'>1</td><td><div class="bar "><i style="width:1.5%"></i></div></td><td class='num'>0.1%</td></tr></tbody></table></div>
+
+<h2>Top-level directories</h2>
+<div class="tbl-wrap"><table class="sortable">
+<thead><tr><th>Directory</th><th class="num">LOC</th><th>Share</th></tr></thead>
+<tbody><tr><td><code>pack/</code></td><td class='num'>5,565</td><td><div class="bar "><i style="width:100.0%"></i></div></td></tr>
+<tr><td><code>state/</code></td><td class='num'>4,745</td><td><div class="bar "><i style="width:85.3%"></i></div></td></tr>
+<tr><td><code>docs/</code></td><td class='num'>4,579</td><td><div class="bar "><i style="width:82.3%"></i></div></td></tr>
+<tr><td><code>app/</code></td><td class='num'>3,945</td><td><div class="bar "><i style="width:70.9%"></i></div></td></tr>
+<tr><td><code>model/</code></td><td class='num'>2,992</td><td><div class="bar "><i style="width:53.8%"></i></div></td></tr>
+<tr><td><code>retrieval/</code></td><td class='num'>2,987</td><td><div class="bar "><i style="width:53.7%"></i></div></td></tr>
+<tr><td><code>conformance/</code></td><td class='num'>2,488</td><td><div class="bar "><i style="width:44.7%"></i></div></td></tr>
+<tr><td><code>builder/</code></td><td class='num'>2,358</td><td><div class="bar "><i style="width:42.4%"></i></div></td></tr>
+<tr><td><code>routing/</code></td><td class='num'>1,659</td><td><div class="bar "><i style="width:29.8%"></i></div></td></tr>
+<tr><td><code>session/</code></td><td class='num'>1,635</td><td><div class="bar "><i style="width:29.4%"></i></div></td></tr>
+<tr><td><code>cli/</code></td><td class='num'>1,297</td><td><div class="bar "><i style="width:23.3%"></i></div></td></tr>
+<tr><td><code>corpus/</code></td><td class='num'>715</td><td><div class="bar "><i style="width:12.8%"></i></div></td></tr>
+<tr><td><code>capabilities/</code></td><td class='num'>593</td><td><div class="bar "><i style="width:10.7%"></i></div></td></tr>
+<tr><td><code>runtime-llamacpp/</code></td><td class='num'>297</td><td><div class="bar "><i style="width:5.3%"></i></div></td></tr></tbody></table></div>
+
+<div class="grid cols-2">
+<div>
+<h2>Largest files</h2>
+<div class="tbl-wrap"><table class="sortable">
+<thead><tr><th>File</th><th class="num">LOC</th><th>Size</th><th class="num">Branches</th></tr></thead>
+<tbody><tr><td><code>builder/src/main/kotlin/dev/ludex/builder/PackBuilder.kt</code></td><td class='num'>1,028</td><td><div class="bar "><i style="width:100.0%"></i></div></td><td class='num'>78</td></tr>
+<tr><td><code>cli/src/main/kotlin/dev/ludex/cli/Main.kt</code></td><td class='num'>831</td><td><div class="bar "><i style="width:80.8%"></i></div></td><td class='num'>65</td></tr>
+<tr><td><code>state/src/main/kotlin/dev/ludex/state/PackLibrary.kt</code></td><td class='num'>696</td><td><div class="bar "><i style="width:67.7%"></i></div></td><td class='num'>51</td></tr>
+<tr><td><code>state/src/test/kotlin/dev/ludex/state/PackLibraryTest.kt</code> <span class="badge neutral">test</span></td><td class='num'>664</td><td><div class="bar "><i style="width:64.6%"></i></div></td><td class='num'>14</td></tr>
+<tr><td><code>state/src/main/kotlin/dev/ludex/state/Constraints.kt</code></td><td class='num'>659</td><td><div class="bar "><i style="width:64.1%"></i></div></td><td class='num'>76</td></tr>
+<tr><td><code>routing/src/test/kotlin/dev/ludex/routing/RouterTest.kt</code> <span class="badge neutral">test</span></td><td class='num'>614</td><td><div class="bar "><i style="width:59.7%"></i></div></td><td class='num'>17</td></tr>
+<tr><td><code>app/src/main/kotlin/dev/ludex/app/DocumentsScreen.kt</code></td><td class='num'>513</td><td><div class="bar "><i style="width:49.9%"></i></div></td><td class='num'>28</td></tr>
+<tr><td><code>state/src/test/kotlin/dev/ludex/state/ConstraintEngineTest.kt</code> <span class="badge neutral">test</span></td><td class='num'>500</td><td><div class="bar "><i style="width:48.6%"></i></div></td><td class='num'>17</td></tr>
+<tr><td><code>pack/src/testFixtures/kotlin/dev/ludex/pack/PackForge.kt</code></td><td class='num'>457</td><td><div class="bar "><i style="width:44.5%"></i></div></td><td class='num'>10</td></tr>
+<tr><td><code>pack/src/test/kotlin/dev/ludex/pack/PackValidatorHardeningTest.kt</code> <span class="badge neutral">test</span></td><td class='num'>453</td><td><div class="bar "><i style="width:44.1%"></i></div></td><td class='num'>5</td></tr>
+<tr><td><code>pack/src/main/kotlin/dev/ludex/pack/PackValidator.kt</code></td><td class='num'>427</td><td><div class="bar "><i style="width:41.5%"></i></div></td><td class='num'>30</td></tr>
+<tr><td><code>pack/src/main/kotlin/dev/ludex/pack/ReferenceValidation.kt</code></td><td class='num'>404</td><td><div class="bar "><i style="width:39.3%"></i></div></td><td class='num'>41</td></tr>
+<tr><td><code>builder/src/test/kotlin/dev/ludex/builder/CorpusBuildTest.kt</code> <span class="badge neutral">test</span></td><td class='num'>402</td><td><div class="bar "><i style="width:39.1%"></i></div></td><td class='num'>14</td></tr>
+<tr><td><code>pack/src/main/kotlin/dev/ludex/pack/ChunkValidation.kt</code></td><td class='num'>400</td><td><div class="bar "><i style="width:38.9%"></i></div></td><td class='num'>63</td></tr>
+<tr><td><code>app/src/main/kotlin/dev/ludex/app/Cards.kt</code></td><td class='num'>396</td><td><div class="bar "><i style="width:38.5%"></i></div></td><td class='num'>13</td></tr>
+<tr><td><code>retrieval/src/main/kotlin/dev/ludex/retrieval/Pipeline.kt</code></td><td class='num'>393</td><td><div class="bar "><i style="width:38.2%"></i></div></td><td class='num'>24</td></tr>
+<tr><td><code>routing/src/main/kotlin/dev/ludex/routing/Router.kt</code></td><td class='num'>385</td><td><div class="bar "><i style="width:37.5%"></i></div></td><td class='num'>37</td></tr>
+<tr><td><code>model/src/main/kotlin/dev/ludex/model/ModelDownloader.kt</code></td><td class='num'>369</td><td><div class="bar "><i style="width:35.9%"></i></div></td><td class='num'>34</td></tr>
+<tr><td><code>session/src/main/kotlin/dev/ludex/session/Library.kt</code></td><td class='num'>364</td><td><div class="bar "><i style="width:35.4%"></i></div></td><td class='num'>14</td></tr>
+<tr><td><code>pack/src/test/kotlin/dev/ludex/pack/PackValidatorTest.kt</code> <span class="badge neutral">test</span></td><td class='num'>347</td><td><div class="bar "><i style="width:33.8%"></i></div></td><td class='num'>5</td></tr></tbody></table></div>
+</div>
+<div>
+<h2>Most branch-heavy files</h2>
+<p class="dim">Branch count ≈ decision points (if/for/while/case/catch/&amp;&amp;/||). A rough cyclomatic-complexity proxy.</p>
+<div class="tbl-wrap"><table class="sortable">
+<thead><tr><th>File</th><th class="num">Branches</th><th>Heat</th><th class="num">LOC</th><th class="num">Max depth</th></tr></thead>
+<tbody><tr><td><code>builder/src/main/kotlin/dev/ludex/builder/PackBuilder.kt</code></td><td class='num'>78</td><td><div class="bar warn"><i style="width:100.0%"></i></div></td><td class='num'>1,028</td><td class='num'>12</td></tr>
+<tr><td><code>state/src/main/kotlin/dev/ludex/state/Constraints.kt</code></td><td class='num'>76</td><td><div class="bar warn"><i style="width:97.4%"></i></div></td><td class='num'>659</td><td class='num'>6</td></tr>
+<tr><td><code>cli/src/main/kotlin/dev/ludex/cli/Main.kt</code></td><td class='num'>65</td><td><div class="bar warn"><i style="width:83.3%"></i></div></td><td class='num'>831</td><td class='num'>9</td></tr>
+<tr><td><code>pack/src/main/kotlin/dev/ludex/pack/ChunkValidation.kt</code></td><td class='num'>63</td><td><div class="bar warn"><i style="width:80.8%"></i></div></td><td class='num'>400</td><td class='num'>7</td></tr>
+<tr><td><code>state/src/main/kotlin/dev/ludex/state/PackLibrary.kt</code></td><td class='num'>51</td><td><div class="bar warn"><i style="width:65.4%"></i></div></td><td class='num'>696</td><td class='num'>8</td></tr>
+<tr><td><code>pack/src/main/kotlin/dev/ludex/pack/ReferenceValidation.kt</code></td><td class='num'>41</td><td><div class="bar warn"><i style="width:52.6%"></i></div></td><td class='num'>404</td><td class='num'>6</td></tr>
+<tr><td><code>routing/src/main/kotlin/dev/ludex/routing/Router.kt</code></td><td class='num'>37</td><td><div class="bar warn"><i style="width:47.4%"></i></div></td><td class='num'>385</td><td class='num'>6</td></tr>
+<tr><td><code>model/src/main/kotlin/dev/ludex/model/ModelDownloader.kt</code></td><td class='num'>34</td><td><div class="bar warn"><i style="width:43.6%"></i></div></td><td class='num'>369</td><td class='num'>7</td></tr>
+<tr><td><code>pack/src/main/kotlin/dev/ludex/pack/PackValidator.kt</code></td><td class='num'>30</td><td><div class="bar warn"><i style="width:38.5%"></i></div></td><td class='num'>427</td><td class='num'>6</td></tr>
+<tr><td><code>app/src/main/kotlin/dev/ludex/app/DocumentsScreen.kt</code></td><td class='num'>28</td><td><div class="bar warn"><i style="width:35.9%"></i></div></td><td class='num'>513</td><td class='num'>7</td></tr>
+<tr><td><code>retrieval/src/main/kotlin/dev/ludex/retrieval/Nesting.kt</code></td><td class='num'>28</td><td><div class="bar warn"><i style="width:35.9%"></i></div></td><td class='num'>310</td><td class='num'>5</td></tr>
+<tr><td><code>pack/src/main/kotlin/dev/ludex/pack/DiceExpression.kt</code></td><td class='num'>27</td><td><div class="bar warn"><i style="width:34.6%"></i></div></td><td class='num'>201</td><td class='num'>6</td></tr>
+<tr><td><code>retrieval/src/main/kotlin/dev/ludex/retrieval/Pipeline.kt</code></td><td class='num'>24</td><td><div class="bar warn"><i style="width:30.8%"></i></div></td><td class='num'>393</td><td class='num'>5</td></tr>
+<tr><td><code>state/src/main/kotlin/dev/ludex/state/DocumentStore.kt</code></td><td class='num'>22</td><td><div class="bar warn"><i style="width:28.2%"></i></div></td><td class='num'>234</td><td class='num'>6</td></tr>
+<tr><td><code>model/src/main/kotlin/dev/ludex/model/ClaimSupport.kt</code></td><td class='num'>20</td><td><div class="bar warn"><i style="width:25.6%"></i></div></td><td class='num'>237</td><td class='num'>6</td></tr>
+<tr><td><code>state/src/main/kotlin/dev/ludex/state/DocumentTransfer.kt</code></td><td class='num'>20</td><td><div class="bar warn"><i style="width:25.6%"></i></div></td><td class='num'>319</td><td class='num'>10</td></tr>
+<tr><td><code>routing/src/test/kotlin/dev/ludex/routing/RouterTest.kt</code> <span class="badge neutral">test</span></td><td class='num'>17</td><td><div class="bar warn"><i style="width:21.8%"></i></div></td><td class='num'>614</td><td class='num'>5</td></tr>
+<tr><td><code>state/src/test/kotlin/dev/ludex/state/ConstraintEngineTest.kt</code> <span class="badge neutral">test</span></td><td class='num'>17</td><td><div class="bar warn"><i style="width:21.8%"></i></div></td><td class='num'>500</td><td class='num'>5</td></tr>
+<tr><td><code>pack/src/main/kotlin/dev/ludex/pack/Float16.kt</code></td><td class='num'>16</td><td><div class="bar warn"><i style="width:20.5%"></i></div></td><td class='num'>98</td><td class='num'>4</td></tr>
+<tr><td><code>pack/src/main/kotlin/dev/ludex/pack/VectorValidation.kt</code></td><td class='num'>16</td><td><div class="bar warn"><i style="width:20.5%"></i></div></td><td class='num'>106</td><td class='num'>6</td></tr></tbody></table></div>
+</div>
+</div>
+
+
+</section>
+<section class="panel" id="dependencies" role="tabpanel">
+
+
+<div class="kpis">
+  <div class="kpi accent"><div class="n">11</div><div class="l">modules</div></div>
+  <div class="kpi"><div class="n">253</div><div class="l">file-level imports</div></div>
+  <div class="kpi good"><div class="n">0</div><div class="l">cycles</div></div>
+  <div class="kpi"><div class="n">·</div><div class="l">source root</div></div>
+</div>
+<div class="callout good"><b>No module-level dependency cycles detected.</b> The import graph is a DAG at this grouping level.</div>
+<h2>Module import graph</h2>
+<p class="dim">Node area = lines of code · arrows point from importer to imported · drag nodes, Ctrl/⌘-scroll to zoom, hover to isolate a neighborhood.</p>
+<div class="viz" data-render="forcegraph" style="height:620px"></div>
+<script type="application/json">{"nodes":[{"id":"app","label":"app","group":"modules","size":3945,"fanIn":0,"fanOut":6,"meta":"16 files"},{"id":"builder","label":"builder","group":"modules","size":2358,"fanIn":2,"fanOut":3,"meta":"8 files"},{"id":"capabilities","label":"capabilities","group":"modules","size":593,"fanIn":3,"fanOut":1,"meta":"5 files"},{"id":"cli","label":"cli","group":"modules","size":1297,"fanIn":0,"fanOut":9,"meta":"6 files"},{"id":"model","label":"model","group":"modules","size":2992,"fanIn":6,"fanOut":1,"meta":"18 files"},{"id":"pack","label":"pack","group":"modules","size":5565,"fanIn":10,"fanOut":0,"meta":"35 files"},{"id":"retrieval","label":"retrieval","group":"modules","size":2987,"fanIn":4,"fanOut":1,"meta":"19 files"},{"id":"routing","label":"routing","group":"modules","size":1659,"fanIn":3,"fanOut":3,"meta":"8 files"},{"id":"runtime-llamacpp","label":"runtime-llamacpp","group":"modules","size":297,"fanIn":1,"fanOut":2,"meta":"3 files"},{"id":"session","label":"session","group":"modules","size":1635,"fanIn":2,"fanOut":7,"meta":"7 files"},{"id":"state","label":"state","group":"modules","size":4745,"fanIn":3,"fanOut":1,"meta":"18 files"}],"links":[{"source":"app","target":"state","weight":12,"cycle":false},{"source":"app","target":"pack","weight":7,"cycle":false},{"source":"app","target":"capabilities","weight":5,"cycle":false},{"source":"app","target":"model","weight":13,"cycle":false},{"source":"app","target":"session","weight":10,"cycle":false},{"source":"app","target":"routing","weight":9,"cycle":false},{"source":"builder","target":"pack","weight":12,"cycle":false},{"source":"builder","target":"model","weight":3,"cycle":false},{"source":"builder","target":"retrieval","weight":2,"cycle":false},{"source":"capabilities","target":"pack","weight":7,"cycle":false},{"source":"cli","target":"pack","weight":3,"cycle":false},{"source":"cli","target":"builder","weight":4,"cycle":false},{"source":"cli","target":"capabilities","weight":2,"cycle":false},{"source":"cli","target":"state","weight":5,"cycle":false},{"source":"cli","target":"model","weight":6,"cycle":false},{"source":"cli","target":"session","weight":7,"cycle":false},{"source":"cli","target":"routing","weight":11,"cycle":false},{"source":"cli","target":"retrieval","weight":2,"cycle":false},{"source":"cli","target":"runtime-llamacpp","weight":1,"cycle":false},{"source":"model","target":"pack","weight":11,"cycle":false},{"source":"retrieval","target":"pack","weight":32,"cycle":false},{"source":"routing","target":"pack","weight":10,"cycle":false},{"source":"routing","target":"model","weight":5,"cycle":false},{"source":"routing","target":"retrieval","weight":4,"cycle":false},{"source":"runtime-llamacpp","target":"model","weight":9,"cycle":false},{"source":"runtime-llamacpp","target":"pack","weight":1,"cycle":false},{"source":"session","target":"state","weight":15,"cycle":false},{"source":"session","target":"routing","weight":7,"cycle":false},{"source":"session","target":"retrieval","weight":4,"cycle":false},{"source":"session","target":"model","weight":4,"cycle":false},{"source":"session","target":"pack","weight":9,"cycle":false},{"source":"session","target":"capabilities","weight":2,"cycle":false},{"source":"session","target":"builder","weight":6,"cycle":false},{"source":"state","target":"pack","weight":9,"cycle":false}],"legendExtra":"<span><i class=\"sw\" style=\"background:transparent;border:2px solid var(--bad);box-sizing:border-box\"><\/i>red edges = cycle<\/span>"}</script>
+
+<div class="grid cols-2">
+<div>
+<h2>Highest fan-in (most depended-on)</h2>
+<p class="dim">Changes here ripple widely — review with extra care.</p>
+<div class="tbl-wrap"><table class="sortable">
+<thead><tr><th>File</th><th class="num">Fan-in</th><th></th><th class="num">Fan-out</th></tr></thead>
+<tbody><tr><td><code>pack/src/main/kotlin/dev/ludex/pack/ChunkRef.kt</code></td><td class='num'>35</td><td><div class="bar "><i style="width:100.0%"></i></div></td><td class='num'>0</td></tr>
+<tr><td><code>model/src/main/kotlin/dev/ludex/model/Generator.kt</code></td><td class='num'>11</td><td><div class="bar "><i style="width:31.4%"></i></div></td><td class='num'>1</td></tr>
+<tr><td><code>routing/src/main/kotlin/dev/ludex/routing/Cards.kt</code></td><td class='num'>10</td><td><div class="bar "><i style="width:28.6%"></i></div></td><td class='num'>2</td></tr>
+<tr><td><code>routing/src/main/kotlin/dev/ludex/routing/CardLayout.kt</code></td><td class='num'>9</td><td><div class="bar "><i style="width:25.7%"></i></div></td><td class='num'>1</td></tr>
+<tr><td><code>pack/src/main/kotlin/dev/ludex/pack/JdbcDb.kt</code></td><td class='num'>9</td><td><div class="bar "><i style="width:25.7%"></i></div></td><td class='num'>0</td></tr>
+<tr><td><code>pack/src/testFixtures/kotlin/dev/ludex/pack/PackForge.kt</code></td><td class='num'>9</td><td><div class="bar "><i style="width:25.7%"></i></div></td><td class='num'>0</td></tr>
+<tr><td><code>model/src/main/kotlin/dev/ludex/model/ModelManifest.kt</code></td><td class='num'>8</td><td><div class="bar "><i style="width:22.9%"></i></div></td><td class='num'>0</td></tr>
+<tr><td><code>session/src/main/kotlin/dev/ludex/session/Library.kt</code></td><td class='num'>7</td><td><div class="bar "><i style="width:20.0%"></i></div></td><td class='num'>14</td></tr>
+<tr><td><code>state/src/main/kotlin/dev/ludex/state/PackLibrary.kt</code></td><td class='num'>7</td><td><div class="bar "><i style="width:20.0%"></i></div></td><td class='num'>8</td></tr>
+<tr><td><code>pack/src/main/kotlin/dev/ludex/pack/Packs.kt</code></td><td class='num'>7</td><td><div class="bar "><i style="width:20.0%"></i></div></td><td class='num'>0</td></tr>
+<tr><td><code>retrieval/src/main/kotlin/dev/ludex/retrieval/Pipeline.kt</code></td><td class='num'>7</td><td><div class="bar "><i style="width:20.0%"></i></div></td><td class='num'>2</td></tr>
+<tr><td><code>capabilities/src/main/kotlin/dev/ludex/capabilities/Roller.kt</code></td><td class='num'>6</td><td><div class="bar "><i style="width:17.1%"></i></div></td><td class='num'>1</td></tr>
+<tr><td><code>state/src/main/kotlin/dev/ludex/state/DocumentStore.kt</code></td><td class='num'>6</td><td><div class="bar "><i style="width:17.1%"></i></div></td><td class='num'>0</td></tr>
+<tr><td><code>model/src/main/kotlin/dev/ludex/model/ModelLibrary.kt</code></td><td class='num'>5</td><td><div class="bar "><i style="width:14.3%"></i></div></td><td class='num'>0</td></tr>
+<tr><td><code>state/src/main/kotlin/dev/ludex/state/AnswerCache.kt</code></td><td class='num'>5</td><td><div class="bar "><i style="width:14.3%"></i></div></td><td class='num'>0</td></tr></tbody></table></div>
+</div>
+<div>
+<h2>Highest fan-out (most dependencies)</h2>
+<p class="dim">High fan-out can indicate orchestrators — or god modules doing too much.</p>
+<div class="tbl-wrap"><table class="sortable">
+<thead><tr><th>File</th><th class="num">Fan-out</th><th></th><th class="num">Fan-in</th></tr></thead>
+<tbody><tr><td><code>cli/src/main/kotlin/dev/ludex/cli/Main.kt</code></td><td class='num'>22</td><td><div class="bar warn"><i style="width:100.0%"></i></div></td><td class='num'>0</td></tr>
+<tr><td><code>session/src/main/kotlin/dev/ludex/session/Library.kt</code></td><td class='num'>14</td><td><div class="bar warn"><i style="width:63.6%"></i></div></td><td class='num'>7</td></tr>
+<tr><td><code>app/src/main/kotlin/dev/ludex/app/AskViewModel.kt</code></td><td class='num'>9</td><td><div class="bar warn"><i style="width:40.9%"></i></div></td><td class='num'>0</td></tr>
+<tr><td><code>session/src/main/kotlin/dev/ludex/session/AskService.kt</code></td><td class='num'>9</td><td><div class="bar warn"><i style="width:40.9%"></i></div></td><td class='num'>3</td></tr>
+<tr><td><code>cli/src/test/kotlin/dev/ludex/cli/CliTest.kt</code></td><td class='num'>8</td><td><div class="bar warn"><i style="width:36.4%"></i></div></td><td class='num'>0</td></tr>
+<tr><td><code>state/src/main/kotlin/dev/ludex/state/PackLibrary.kt</code></td><td class='num'>8</td><td><div class="bar warn"><i style="width:36.4%"></i></div></td><td class='num'>7</td></tr>
+<tr><td><code>builder/src/main/kotlin/dev/ludex/builder/PackBuilder.kt</code></td><td class='num'>7</td><td><div class="bar warn"><i style="width:31.8%"></i></div></td><td class='num'>5</td></tr>
+<tr><td><code>session/src/test/kotlin/dev/ludex/session/AskServiceTest.kt</code></td><td class='num'>7</td><td><div class="bar warn"><i style="width:31.8%"></i></div></td><td class='num'>0</td></tr>
+<tr><td><code>app/src/test/kotlin/dev/ludex/app/AnswerCardTest.kt</code></td><td class='num'>6</td><td><div class="bar warn"><i style="width:27.3%"></i></div></td><td class='num'>0</td></tr>
+<tr><td><code>session/src/main/kotlin/dev/ludex/session/Rules.kt</code></td><td class='num'>6</td><td><div class="bar warn"><i style="width:27.3%"></i></div></td><td class='num'>4</td></tr>
+<tr><td><code>app/src/main/kotlin/dev/ludex/app/Cards.kt</code></td><td class='num'>5</td><td><div class="bar warn"><i style="width:22.7%"></i></div></td><td class='num'>0</td></tr>
+<tr><td><code>app/src/main/kotlin/dev/ludex/app/DocumentsViewModel.kt</code></td><td class='num'>5</td><td><div class="bar warn"><i style="width:22.7%"></i></div></td><td class='num'>0</td></tr>
+<tr><td><code>app/src/test/kotlin/dev/ludex/app/SheetScreenTest.kt</code></td><td class='num'>5</td><td><div class="bar warn"><i style="width:22.7%"></i></div></td><td class='num'>0</td></tr>
+<tr><td><code>routing/src/main/kotlin/dev/ludex/routing/Router.kt</code></td><td class='num'>5</td><td><div class="bar warn"><i style="width:22.7%"></i></div></td><td class='num'>3</td></tr>
+<tr><td><code>runtime-llamacpp/src/main/kotlin/dev/ludex/runtime/LlamaCppRuntime.kt</code></td><td class='num'>5</td><td><div class="bar warn"><i style="width:22.7%"></i></div></td><td class='num'>1</td></tr></tbody></table></div>
+</div>
+</div>
+
+
+</section>
+<section class="panel" id="hotspots" role="tabpanel">
+
+
+<div class="kpis">
+  <div class="kpi accent"><div class="n">66</div><div class="l">commits (24 months ago)</div></div>
+  <div class="kpi"><div class="n">143</div><div class="l">files touched</div></div>
+  <div class="kpi warn"><div class="n">PackBuilder.kt</div><div class="l">top hotspot</div></div>
+</div>
+<div class="callout"><b>How to read this:</b> files that are both <i>complex</i> and <i>frequently changed</i> are where defects concentrate — complexity makes mistakes likely, churn gives them opportunities. Prioritize refactoring and review attention here, not on complex-but-stable code.</div>
+
+<h2>Churn × size map</h2>
+<p class="dim">Area = lines of code · color = commit count since 24 months ago · hover for details.</p>
+<div class="viz" data-render="treemap" style="height:540px"></div>
+<script type="application/json">{"items":[{"name":"builder/src/main/kotlin/dev/ludex/builder/PackBuilder.kt","value":1028,"metric":13,"meta":"78 branches \u00b7 1 authors"},{"name":"cli/src/main/kotlin/dev/ludex/cli/Main.kt","value":831,"metric":15,"meta":"65 branches \u00b7 1 authors"},{"name":"state/src/main/kotlin/dev/ludex/state/Constraints.kt","value":659,"metric":10,"meta":"76 branches \u00b7 1 authors"},{"name":"state/src/main/kotlin/dev/ludex/state/PackLibrary.kt","value":696,"metric":14,"meta":"51 branches \u00b7 1 authors"},{"name":"routing/src/main/kotlin/dev/ludex/routing/Router.kt","value":385,"metric":11,"meta":"37 branches \u00b7 1 authors"},{"name":"model/src/main/kotlin/dev/ludex/model/ModelDownloader.kt","value":369,"metric":11,"meta":"34 branches \u00b7 1 authors"},{"name":"retrieval/src/main/kotlin/dev/ludex/retrieval/Pipeline.kt","value":393,"metric":13,"meta":"24 branches \u00b7 1 authors"},{"name":"pack/src/main/kotlin/dev/ludex/pack/PackValidator.kt","value":427,"metric":9,"meta":"30 branches \u00b7 1 authors"},{"name":"pack/src/main/kotlin/dev/ludex/pack/ReferenceValidation.kt","value":404,"metric":5,"meta":"41 branches \u00b7 1 authors"},{"name":"retrieval/src/main/kotlin/dev/ludex/retrieval/Nesting.kt","value":310,"metric":7,"meta":"28 branches \u00b7 1 authors"},{"name":"pack/src/main/kotlin/dev/ludex/pack/ChunkValidation.kt","value":400,"metric":3,"meta":"63 branches \u00b7 1 authors"},{"name":"session/src/main/kotlin/dev/ludex/session/Library.kt","value":364,"metric":11,"meta":"14 branches \u00b7 1 authors"},{"name":"app/src/main/kotlin/dev/ludex/app/Cards.kt","value":396,"metric":11,"meta":"13 branches \u00b7 1 authors"},{"name":"model/src/main/kotlin/dev/ludex/model/ClaimSupport.kt","value":237,"metric":7,"meta":"20 branches \u00b7 1 authors"},{"name":"app/src/main/kotlin/dev/ludex/app/AskViewModel.kt","value":325,"metric":10,"meta":"12 branches \u00b7 1 authors"},{"name":"app/src/main/kotlin/dev/ludex/app/DocumentsScreen.kt","value":513,"metric":4,"meta":"28 branches \u00b7 1 authors"},{"name":"state/src/main/kotlin/dev/ludex/state/DocumentStore.kt","value":234,"metric":5,"meta":"22 branches \u00b7 1 authors"},{"name":"pack/src/main/kotlin/dev/ludex/pack/DiceExpression.kt","value":201,"metric":4,"meta":"27 branches \u00b7 1 authors"},{"name":"retrieval/src/main/kotlin/dev/ludex/retrieval/DenseSearch.kt","value":115,"metric":5,"meta":"16 branches \u00b7 1 authors"},{"name":"state/src/main/kotlin/dev/ludex/state/DocumentTransfer.kt","value":319,"metric":4,"meta":"20 branches \u00b7 1 authors"},{"name":"app/src/main/kotlin/dev/ludex/app/PacksViewModel.kt","value":329,"metric":5,"meta":"15 branches \u00b7 1 authors"},{"name":"retrieval/src/main/kotlin/dev/ludex/retrieval/Supersession.kt","value":154,"metric":5,"meta":"15 branches \u00b7 1 authors"},{"name":"app/src/main/kotlin/dev/ludex/app/MainActivity.kt","value":299,"metric":13,"meta":"5 branches \u00b7 1 authors"},{"name":"retrieval/src/main/kotlin/dev/ludex/retrieval/AliasRewriter.kt","value":127,"metric":7,"meta":"10 branches \u00b7 1 authors"},{"name":"pack/src/main/kotlin/dev/ludex/pack/VectorValidation.kt","value":106,"metric":4,"meta":"16 branches \u00b7 1 authors"},{"name":"session/src/main/kotlin/dev/ludex/session/Rules.kt","value":333,"metric":5,"meta":"12 branches \u00b7 1 authors"},{"name":"model/src/main/kotlin/dev/ludex/model/Attributions.kt","value":150,"metric":4,"meta":"15 branches \u00b7 1 authors"},{"name":"app/src/main/kotlin/dev/ludex/app/PacksScreen.kt","value":301,"metric":4,"meta":"14 branches \u00b7 1 authors"},{"name":"capabilities/src/main/kotlin/dev/ludex/capabilities/Capabilities.kt","value":177,"metric":6,"meta":"9 branches \u00b7 1 authors"},{"name":"pack/src/main/kotlin/dev/ludex/pack/Tokenizer.kt","value":108,"metric":6,"meta":"9 branches \u00b7 1 authors"},{"name":"pack/src/main/kotlin/dev/ludex/pack/Preflight.kt","value":161,"metric":4,"meta":"13 branches \u00b7 1 authors"},{"name":"retrieval/src/main/kotlin/dev/ludex/retrieval/InformationGate.kt","value":190,"metric":7,"meta":"7 branches \u00b7 1 authors"},{"name":"pack/src/main/kotlin/dev/ludex/pack/Packs.kt","value":126,"metric":9,"meta":"5 branches \u00b7 1 authors"},{"name":"pack/src/main/kotlin/dev/ludex/pack/ChunkRow.kt","value":136,"metric":4,"meta":"12 branches \u00b7 1 authors"},{"name":"pack/src/main/kotlin/dev/ludex/pack/Float16.kt","value":98,"metric":3,"meta":"16 branches \u00b7 1 authors"},{"name":"builder/src/main/kotlin/dev/ludex/builder/QuerySet.kt","value":139,"metric":4,"meta":"11 branches \u00b7 1 authors"},{"name":"model/src/main/kotlin/dev/ludex/model/ModelLibrary.kt","value":163,"metric":4,"meta":"11 branches \u00b7 1 authors"},{"name":"state/src/main/kotlin/dev/ludex/state/StateDb.kt","value":210,"metric":3,"meta":"15 branches \u00b7 1 authors"},{"name":"pack/src/main/kotlin/dev/ludex/pack/Db.kt","value":88,"metric":5,"meta":"7 branches \u00b7 1 authors"},{"name":"app/src/main/kotlin/dev/ludex/app/ModelsScreen.kt","value":195,"metric":4,"meta":"8 branches \u00b7 1 authors"},{"name":"session/src/main/kotlin/dev/ludex/session/AskService.kt","value":163,"metric":3,"meta":"11 branches \u00b7 1 authors"},{"name":"routing/src/main/kotlin/dev/ludex/routing/Cards.kt","value":168,"metric":5,"meta":"6 branches \u00b7 1 authors"},{"name":"pack/src/testFixtures/kotlin/dev/ludex/pack/PackForge.kt","value":457,"metric":3,"meta":"10 branches \u00b7 1 authors"},{"name":"pack/src/main/kotlin/dev/ludex/pack/JdbcDb.kt","value":100,"metric":5,"meta":"5 branches \u00b7 1 authors"},{"name":"pack/src/main/kotlin/dev/ludex/pack/Utf8.kt","value":80,"metric":3,"meta":"9 branches \u00b7 1 authors"},{"name":"model/src/main/kotlin/dev/ludex/model/HashingEmbedder.kt","value":117,"metric":2,"meta":"13 branches \u00b7 1 authors"},{"name":"retrieval/src/main/kotlin/dev/ludex/retrieval/QueryNormalizer.kt","value":82,"metric":3,"meta":"8 branches \u00b7 1 authors"},{"name":"model/src/main/kotlin/dev/ludex/model/Prompted.kt","value":233,"metric":2,"meta":"12 branches \u00b7 1 authors"},{"name":"cli/src/main/kotlin/dev/ludex/cli/Render.kt","value":50,"metric":5,"meta":"4 branches \u00b7 1 authors"},{"name":"app/src/main/kotlin/dev/ludex/app/DocumentsViewModel.kt","value":309,"metric":4,"meta":"5 branches \u00b7 1 authors"},{"name":"model/src/main/kotlin/dev/ludex/model/ContextBudget.kt","value":119,"metric":2,"meta":"11 branches \u00b7 1 authors"},{"name":"routing/src/main/kotlin/dev/ludex/routing/PlainText.kt","value":65,"metric":4,"meta":"5 branches \u00b7 1 authors"},{"name":"state/src/main/kotlin/dev/ludex/state/ModelRegistry.kt","value":141,"metric":2,"meta":"10 branches \u00b7 1 authors"},{"name":"retrieval/src/main/kotlin/dev/ludex/retrieval/Fusion.kt","value":165,"metric":3,"meta":"6 branches \u00b7 1 authors"},{"name":"pack/src/main/kotlin/dev/ludex/pack/BundledDb.kt","value":104,"metric":3,"meta":"5 branches \u00b7 1 authors"},{"name":"state/src/main/kotlin/dev/ludex/state/AnswerCache.kt","value":171,"metric":3,"meta":"5 branches \u00b7 1 authors"},{"name":"model/src/main/kotlin/dev/ludex/model/Generator.kt","value":89,"metric":4,"meta":"3 branches \u00b7 1 authors"},{"name":"routing/src/main/kotlin/dev/ludex/routing/CardLayout.kt","value":105,"metric":2,"meta":"7 branches \u00b7 1 authors"},{"name":"runtime-llamacpp/src/main/kotlin/dev/ludex/runtime/LlamaCppRuntime.kt","value":134,"metric":2,"meta":"7 branches \u00b7 1 authors"},{"name":"model/src/main/kotlin/dev/ludex/model/ModelManifest.kt","value":98,"metric":3,"meta":"4 branches \u00b7 1 authors"},{"name":"session/src/main/kotlin/dev/ludex/session/Shelf.kt","value":165,"metric":3,"meta":"4 branches \u00b7 1 authors"},{"name":"builder/src/main/kotlin/dev/ludex/builder/Anchors.kt","value":67,"metric":2,"meta":"6 branches \u00b7 1 authors"},{"name":"app/src/main/kotlin/dev/ludex/app/ModelsViewModel.kt","value":139,"metric":3,"meta":"3 branches \u00b7 1 authors"},{"name":"app/src/main/kotlin/dev/ludex/app/Voice.kt","value":126,"metric":2,"meta":"5 branches \u00b7 1 authors"},{"name":"builder/src/main/kotlin/dev/ludex/builder/CorpusSpec.kt","value":164,"metric":4,"meta":"2 branches \u00b7 1 authors"},{"name":"pack/src/main/kotlin/dev/ludex/pack/Violation.kt","value":222,"metric":6,"meta":"1 branches \u00b7 1 authors"},{"name":"app/src/main/kotlin/dev/ludex/app/Storage.kt","value":63,"metric":3,"meta":"2 branches \u00b7 1 authors"},{"name":"capabilities/src/main/kotlin/dev/ludex/capabilities/Dice.kt","value":50,"metric":2,"meta":"2 branches \u00b7 1 authors"},{"name":"capabilities/src/main/kotlin/dev/ludex/capabilities/Roller.kt","value":67,"metric":2,"meta":"2 branches \u00b7 1 authors"},{"name":"model/src/main/kotlin/dev/ludex/model/ModelRuntime.kt","value":76,"metric":2,"meta":"2 branches \u00b7 1 authors"},{"name":"pack/src/main/kotlin/dev/ludex/pack/FileDigest.kt","value":30,"metric":2,"meta":"2 branches \u00b7 1 authors"},{"name":"pack/src/main/kotlin/dev/ludex/pack/ProbeVector.kt","value":63,"metric":3,"meta":"1 branches \u00b7 1 authors"},{"name":"retrieval/src/main/kotlin/dev/ludex/retrieval/LexicalQuery.kt","value":47,"metric":2,"meta":"2 branches \u00b7 1 authors"},{"name":"routing/src/main/kotlin/dev/ludex/routing/PackResolvers.kt","value":87,"metric":2,"meta":"2 branches \u00b7 1 authors"},{"name":"model/src/main/kotlin/dev/ludex/model/Embedder.kt","value":54,"metric":2,"meta":"1 branches \u00b7 1 authors"},{"name":"pack/src/main/kotlin/dev/ludex/pack/PackSchema.kt","value":241,"metric":4,"meta":"0 branches \u00b7 1 authors"},{"name":"retrieval/src/main/kotlin/dev/ludex/retrieval/LexicalSearch.kt","value":60,"metric":4,"meta":"0 branches \u00b7 1 authors"},{"name":"pack/src/main/kotlin/dev/ludex/pack/BuildReport.kt","value":60,"metric":3,"meta":"0 branches \u00b7 1 authors"},{"name":"pack/src/main/kotlin/dev/ludex/pack/EmbedderContract.kt","value":19,"metric":3,"meta":"0 branches \u00b7 1 authors"},{"name":"state/src/main/kotlin/dev/ludex/state/StateSchema.kt","value":104,"metric":3,"meta":"0 branches \u00b7 1 authors"}],"valueLabel":"LOC","metricLabel":"commits","metricMax":15}</script>
+
+<h2>Hotspot ranking</h2>
+<p class="dim">Score = commits × (branch points + 1). Tests excluded.</p>
+<div class="tbl-wrap"><table class="sortable">
+<thead><tr><th>File</th><th class="num">Commits</th><th class="num">Branches</th><th class="num">LOC</th><th class="num">Authors</th><th class="num">Hotspot score</th></tr></thead>
+<tbody><tr><td><code>builder/src/main/kotlin/dev/ludex/builder/PackBuilder.kt</code></td><td class='num'>13</td><td class='num'>78</td><td class='num'>1,028</td><td class='num'>1</td><td class='num' data-sort='1027'><div class="bar bad"><i style="width:100.0%"></i></div></td></tr>
+<tr><td><code>cli/src/main/kotlin/dev/ludex/cli/Main.kt</code></td><td class='num'>15</td><td class='num'>65</td><td class='num'>831</td><td class='num'>1</td><td class='num' data-sort='990'><div class="bar bad"><i style="width:96.4%"></i></div></td></tr>
+<tr><td><code>state/src/main/kotlin/dev/ludex/state/Constraints.kt</code></td><td class='num'>10</td><td class='num'>76</td><td class='num'>659</td><td class='num'>1</td><td class='num' data-sort='770'><div class="bar bad"><i style="width:75.0%"></i></div></td></tr>
+<tr><td><code>state/src/main/kotlin/dev/ludex/state/PackLibrary.kt</code></td><td class='num'>14</td><td class='num'>51</td><td class='num'>696</td><td class='num'>1</td><td class='num' data-sort='728'><div class="bar bad"><i style="width:70.9%"></i></div></td></tr>
+<tr><td><code>routing/src/main/kotlin/dev/ludex/routing/Router.kt</code></td><td class='num'>11</td><td class='num'>37</td><td class='num'>385</td><td class='num'>1</td><td class='num' data-sort='418'><div class="bar bad"><i style="width:40.7%"></i></div></td></tr>
+<tr><td><code>model/src/main/kotlin/dev/ludex/model/ModelDownloader.kt</code></td><td class='num'>11</td><td class='num'>34</td><td class='num'>369</td><td class='num'>1</td><td class='num' data-sort='385'><div class="bar bad"><i style="width:37.5%"></i></div></td></tr>
+<tr><td><code>retrieval/src/main/kotlin/dev/ludex/retrieval/Pipeline.kt</code></td><td class='num'>13</td><td class='num'>24</td><td class='num'>393</td><td class='num'>1</td><td class='num' data-sort='325'><div class="bar bad"><i style="width:31.6%"></i></div></td></tr>
+<tr><td><code>pack/src/main/kotlin/dev/ludex/pack/PackValidator.kt</code></td><td class='num'>9</td><td class='num'>30</td><td class='num'>427</td><td class='num'>1</td><td class='num' data-sort='279'><div class="bar bad"><i style="width:27.2%"></i></div></td></tr>
+<tr><td><code>pack/src/main/kotlin/dev/ludex/pack/ReferenceValidation.kt</code></td><td class='num'>5</td><td class='num'>41</td><td class='num'>404</td><td class='num'>1</td><td class='num' data-sort='210'><div class="bar bad"><i style="width:20.4%"></i></div></td></tr>
+<tr><td><code>retrieval/src/main/kotlin/dev/ludex/retrieval/Nesting.kt</code></td><td class='num'>7</td><td class='num'>28</td><td class='num'>310</td><td class='num'>1</td><td class='num' data-sort='203'><div class="bar bad"><i style="width:19.8%"></i></div></td></tr>
+<tr><td><code>pack/src/main/kotlin/dev/ludex/pack/ChunkValidation.kt</code></td><td class='num'>3</td><td class='num'>63</td><td class='num'>400</td><td class='num'>1</td><td class='num' data-sort='192'><div class="bar bad"><i style="width:18.7%"></i></div></td></tr>
+<tr><td><code>session/src/main/kotlin/dev/ludex/session/Library.kt</code></td><td class='num'>11</td><td class='num'>14</td><td class='num'>364</td><td class='num'>1</td><td class='num' data-sort='165'><div class="bar bad"><i style="width:16.1%"></i></div></td></tr>
+<tr><td><code>app/src/main/kotlin/dev/ludex/app/Cards.kt</code></td><td class='num'>11</td><td class='num'>13</td><td class='num'>396</td><td class='num'>1</td><td class='num' data-sort='154'><div class="bar bad"><i style="width:15.0%"></i></div></td></tr>
+<tr><td><code>model/src/main/kotlin/dev/ludex/model/ClaimSupport.kt</code></td><td class='num'>7</td><td class='num'>20</td><td class='num'>237</td><td class='num'>1</td><td class='num' data-sort='147'><div class="bar bad"><i style="width:14.3%"></i></div></td></tr>
+<tr><td><code>app/src/main/kotlin/dev/ludex/app/AskViewModel.kt</code></td><td class='num'>10</td><td class='num'>12</td><td class='num'>325</td><td class='num'>1</td><td class='num' data-sort='130'><div class="bar bad"><i style="width:12.7%"></i></div></td></tr>
+<tr><td><code>app/src/main/kotlin/dev/ludex/app/DocumentsScreen.kt</code></td><td class='num'>4</td><td class='num'>28</td><td class='num'>513</td><td class='num'>1</td><td class='num' data-sort='116'><div class="bar bad"><i style="width:11.3%"></i></div></td></tr>
+<tr><td><code>state/src/main/kotlin/dev/ludex/state/DocumentStore.kt</code></td><td class='num'>5</td><td class='num'>22</td><td class='num'>234</td><td class='num'>1</td><td class='num' data-sort='115'><div class="bar bad"><i style="width:11.2%"></i></div></td></tr>
+<tr><td><code>pack/src/main/kotlin/dev/ludex/pack/DiceExpression.kt</code></td><td class='num'>4</td><td class='num'>27</td><td class='num'>201</td><td class='num'>1</td><td class='num' data-sort='112'><div class="bar bad"><i style="width:10.9%"></i></div></td></tr>
+<tr><td><code>retrieval/src/main/kotlin/dev/ludex/retrieval/DenseSearch.kt</code></td><td class='num'>5</td><td class='num'>16</td><td class='num'>115</td><td class='num'>1</td><td class='num' data-sort='85'><div class="bar bad"><i style="width:8.3%"></i></div></td></tr>
+<tr><td><code>state/src/main/kotlin/dev/ludex/state/DocumentTransfer.kt</code></td><td class='num'>4</td><td class='num'>20</td><td class='num'>319</td><td class='num'>1</td><td class='num' data-sort='84'><div class="bar bad"><i style="width:8.2%"></i></div></td></tr>
+<tr><td><code>app/src/main/kotlin/dev/ludex/app/PacksViewModel.kt</code></td><td class='num'>5</td><td class='num'>15</td><td class='num'>329</td><td class='num'>1</td><td class='num' data-sort='80'><div class="bar bad"><i style="width:7.8%"></i></div></td></tr>
+<tr><td><code>retrieval/src/main/kotlin/dev/ludex/retrieval/Supersession.kt</code></td><td class='num'>5</td><td class='num'>15</td><td class='num'>154</td><td class='num'>1</td><td class='num' data-sort='80'><div class="bar bad"><i style="width:7.8%"></i></div></td></tr>
+<tr><td><code>app/src/main/kotlin/dev/ludex/app/MainActivity.kt</code></td><td class='num'>13</td><td class='num'>5</td><td class='num'>299</td><td class='num'>1</td><td class='num' data-sort='78'><div class="bar bad"><i style="width:7.6%"></i></div></td></tr>
+<tr><td><code>retrieval/src/main/kotlin/dev/ludex/retrieval/AliasRewriter.kt</code></td><td class='num'>7</td><td class='num'>10</td><td class='num'>127</td><td class='num'>1</td><td class='num' data-sort='77'><div class="bar bad"><i style="width:7.5%"></i></div></td></tr>
+<tr><td><code>pack/src/main/kotlin/dev/ludex/pack/VectorValidation.kt</code></td><td class='num'>4</td><td class='num'>16</td><td class='num'>106</td><td class='num'>1</td><td class='num' data-sort='68'><div class="bar bad"><i style="width:6.6%"></i></div></td></tr></tbody></table></div>
+
+
+
+</section>
+<section class="panel" id="flows" role="tabpanel">
+
+<div class="card">
+  <p>Three flows carry essentially all of this system's correctness risk: <b>asking a question</b>
+  (where the quote/paraphrase guarantee is either kept or broken), <b>installing and activating a
+  pack</b> (where a crash can leave the shelf lying about what is on it), and <b>borrowing a pack
+  file while someone uninstalls it</b> (where an answer can cite a book that no longer exists). The
+  fourth — the model download — is the only place bytes enter from the network, and is summarised at
+  the bottom.</p>
+</div>
+
+<h2>Flow 1 — a question becomes cards</h2>
+<div class="mermaid-wrap"><div class="mviewport"><pre class="mermaid">
+sequenceDiagram
+  participant S as Surface (cli / AskViewModel)
+  participant A as AskService
+  participant C as Conversation
+  participant P as Pipeline
+  participant K as AnswerCache
+  participant R as Router
+  participant G as Generator
+  S->>A: ask(question, library, generator, modelId)
+  A->>C: window()
+  opt model Ready AND window non-empty AND question reads dependent
+    A->>G: normalize(question, turns)
+    G-->>A: resolved query (blank falls back to original)
+  end
+  A->>P: retrieve(resolved, activeSet, gates, embed)
+  P-->>A: Retrieved(candidates, gatedOut)
+  opt any candidate is kind=setting AND origin=source
+    A->>K: get(CacheKey)
+    alt hit
+      K-->>A: stored render
+      A->>C: record(question, render)
+      A-->>S: Asked(fromCache = true, answer = null)
+    end
+  end
+  A->>R: route(retrieved, generator, activePacks)
+  R->>R: partition on (origin, kind) into quote / derived / setting
+  opt setting chunks present and model Ready
+    R->>G: residualIntent(query, covered)
+    alt residual blank or model throws
+      R-->>R: no generated card, diagnostics only
+    else
+      R->>G: answer(residual, redactedContext)
+      R->>R: Attributions.validate(answer, context)
+    end
+  end
+  R-->>A: Answer(cards, diagnostics)
+  opt a Card.Generated actually came out
+    A->>K: put(key, rendered)
+  end
+  A->>C: record(question, rendered)
+  A-->>S: Asked(fromCache = false, answer)
+</pre></div></div>
+
+<h3>Seams this flow exposes</h3>
+<div class="tbl-wrap"><table>
+<thead><tr><th>Seam</th><th>Where</th><th>What it costs if it moves</th></tr></thead>
+<tbody>
+<tr><td><b>The cache is consulted <em>before</em> routing, not after</b></td><td><code>session/…/AskService.kt:112-136</code></td><td>Routing is what invokes the model. A lookup afterwards has already paid the cost it exists to avoid. The precondition — "could route 3 fire at all?" — is computed from candidate columns, not from the model.</td></tr>
+<tr><td><b>The feed is written <em>after</em> the answer exists</b></td><td><code>session/…/AskService.kt:158</code></td><td>A query that throws must not leave a turn in the window with nothing under it, because that turn is what the <em>next</em> follow-up resolves against.</td></tr>
+<tr><td><b>Cache stores a render, not cards</b></td><td><code>session/…/AskService.kt:26-35</code>, <code>state/…/AnswerCache.kt:126-132</code></td><td>Re-assembling cards from a cached body would be a second rendering under possibly different code — exactly what <code>contractVersion</code> exists to prevent. Consequence: <code>Asked.answer</code> is <b>null on a hit</b>, and any caller reaching into it must handle that.</td></tr>
+<tr><td><b>Route 3 firing ≠ route 3 succeeding</b></td><td><code>session/…/AskService.kt:150-156</code></td><td>Redaction can empty the context and an unresolvable citation suppresses the card. Caching those would serve a degraded answer for as long as the key lives. Guarded by <code>answer.cards.any { it is Card.Generated }</code>.</td></tr>
+<tr><td><b>A throwing generator costs the generated card and nothing else</b></td><td><code>routing/…/Router.kt:342-346, 361-364</code></td><td>Both <code>residualIntent</code> and <code>answer</code> are wrapped in <code>runCatching</code>. Letting either escape would discard the quote cards the same question already produced correctly.</td></tr>
+<tr><td><b>Citation resolution is all-or-nothing</b></td><td><code>routing/…/Router.kt:397-408</code></td><td>A card listing <em>some</em> of the passages it found is indistinguishable on screen from a complete one. Any refactor that turns <code>resolveAll</code> into a <code>mapNotNull</code> breaks the product's central claim silently.</td></tr>
+<tr><td><b>Redacted text is carried, never recomputed</b></td><td><code>retrieval/…/Pipeline.kt:63-72</code>, <code>routing/…/Router.kt:410-418</code></td><td>The lexical independence test read this exact string. A second implementation downstream <em>was</em> present once and disagreed — it inserted a different marker.</td></tr>
+<tr><td><b>Redaction failure is not a refusal</b></td><td><code>routing/…/Router.kt:315-329</code></td><td>Route 3 fired, so the user gets a <code>ModelUnavailable</code> card listing passages — never a model answering from an empty context, which is pretraining wearing the generated card's styling.</td></tr>
+</tbody></table></div>
+
+<div class="callout warn">
+  <b>The context budget counts every field, not just the body.</b>
+  <code>routing/…/Router.kt:294-295</code> charges <code>redactedText</code> <em>and</em>
+  <code>headingPath</code> against the 16 KiB ceiling. This was a real defect: five chunks with
+  one-line bodies and enormous heading paths cleared the budget while expanding the prompt by tens
+  of megabytes. Any new field passed to the generator must be added to this sum, and nothing in the
+  type system enforces that.
+</div>
+
+<h2>Flow 2 — installing and activating a pack</h2>
+<div class="mermaid-wrap"><div class="mviewport"><pre class="mermaid">
+sequenceDiagram
+  participant U as User / surface
+  participant L as PackLibrary
+  participant F as packs/ directory
+  participant D as StateDb
+  participant V as Packs (gate)
+  U->>L: install(source, confirmReplacing)
+  L->>D: INSERT installed_packs (state = INSTALLING)
+  D-->>L: installId
+  L->>F: copyBounded(source, installId.rpgpack, 2 GiB)
+  alt over the byte ceiling
+    L->>L: abandon(installId) → TooLarge
+  end
+  L->>V: Preflight.check(staged)
+  L->>V: validateFile(staged, supportedEmbedders)
+  alt violations
+    L->>L: abandon(installId) → Rejected(report)
+  end
+  L->>L: readMeta + BuildReport + sha256, all from the STAGED copy
+  alt uid already installed and not confirmed
+    L->>L: abandon(installId) → NeedsConfirmation(existing)
+  end
+  L->>D: BEGIN
+  D->>L: re-read findReady(uid) inside the transaction
+  alt it changed since the pre-hash read
+    L->>L: abandon + error, nothing installed
+  end
+  L->>L: supersessionImpact(candidate, replacing = current)
+  L->>D: DELETE old ready row; UPDATE this row to READY
+  D-->>L: COMMIT
+  L->>F: deleteWhenUnread(old installId)
+  L-->>U: Installed(pack, deactivatedForReview, impact, buildNotes)
+</pre></div></div>
+
+<h3>Seams this flow exposes</h3>
+<div class="tbl-wrap"><table>
+<thead><tr><th>Seam</th><th>Where</th><th>What it protects</th></tr></thead>
+<tbody>
+<tr><td><b>Every decision derives from the staged copy, never from <code>source</code></b></td><td><code>state/…/PackLibrary.kt:193-198</code></td><td>The source is typically a <code>content://</code> URI backed by another app, which can change between two reads. Deciding replacement from one read and validating another lets a pack inherit an activation granted to a different file.</td></tr>
+<tr><td><b>The replacement target is re-read <em>inside</em> the transaction</b></td><td><code>state/…/PackLibrary.kt:259-270</code></td><td><code>existing</code> was read before the file was hashed, and the user can uninstall or deactivate in that window. Acting on the stale snapshot would reinstate something they explicitly removed.</td></tr>
+<tr><td><b>Activation is measured and applied in one transaction</b></td><td><code>state/…/PackLibrary.kt:399-420</code></td><td>Measuring outside the transaction left the hole one step further along: another install landing in between meant a pack going live against an active set nobody checked it against.</td></tr>
+<tr><td><b>Acknowledgement is the impact, not a boolean</b></td><td><code>state/…/PackLibrary.kt:384-391</code></td><td>A boolean can only say <em>yes</em>, never <em>yes to what</em>. It let <code>--accept</code> be passed by someone who had seen no warning, and let a stale warning stand in for a withdrawal that had since grown.</td></tr>
+<tr><td><b>Past the commit, file cleanup must not unwind the swap</b></td><td><code>state/…/PackLibrary.kt:320-325</code></td><td>A reader still holding the old file on a locking platform must not roll back a swap the database already records — that would leave <em>neither</em> pack installed. <code>reconcile()</code> sweeps orphans.</td></tr>
+<tr><td><b>A replacement inherits activation only if it would not newly hollow out another book</b></td><td><code>state/…/PackLibrary.kt:302-311</code></td><td>Inheriting the flag unconditionally walked straight past <code>setActive</code>'s acknowledgement gate — a same-uid replacement was a way to make a broad supersession live with no acknowledgement at all.</td></tr>
+</tbody></table></div>
+
+<h2>Flow 3 — borrowing a pack while it is being uninstalled</h2>
+<div class="mermaid-wrap"><div class="mviewport"><pre class="mermaid">
+sequenceDiagram
+  participant Q as Query thread (Library.openActive)
+  participant L as PackLibrary
+  participant K as leaseLock
+  participant U as Uninstall thread
+  Q->>L: borrow(installId)
+  L->>K: lock
+  alt installId already condemned
+    K-->>Q: null — dropped from the active set
+  end
+  L->>L: file missing? → setActive(false), return null
+  L->>L: Packs.openCheck(file) — schema, embedder, probe vector
+  alt gross corruption
+    L->>L: setActive(false), return null
+  end
+  L->>L: readers[installId]++
+  K-->>Q: PackLease
+  U->>L: uninstall(installId)
+  L->>L: DELETE row (the pack is uninstalled the moment the user says so)
+  L->>K: deleteWhenUnread → lock
+  L->>L: readers > 0, so mark pendingDeletion and return
+  Q->>L: lease.close() → release(installId)
+  L->>K: lock
+  L->>L: readers hits 0 → pendingDeletion drained → file unlinked
+</pre></div></div>
+
+<h3>Seams this flow exposes</h3>
+<div class="tbl-wrap"><table>
+<thead><tr><th>Seam</th><th>Where</th><th>Note</th></tr></thead>
+<tbody>
+<tr><td><b>Condemnation and unlink both happen under one lock hold</b></td><td><code>state/…/PackLibrary.kt:582-595</code></td><td>Releasing the lock in between leaves a window where <code>borrow</code> sees a file that still exists and leases bytes about to vanish. Untraceable after the fact.</td></tr>
+<tr><td><b><code>borrow</code> refuses on <code>pendingDeletion</code>, not on <code>Files.exists</code></b></td><td><code>state/…/PackLibrary.kt:538-541</code></td><td>Deciding on existence alone hands out a lease on a file whose deletion is already committed.</td></tr>
+<tr><td><b>A missing or corrupt file is <em>deactivated</em>, not silently skipped</b></td><td><code>state/…/PackLibrary.kt:543-564</code></td><td>Returning null while leaving the row active made the pack invisible to every query while the Packs surface still listed it as active — a refusal appearing to come from a book that was never searched.</td></tr>
+<tr><td class="dim"><b>Lock order: <code>leaseLock</code> → <code>StateDb.lock</code></b></td><td><code>borrow():536</code> calls <code>setActive():392</code>, which opens a <code>StateDb</code> transaction</td><td><span class="badge warn">unenforced</span> No path today reverses this, so there is no deadlock — but nothing in the code prevents a future caller from invoking <code>borrow</code> inside a <code>db.transaction { }</code>. See Invariants.</td></tr>
+<tr><td><b>The whole assembly is wrapped, not just the two anticipated branches</b></td><td><code>session/…/Library.kt:259-279</code></td><td>Anything else that threw — <code>readMeta</code> on a damaged pack, a capability query, the supersession scan — used to leak every open SQLite handle and every lease, so uninstall waited forever on reader counts that could never fall to zero.</td></tr>
+</tbody></table></div>
+
+<details><summary>Flow 4 — the model download, in brief</summary><div class="body">
+<p>The app's only network operation (<code>model/…/ModelDownloader.kt:42</code>). Four properties
+worth knowing:</p>
+<ul>
+<li><b>Partials are dot-prefixed</b> (<code>.name.partial</code>, <code>:69</code>) so no final name
+can ever be spelled like a partial — a manifest holding both <code>weights</code> and
+<code>weights.partial</code> would otherwise have the first file's verified bytes occupy the
+second's partial path.</li>
+<li><b>Verification is over the assembled whole</b>, not the fetched tail (<code>:130</code>) —
+a resume stitched onto a corrupt prefix would otherwise pass. Size is checked too
+(<code>:140</code>), because a digest match on a short file is not one.</li>
+<li><b>A move failure keeps the verified partial</b> (<code>:152-159</code>) and says where, rather
+than discarding gigabytes that hashed correctly.</li>
+<li><b><code>ModelManifest</code> refuses a placeholder digest at parse time</b>; the
+<code>make-manifest</code> subcommand exists so that refusal stays tenable.</li>
+</ul>
+</div></details>
+
+</section>
+<section class="panel" id="boundaries" role="tabpanel">
+
+<div class="card hero">
+  <h2>Ownership here is unusually clean — the interesting question is what leaks around it.</h2>
+  <p>Every table in <code>state.db</code> has exactly one writing class. Every module dependency
+  points down a strict layering with <b>no cycles at module or file level</b> (253 import edges
+  scanned). The two boundary problems that <em>do</em> exist are both process-global mutable state
+  in <code>companion object</code>/<code>object</code> singletons, and one of them silently changes
+  what a second <code>Store</code> in the same process would see.</p>
+</div>
+
+<h2>Concern ownership</h2>
+<div class="tbl-wrap"><table class="sortable">
+<thead><tr><th>Concern</th><th>Owner</th><th>Verdict</th></tr></thead>
+<tbody>
+<tr><td>Pack format definition + activation gate</td><td><code>:pack</code> — <code>Packs</code>, <code>PackValidator</code>, <code>Preflight</code></td><td><span class="badge good">single owner</span> The builder runs the app's real gate against its own output (<code>docs/THEORY.md</code> §2), so there is no second idea of the format.</td></tr>
+<tr><td>Bounds against hostile packs</td><td><code>:pack</code> — <code>PackLimits</code> / <code>Preflight.check</code></td><td><span class="badge good">single owner</span> <code>state/…/PackLibrary.kt:697</code> explicitly delegates rather than keeping a copy; the comment records that it used to be a property of one call site.</td></tr>
+<tr><td>File digesting</td><td><code>:pack</code> — <code>FileDigest.of</code></td><td><span class="badge good">single owner</span> <code>PackLibrary.sha256:733</code> and <code>Library.digestOf:192</code> both delegate. They were once two copies; the cache key means nothing unless they agree.</td></tr>
+<tr><td>Transactions + connection serialization</td><td><code>:state</code> — <code>StateDb</code></td><td><span class="badge good">single owner</span> One connection, one reentrant lock, depth-counted nesting (<code>StateDb.kt:44,74-93</code>).</td></tr>
+<tr><td>Retrieval thresholds (gates)</td><td><code>:retrieval</code> defines <code>Gates</code>; <code>:session</code> supplies the calibrated values</td><td><span class="badge good">deliberate split</span> <code>session/…/Library.kt:46</code> ships the one calibrated contract; <code>Gates.denseDefault = 1.1</code> is unreachable so an uncalibrated embedder admits nothing.</td></tr>
+<tr><td>Quote / paraphrase partition</td><td><code>:routing</code> — <code>Router.route</code></td><td><span class="badge good">single owner</span> One <code>when</code> over <code>(origin, kind)</code> at <code>Router.kt:96-123</code>.</td></tr>
+<tr><td>Citation resolution</td><td><code>:routing</code> — <code>CitationResolver</code> / <code>PackResolvers</code></td><td><span class="badge good">single owner</span> Injected as a <code>fun interface</code>, so tests do not need a pack.</td></tr>
+<tr><td>Redaction</td><td><code>:retrieval</code> — <code>Nesting</code>, carried on <code>Candidate.redactedText</code></td><td><span class="badge good">single owner, by construction</span> <code>Router.redactedTextOf:418</code> reads the carried value. A second implementation existed here and disagreed.</td></tr>
+<tr><td>Error surfacing to the user</td><td>Each ViewModel's <code>failure</code> field; <code>Main.kt:120-127</code> on the CLI</td><td><span class="badge warn">2 owners, appropriately</span> Two surfaces, two idioms, but consistent within each: every <code>runCatching</code> in the app modules ends in <code>onFailure { failure = … }</code> or a <code>when</code> over the result.</td></tr>
+<tr><td>Rendering</td><td><code>:cli</code> <code>Render.kt</code> and <code>:app</code> <code>Cards.kt</code></td><td><span class="badge warn">2 owners</span> Unavoidable — two media. Held together by <code>RenderParityTest</code>, which asserts both surfaces quote the same lines and number chips the same way.</td></tr>
+<tr><td>Inference runtime registration</td><td><code>LlamaCppRuntime.register</code>, called from <code>app/…/Storage.kt:58</code> and <code>cli/…/Main.kt:87</code></td><td><span class="badge warn">2 call sites, 1 registry</span> Both wrap in a way that a device unable to load the native library behaves exactly as a build with no runtime.</td></tr>
+</tbody></table></div>
+
+<h2>Data ownership</h2>
+<p class="dim">Seven tables in <code>state.db</code>. Grepping every <code>INSERT</code>,
+<code>UPDATE</code> and <code>DELETE</code> across all <code>src/main</code> sources:</p>
+<div class="tbl-wrap"><table class="sortable">
+<thead><tr><th>Store</th><th>Sole writer</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td><code>installed_packs</code></td><td><code>state/…/PackLibrary.kt</code></td><td>Also the only reader that decides activation. <code>borrow()</code> writes through <code>setActive</code>.</td></tr>
+<tr><td><code>documents</code>, <code>trackers</code>, <code>accepted_violations</code></td><td><code>state/…/DocumentStore.kt</code></td><td><code>DocumentTransfer</code> imports/exports by calling <code>DocumentStore</code>'s API (<code>:221-231</code>), never SQL of its own.</td></tr>
+<tr><td><code>conversation_turns</code></td><td><code>state/…/Conversation.kt</code></td><td></td></tr>
+<tr><td><code>answer_cache</code></td><td><code>state/…/AnswerCache.kt</code></td><td></td></tr>
+<tr><td><code>models</code></td><td><code>state/…/ModelRegistry.kt</code></td><td></td></tr>
+<tr><td><code>packs/*.rpgpack</code> (files)</td><td><code>state/…/PackLibrary.kt</code> only</td><td>Opened everywhere else strictly read-only via <code>Sqlite.openReadOnly</code> behind the <code>Db</code> interface.</td></tr>
+</tbody></table></div>
+
+<div class="callout good">
+  <b>Single-writer holds everywhere, and it is load-bearing.</b> Because <code>StateDb</code>
+  serializes one connection behind one lock, "one writer class per table" plus "one
+  <code>StateDb</code> per process" is what makes concurrent surfaces safe without any
+  table-level locking. Both halves have to stay true — see the risk below.
+</div>
+
+<h2>No cycles</h2>
+<div class="callout good">
+  The dependency scan found <b>0 module cycles and 0 file cycles</b> across 253 resolved imports.
+  Declared Gradle dependencies match: <code>:pack</code> has no project dependencies at all;
+  <code>:state</code>, <code>:retrieval</code>, <code>:model</code> and <code>:capabilities</code>
+  depend only on <code>:pack</code>; <code>:routing</code> adds <code>:retrieval</code> and
+  <code>:model</code>; <code>:session</code> is the assembly layer; <code>:cli</code> and
+  <code>:app</code> are leaves. Nothing to explain semantically, which is the good outcome.
+</div>
+
+<h2>Boundary observations</h2>
+
+<div class="callout warn">
+  <b>1. <code>Library</code> holds a process-global supersession cache in its companion object.</b>
+  <code>session/src/main/kotlin/dev/ludex/session/Library.kt:131-147</code> keeps a single
+  <code>(fingerprint → SupersededSet)</code> entry, <code>@Synchronized</code>, shared by every
+  <code>Library</code> instance in the JVM — including ones opened from different
+  <code>Store</code> roots. Correctness survives because the key is a content fingerprint
+  <code>(pack_uid, file_sha256)</code>, so identical keys imply identical bytes. But it is
+  <em>module-level</em> state reached from an <em>instance</em> path, it is invisible at the call
+  site, and it makes tests order-dependent in a way nothing declares. The comment justifies the
+  single entry, not the global placement.
+</div>
+
+<div class="callout warn">
+  <b>2. <code>Storage</code> is a never-closed process singleton, and that is the fix for a worse
+  bug.</b> <code>app/src/main/kotlin/dev/ludex/app/Storage.kt:27-40</code>. Each surface used to
+  build its own <code>Store</code>, and <code>PackLibrary</code>'s initializer calls
+  <code>reconcile()</code> — which cannot tell <em>died mid-flight</em> from <em>happening right
+  now</em>, so opening Documents during an install destroyed the install. The singleton is correct;
+  the fragility is that the invariant it now carries ("exactly one <code>Store</code> per process")
+  is enforced by nothing but this object, and any code path that constructs
+  <code>Store(...)</code> directly re-opens the hole. <code>:cli</code> does construct
+  <code>Store</code> directly (<code>Main.kt</code>), which is safe only because it is a one-shot
+  process.
+</div>
+
+<div class="callout">
+  <b>3. The Android boundary is genuinely clean.</b> No module below <code>:app</code> imports an
+  Android class; <code>:app</code>'s own <code>MainActivity.kt:44-50</code> claims this as the point
+  of the layering rather than an accident, and the module graph bears it out. The one place it
+  nearly broke is recorded in <code>StateDb.kt:20-26</code>: the write path was on
+  <code>sqlite-jdbc</code>, whose natives cannot load on Android, so constructing
+  <code>AskViewModel</code> killed the app at startup. Both directions now use the same bundled
+  SQLite.
+</div>
+
+<div class="callout">
+  <b>4. <code>:cli</code> is deliberately the one module that depends on all the others.</b>
+  <code>cli/build.gradle.kts:15-16</code> states the rationale: it is the wiring, and every seam it
+  crosses is a seam the app will have to cross too. Its 22 outbound file imports make it the highest
+  fan-out file in the repo — expected for this role, not a smell.
+</div>
+
+<div class="callout">
+  <b>5. Raw SQL string interpolation exists, and is bounded.</b> Three places build SQL by
+  concatenation rather than binding: <code>retrieval/…/Pipeline.kt:324-326</code> (alias phrases,
+  single-quote-escaped, drawn from a tokenizer whose separators include punctuation),
+  <code>Pipeline.kt:371,401</code> (chunk ids, typed <code>Long</code>), and
+  <code>state/…/Conversation.kt:75</code> (<code>windowSize</code>, a constant). None is currently
+  injectable, but the alias path is the one a future change could make so — it is the only one whose
+  interpolated value originates in user text.
+</div>
+
+</section>
+<section class="panel" id="invariants" role="tabpanel">
+
+<div class="card hero">
+  <h2>The pack format is pinned by test. The answer contract is pinned by memory.</h2>
+  <p>This codebase is unusually good at enforcing its own rules — the pack schema is checked against
+  its spec document by <code>SchemaDocSyncTest</code>, the float16 codec is verified across all
+  65 536 bit patterns, and one deliberately-corrupted pack exists per rejection the app promises to
+  make. Against that standard, one invariant stands out for having <b>no mechanical enforcement at
+  all</b>: <code>AskService.CONTRACT_VERSION</code>. It is referenced by nothing outside the two
+  files that define and consume it, no test asserts it, and forgetting to bump it makes an upgraded
+  app serve cached cards built under rules it no longer follows.</p>
+</div>
+
+<h2>Invariants</h2>
+<div class="tbl-wrap"><table class="sortable">
+<thead><tr><th>Invariant</th><th>Where enforced</th><th>Verdict</th></tr></thead>
+<tbody>
+<tr>
+  <td><b>A quote card's body is the pack's bytes, unmodified and un-rendered</b></td>
+  <td><code>routing/…/Cards.kt:27-33</code> (contract, in prose); <code>cli/…/Main.kt:80</code> forces UTF-8 stdout; <code>RenderParityTest</code> asserts both surfaces emit the same lines</td>
+  <td><span class="badge warn">partially</span> The rule "never pass <code>body</code> through a markdown/HTML renderer" is a doc comment. Nothing in the type system distinguishes a verbatim string from a renderable one — a future Compose change can break it and every test still passes.</td>
+</tr>
+<tr>
+  <td><b>Anything shown as a quotation has <code>origin = 'source'</code> and a verbatim-eligible <code>kind</code></b></td>
+  <td><code>routing/…/Router.kt:96-104</code>, <code>retrieval/…/Candidate.verbatim:82-83</code></td>
+  <td><span class="badge good">enforced</span> One <code>when</code>, one predicate, both reading <code>PackSchema.VERBATIM_ELIGIBLE_KINDS</code>.</td>
+</tr>
+<tr>
+  <td><b>A card never renders a partial or placeholder citation</b></td>
+  <td><code>routing/…/Router.kt:397-408</code> (<code>resolveAll</code> returns null if <em>any</em> fails); <code>:147</code>, <code>:181</code>, <code>:379</code></td>
+  <td><span class="badge good">enforced</span> Every resolution site returns null rather than dropping.</td>
+</tr>
+<tr>
+  <td><b>Everything that could change a generated answer is in the cache key</b></td>
+  <td><code>state/…/AnswerCache.kt:21-77</code>; <code>session/…/AskService.kt:162-172</code></td>
+  <td><span class="badge bad">assumed, enforced nowhere</span> <code>CONTRACT_VERSION = 1</code> must be bumped by hand whenever thresholds, routing, prompts or card serialization change. No test, no lint, no reference outside its own file. <b>And the retrieval gates are not in the key at all</b> — <code>GATES</code> lives in <code>session/…/Library.kt:46</code>, so re-calibrating <code>dense = 0.65</code> changes answers while every existing cache entry stays reachable.</td>
+</tr>
+<tr>
+  <td><b>Two packs claiming one <code>pack_uid</code> are never active together</b></td>
+  <td><code>session/…/Library.kt:310-322</code> (command-line path); <code>state/…/PackLibrary.kt:664-669</code> (<code>findReady</code> uniqueness among <code>ready</code> rows)</td>
+  <td><span class="badge warn">two enforcers</span> Correct in both, but the rule lives in two places because the library's uniqueness index cannot reach a CLI argument list. The comment at <code>Library.kt:310</code> says so explicitly.</td>
+</tr>
+<tr>
+  <td><b>A pack file under a lease is never unlinked</b></td>
+  <td><code>state/…/PackLibrary.kt:536-595</code> — <code>borrow</code>/<code>release</code>/<code>deleteWhenUnread</code>, all under one <code>ReentrantLock</code></td>
+  <td><span class="badge good">enforced</span> Condemnation and unlink happen in the same lock hold; <code>reconcile</code> honours <code>readers</code> too (<code>:349,358</code>) even though it is specified to run before any pack opens.</td>
+</tr>
+<tr>
+  <td><b>Lock order is <code>leaseLock</code> → <code>StateDb.lock</code>, never the reverse</b></td>
+  <td><code>borrow():536</code> → <code>setActive():392</code> → <code>db.transaction</code></td>
+  <td><span class="badge warn">holds today, unenforced</span> I traced every <code>db.transaction</code> body in <code>src/main</code>; none reaches <code>borrow</code>, <code>release</code>, <code>deleteWhenUnread</code> or <code>reconcile</code>, so there is no deadlock now. Nothing prevents a future one.</td>
+</tr>
+<tr>
+  <td><b>Exactly one <code>StateDb</code> connection per process</b></td>
+  <td><code>app/…/Storage.kt:27-40</code> (double-checked singleton)</td>
+  <td><span class="badge warn">partially</span> Enforced for the Android app only. <code>Store</code>'s constructor is public and <code>:cli</code> calls it directly; safe there only because each CLI invocation is a one-shot process.</td>
+</tr>
+<tr>
+  <td><b>Every install ends with a file and a row, or with neither</b></td>
+  <td><code>state/…/PackLibrary.kt:205-330</code> journalled three-phase; <code>reconcile():338-361</code> sweeps both directions; <code>Store.init:386-391</code> calls it on open</td>
+  <td><span class="badge good">enforced</span> The <code>INSTALLING</code> state row is the journal, and orphan files are swept by name.</td>
+</tr>
+<tr>
+  <td><b>A broadly-superseding pack cannot go live unacknowledged</b></td>
+  <td><code>state/…/PackLibrary.kt:392-421</code> (measure + apply in one transaction; acknowledgement is the measured impact, not a boolean) and <code>:302-311</code> (a same-uid replacement cannot inherit activation past the gate)</td>
+  <td><span class="badge good">enforced</span> Both bypasses that existed are closed and commented at the site.</td>
+</tr>
+<tr>
+  <td><b>An installed pack's bytes still hash to what was installed</b></td>
+  <td><code>state/…/PackLibrary.kt:641-651</code> <code>verifyStale</code>; called from <code>app/…/AskViewModel.kt:161-168</code> once per process, interval 1 day</td>
+  <td><span class="badge warn">partially</span> Only the Android surface schedules it, only once per process, and only over <em>active</em> packs. A long-lived process never re-checks; an inactive pack is never checked until activated.</td>
+</tr>
+<tr>
+  <td><b>An uncalibrated embedder admits no dense candidates</b></td>
+  <td><code>retrieval/…/Pipeline.kt:39-47</code> — <code>denseDefault = 1.1</code>, deliberately unreachable under cosine</td>
+  <td><span class="badge good">fail-closed</span> A rare and correct choice: the default is a refusal, not a permission.</td>
+</tr>
+<tr>
+  <td><b>The conversational window is exactly what is on screen</b></td>
+  <td><code>state/…/Conversation.kt:12-33,85-87</code> — <b>New topic</b> deletes the feed, and the feed <em>is</em> the window</td>
+  <td><span class="badge good">enforced by construction</span> One table, one clear. There is no second hidden context to fall out of sync.</td>
+</tr>
+</tbody></table></div>
+
+<h2>Failure handling</h2>
+<div class="tbl-wrap"><table>
+<thead><tr><th>Pattern</th><th>Where</th><th>Assessment</th></tr></thead>
+<tbody>
+<tr><td>Model failure degrades the card, not the answer</td><td><code>routing/…/Router.kt:342-346,361-364</code></td><td><span class="badge good">good</span> Both generator calls wrapped; quote and derived cards survive.</td></tr>
+<tr><td>Every ViewModel <code>runCatching</code> ends in a user-visible message</td><td><code>app/…/DocumentsViewModel.kt</code>, <code>ModelsViewModel.kt</code>, <code>PacksViewModel.kt</code> — <code>onFailure { failure = … }</code> throughout</td><td><span class="badge good">good</span> I checked all 26 occurrences; none discards silently.</td></tr>
+<tr><td>Deliberate swallows, each commented</td><td><code>app/…/Storage.kt:58</code> (runtime registration), <code>PackLibrary.kt:448-454,463</code> (unreadable pack ⇒ no impact rows), <code>Library.kt:101-106</code> (staging cleanup)</td><td><span class="badge warn">acceptable</span> The <code>supersessionImpact</code> ones are the least comfortable: an unreadable candidate silently reports <em>no impact</em>, which is indistinguishable from a pack that genuinely supersedes nothing.</td></tr>
+<tr><td>CLI prints the message, not the stack</td><td><code>cli/…/Main.kt:120-127</code></td><td><span class="badge good">good</span> Deliberate — every intentional failure carries its explanation in the message.</td></tr>
+<tr><td>Migration failure closes the connection before rethrowing</td><td><code>state/…/StateDb.kt:174-179</code></td><td><span class="badge good">good</span> Otherwise the file and its WAL stay locked precisely while the app tries to restore the backup that failure just made relevant.</td></tr>
+<tr><td>No timeouts on the download</td><td><code>model/…/ModelDownloader.kt</code> / <code>HttpRangeFetcher</code></td><td><span class="badge warn">unverified</span> Cancellation is cooperative via an <code>AtomicBoolean</code> checked between chunks (<code>:80</code>); I did not find a socket/read timeout. On a stalled connection the download would hang until the user cancels.</td></tr>
+</tbody></table></div>
+
+<h2>Concurrency</h2>
+<p>Four primitives, and the model is small enough to hold in your head:</p>
+<ul>
+<li><b><code>StateDb.lock</code></b> (<code>StateDb.kt:44</code>) — reentrant, serializes <em>every</em> use of the single SQLite connection, with a <code>depth</code> counter so a nested <code>transaction</code> joins rather than committing the outer one early.</li>
+<li><b><code>PackLibrary.leaseLock</code></b> (<code>PackLibrary.kt:154</code>) — guards <code>readers</code> and <code>pendingDeletion</code> together. Nested above <code>StateDb.lock</code>.</li>
+<li><b><code>Library.supersessionCache</code></b> (<code>Library.kt:131-147</code>) — <code>@Synchronized</code>, process-global, one entry. A race costs one redundant scan, never a wrong answer, because the key is a content fingerprint.</li>
+<li><b><code>ModelRuntime</code> registry</b> (<code>ModelRuntime.kt:59,65</code>) and the download's <code>AtomicBoolean</code> cancel flag.</li>
+</ul>
+<p>Everything else is confined: retrieval and routing are pure functions of an <code>ActiveSet</code>
+and a <code>Retrieved</code>, holding no mutable state between calls. All ViewModel work runs on
+<code>Dispatchers.IO</code> inside <code>viewModelScope</code> and writes state back on the main
+dispatcher.</p>
+
+<h2>Risk ranking</h2>
+
+<div class="callout bad">
+  <b>1. <code>CONTRACT_VERSION</code> is a hand-maintained cache invalidator with no guard.</b>
+  <code>session/…/AskService.kt:172</code>. Cached cards are stored <em>already rendered</em> and
+  persist across upgrades. Change a gate, a prompt, the routing partition or the card's serialized
+  form without bumping it, and the app serves answers built under rules it no longer follows —
+  indistinguishable on screen from fresh ones. Worse, the retrieval gates are not in the key at all
+  (<code>session/…/Library.kt:46</code>), so a calibration change is a silent one by default. A test
+  that hashes the concatenation of every contract-shaping constant and fails when it changes without
+  a version bump would close this for a few dozen lines.
+</div>
+
+<div class="callout bad">
+  <b>2. CI does not run the test suite the README says it runs.</b>
+  <code>.github/workflows/ci.yml:35</code> runs <code>./gradlew :pack:test</code>;
+  <code>README.md</code> ("Building") says CI "runs the same command" as <code>./gradlew test</code>.
+  Of 750 tests across 11 modules, CI covers <code>:pack</code> only. Compounding it, the workflow is
+  <code>workflow_dispatch</code>-only by deliberate choice (documented at <code>:3-15</code>) — so
+  today <b>nothing runs on any push or pull request</b>. The trigger decision is defensible and
+  explained; the <code>:pack:test</code>-vs-<code>test</code> gap looks like an oversight, and it is
+  the one that will bite when the trigger is restored.
+</div>
+
+<div class="callout warn">
+  <b>3. Byte-exactness of a quotation is a doc comment below the router.</b>
+  <code>routing/…/Cards.kt:27-33</code> forbids passing <code>Card.Verbatim.body</code> through any
+  rich-text renderer, and <code>RenderParityTest</code> checks the two current surfaces agree — but
+  the type is a plain <code>String</code>, so nothing stops a third surface, or a Compose refactor,
+  from re-wrapping or markdown-parsing it. This is the product's central guarantee with the weakest
+  mechanical backing of any invariant here. A <code>value class Verbatim(val bytes: String)</code>
+  would make the mistake unrepresentable.
+</div>
+
+<div class="callout warn">
+  <b>4. The background digest pass runs once per process, from one surface.</b>
+  <code>app/…/AskViewModel.kt:161-168</code> is the only production caller of
+  <code>verifyStale</code>. On a phone that keeps the process alive for days the check never repeats,
+  and inactive packs are never re-hashed at all. The guarantee <code>PackLibrary.kt:621-640</code>
+  argues for — that a quotation is the book's bytes <em>now</em>, not at install time — decays
+  accordingly.
+</div>
+
+<div class="callout warn">
+  <b>5. Two pieces of process-global mutable state are reached from instance-shaped APIs.</b>
+  <code>Library.supersessionCache</code> and the <code>Storage</code> singleton (see Boundaries).
+  Both are correct as written and both are invisible at the call site; the second one exists
+  <em>because</em> a duplicate <code>Store</code> destroyed in-flight installs, which is the shape of
+  bug this class of state produces.
+</div>
+
+<details><summary>Smaller things worth a look</summary><div class="body">
+<ul>
+<li><code>AnswerCache.evict():174-181</code> re-runs <code>size()</code> and <code>bytes()</code> — two aggregate queries — on every loop iteration. Bounded by the 200-entry limit, so it is a papercut, not a defect.</li>
+<li><code>PackLibrary.verify():600-619</code> issues its <code>UPDATE</code> outside a transaction; a crash between the hash and the write leaves <code>verified_at</code> stale, which fails safe (it re-verifies).</li>
+<li><code>Router.generate</code> returns <code>Card.ModelUnavailable(availability = Availability.Ready)</code> at <code>:322-328</code> — the type name contradicts the state. See Glossary.</li>
+<li><code>supersessionImpact</code> opens and closes each target pack's SQLite file per call (<code>PackLibrary.kt:449,464</code>), inside the activation transaction. With many active packs this puts file opens on the critical path of a user-visible action.</li>
+</ul>
+</div></details>
+
+</section>
+<section class="panel" id="glossary" role="tabpanel">
+
+<div class="card">
+  <p>The domain vocabulary here is carefully chosen and mostly consistent — the pack format's terms
+  (<code>origin</code>, <code>kind</code>, <code>stable_key</code>, supersession) mean exactly one
+  thing each, and the specs in <code>docs/</code> use the same words the code does. Three terms are
+  overloaded, one type name contradicts the state it is constructed with, and the rebrand to Ludex
+  left a layer of generic <code>rpg</code> naming behind in the file format and one environment
+  variable.</p>
+</div>
+
+<h2>Domain term ↔ code name</h2>
+<div class="tbl-wrap"><table class="sortable">
+<thead><tr><th>Domain term</th><th>Code name(s)</th><th>Where</th><th>Note</th></tr></thead>
+<tbody>
+<tr><td><b>Pack</b> — a compiled book, handed over as a file</td><td><code>.rpgpack</code>, <code>PackMeta</code>, <code>pack_uid</code></td><td><code>:pack</code></td><td>A SQLite database with a pinned schema. Untrusted by construction, including its own DDL.</td></tr>
+<tr><td><b>Chunk</b> — one addressable passage</td><td><code>ChunkRef(packUid, chunkId)</code></td><td><code>pack/…/ChunkRef.kt</code></td><td>Highest fan-in file in the repo (35 importers). The identity of everything downstream.</td></tr>
+<tr><td><b>Provenance</b> — did a person write this, or a machine</td><td><code>chunks.origin</code> ∈ <code>{source, derived}</code></td><td><code>pack/…/PackSchema.kt:43</code></td><td>The guarantee made into data. <code>source</code> may be quoted; <code>derived</code> never can be.</td></tr>
+<tr><td><b>Passage type</b></td><td><code>chunks.kind</code> ∈ <code>{rules, table, statblock, readaloud, glossary, setting}</code></td><td><code>PackSchema.kt:30</code></td><td><code>setting</code> is the only kind excluded from <code>VERBATIM_ELIGIBLE_KINDS</code> — it is the one that feeds the generative route.</td></tr>
+<tr><td><b>Errata / a correction that withdraws a passage</b></td><td><code>supersessions</code>, <code>SupersededSet</code>, <code>SupersessionImpact</code>, "withdrawn"</td><td><code>:retrieval</code>, <code>:state</code></td><td>Consistent. "Withdrawn" is always the effect on a target chunk; "supersession" is always the declaring row.</td></tr>
+<tr><td><b>What is on the table tonight</b></td><td><code>ActiveSet</code> (query-time value) vs <code>installed_packs.active</code> (durable flag)</td><td><code>retrieval/…/Pipeline.kt:15</code>, <code>state/…/PackLibrary.kt</code></td><td>Two names for two genuinely different things: a snapshot captured once per query, and the persisted user choice. The distinction is the point.</td></tr>
+<tr><td><b>The five cards</b></td><td><code>Card.Verbatim</code>, <code>.Derived</code>, <code>.Generated</code>, <code>.ModelUnavailable</code>, <code>.Empty</code></td><td><code>routing/…/Cards.kt:25</code></td><td>Matches <code>docs/05-routing-and-cards-spec.md</code>. One naming problem — see below.</td></tr>
+<tr><td><b>Route 1 / 2 / 3</b></td><td>Not types — the three branches of <code>Router.route</code>'s <code>when</code></td><td><code>routing/…/Router.kt:96-123</code>, section comments at <code>:141,169,221</code></td><td><span class="badge warn">spec-only vocabulary</span> "Route 3" appears in diagnostics strings and comments but is not a name any type or function carries. Grep-able, but only via comments.</td></tr>
+<tr><td><b>Redaction</b> — excising a nested rule before prose generation</td><td><code>Candidate.redact</code>, <code>redactedText</code>, <code>RedactedChunk</code></td><td><code>:retrieval</code> → <code>:routing</code> → <code>:model</code></td><td>Consistent, and deliberately carried rather than recomputed.</td></tr>
+<tr><td><b>Character sheet</b></td><td><code>Document</code>, <code>DocumentStore</code>, <code>documents</code> table, <b>but</b> <code>sheet</code> on the command line</td><td><code>state/…/DocumentStore.kt</code> vs <code>cli/…/Main.kt:102,485</code></td><td><span class="badge warn">drift</span> Three names for one concept: the CLI says <code>sheet</code>, the code and the Android surface say <em>Documents</em>, and the spec is <code>07-documents-and-constraints-spec.md</code>. <code>SheetState</code> (<code>session/…/Rules.kt:90</code>) sits on the CLI side of the split inside a shared module.</td></tr>
+<tr><td><b>Tracker</b> — a named value on a sheet</td><td><code>Tracker</code>, <code>TrackerValue</code>, <code>putTracker</code></td><td><code>state/…/DocumentStore.kt</code></td><td>Clean. Keys are normalized to <code>[a-z0-9-]+</code> segments and selectors are validated at construction (<code>Constraints.kt:22-31</code>).</td></tr>
+<tr><td><b>Embedder contract</b> — which vector space a pack was built in</td><td><code>EmbedderContract</code>, <code>embedder_id</code>, "contract"</td><td><code>pack/…/EmbedderContract.kt</code></td><td><span class="badge warn">collides</span> with <code>CacheKey.contractVersion</code>, which is about the <em>generation</em> contract and has nothing to do with embedders. Both are just "contract" in prose.</td></tr>
+</tbody></table></div>
+
+<h2>Overloaded and misleading names</h2>
+
+<div class="callout warn">
+  <b><code>Card.ModelUnavailable</code> is constructed with <code>Availability.Ready</code>.</b>
+  <code>routing/…/Router.kt:319-328</code>: when redaction empties the generation context, route 3
+  produces a <code>ModelUnavailable</code> card whose <code>availability</code> field is
+  <code>Availability.Ready</code> and whose statement says the passages "cannot be separated from the
+  rest, so they are listed rather than summarised" — nothing to do with the model. The behaviour is
+  right (list the passages, generate nothing); the type name asserts something false about why. A
+  reader debugging "why is the app saying the model is unavailable when it is loaded?" starts in the
+  wrong place. <code>Card.Listed</code>, or a reason enum on the card, would say what is actually
+  true.
+</div>
+
+<div class="callout warn">
+  <b>"Gate" means four different things.</b> All four are load-bearing and none is wrong on its own:
+  <ul>
+    <li><b>The activation gate</b> — <code>Packs.validate</code>, the whole-pack validator (<code>pack/…/Packs.kt:5-20</code>).</li>
+    <li><b>Retrieval gates</b> — <code>Gates(lexical, dense, denseDefault)</code>, the admission thresholds (<code>retrieval/…/Pipeline.kt:27</code>).</li>
+    <li><b><code>InformationGate</code></b> — the per-chunk query-coverage measure that feeds the lexical threshold.</li>
+    <li><b><code>Library.Gate</code></b> — a private enum meaning "how much re-validation does this pack still need" (<code>session/…/Library.kt:119</code>).</li>
+  </ul>
+  In a doc comment or a commit message, "the gate" is ambiguous unless the sentence disambiguates it.
+</div>
+
+<div class="callout warn">
+  <b>"Library" means three different things, in three different modules.</b>
+  <code>session.Library</code> is an opened set of validated packs (an <code>AutoCloseable</code>
+  bound to a query's lifetime). <code>state.PackLibrary</code> is the durable shelf — installs,
+  activation, leases. <code>model.ModelLibrary</code> is the set of downloaded weights. Their
+  lifetimes are completely different (one query, forever, forever) and only the middle one is what
+  a user would call "my library".
+</div>
+
+<div class="callout">
+  <b>Post-rebrand naming residue.</b> The app is now Ludex RPG and the package is
+  <code>dev.ludex</code>, but the generic <code>rpg</code> prefix survives in three places that were
+  deliberately left alone because changing them is not a rename:
+  <ul>
+    <li><code>.rpgpack</code> and <code>.rpgdoc</code> — <b>file format extensions</b>. Changing them breaks every pack and exported sheet already in existence, and the format is documented under those names in <code>docs/00-pack-schema.md</code>.</li>
+    <li><code>RPG_CONTEXT</code> — the context-window environment variable read at <code>cli/…/Main.kt:87</code>. Renaming it to <code>LUDEX_CONTEXT</code> is a one-line change plus a README note, but it is a user-facing interface change rather than a rebrand.</li>
+    <li><code>rpg-helper</code> in git history before <code>0c217cb</code> — the old name is still the truth about what those commits said.</li>
+  </ul>
+</div>
+
+<div class="callout good">
+  <b>Where naming is genuinely good, and worth preserving.</b> <code>Retrieved.refused</code> reads
+  as the domain concept ("refusal is a correct answer") rather than as <code>isEmpty()</code>.
+  <code>Candidate.verbatim</code> encodes the two-column rule as one property.
+  <code>InstallResult.NeedsConfirmation</code> / <code>ActivationResult.NeedsAcknowledgement</code>
+  distinguish two different user questions that a boolean would have collapsed.
+  <code>PackForge.relax()</code> names exactly why it exists — the honest attack is a builder that
+  never wrote the <code>CHECK</code> constraint.
+</div>
+
+</section></main>
+<footer class="doc">Generated by code-visualization. Automated tabs: Inventory, Dependencies, Hotspots — the Dependencies and Hotspots analyzers were patched for Kotlin multi-module layout and rename-following (see Overview). Judgment tabs authored from code reading — verify citations before acting.</footer>
+<div class="viz-tip" id="viz-tip"></div>
+<script>
+/* ============ tabs ============ */
+(function(){
+  const btns=[...document.querySelectorAll('nav.tabs button')];
+  const panels=[...document.querySelectorAll('.panel')];
+  function activate(id,push){
+    btns.forEach(b=>b.setAttribute('aria-selected',b.dataset.tab===id?'true':'false'));
+    panels.forEach(p=>p.classList.toggle('active',p.id===id));
+    if(push){try{history.replaceState(null,'','#'+id)}catch(e){}}
+    window.dispatchEvent(new CustomEvent('tab:shown',{detail:{id}}));
+  }
+  btns.forEach(b=>b.addEventListener('click',()=>activate(b.dataset.tab,true)));
+  const initial=location.hash&&panels.some(p=>'#'+p.id===location.hash)?location.hash.slice(1):(panels[0]&&panels[0].id);
+  if(initial)activate(initial,false);
+  window.addEventListener('hashchange',()=>{const h=location.hash.slice(1);if(panels.some(p=>p.id===h))activate(h,false);});
+})();
+
+/* ============ helpers ============ */
+const cssVar=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const tip=document.getElementById('viz-tip');
+function showTip(html,x,y){tip.innerHTML=html;tip.style.display='block';
+  const r=tip.getBoundingClientRect();
+  tip.style.left=Math.min(x+14,innerWidth-r.width-10)+'px';
+  tip.style.top=Math.min(y+14,innerHeight-r.height-10)+'px';}
+function hideTip(){tip.style.display='none'}
+function lerpColor(a,b,t){
+  const pa=hex(a),pb=hex(b);
+  return `rgb(${pa.map((v,i)=>Math.round(v+(pb[i]-v)*t)).join(',')})`;
+  function hex(h){h=h.replace('#','');if(h.length===3)h=h.split('').map(c=>c+c).join('');
+    return [0,2,4].map(i=>parseInt(h.slice(i,i+2),16));}
+}
+function fmt(n){return n>=1e6?(n/1e6).toFixed(1)+'M':n>=1e4?(n/1e3).toFixed(0)+'k':n>=1e3?(n/1e3).toFixed(1)+'k':String(n)}
+function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+
+/* sortable tables */
+document.querySelectorAll('table.sortable').forEach(tb=>{
+  tb.querySelectorAll('thead th').forEach((th,ci)=>{
+    th.addEventListener('click',()=>{
+      const dir=th.classList.contains('asc')?'desc':'asc';
+      tb.querySelectorAll('thead th').forEach(h=>h.classList.remove('asc','desc'));
+      th.classList.add(dir);
+      const rows=[...tb.querySelectorAll('tbody tr')];
+      const val=r=>{const td=r.children[ci];if(!td)return '';
+        const d=td.dataset.sort!==undefined?td.dataset.sort:td.textContent.trim();
+        const n=parseFloat(String(d).replace(/[,%]/g,''));return isNaN(n)?String(d).toLowerCase():n;};
+      rows.sort((a,b)=>{const va=val(a),vb=val(b);
+        const c=(typeof va==='number'&&typeof vb==='number')?va-vb:String(va).localeCompare(String(vb));
+        return dir==='asc'?c:-c;});
+      const tbody=tb.querySelector('tbody');rows.forEach(r=>tbody.appendChild(r));
+    });
+  });
+});
+
+/* pan/zoom for a container holding an inner element (svg group or div) */
+function panZoom(viewport,apply,getState){
+  let drag=null;
+  viewport.addEventListener('wheel',e=>{
+    if(!e.ctrlKey&&!e.metaKey)return;e.preventDefault();
+    const s=getState();const f=e.deltaY<0?1.15:1/1.15;
+    const r=viewport.getBoundingClientRect(),mx=e.clientX-r.left,my=e.clientY-r.top;
+    s.x=mx-(mx-s.x)*f; s.y=my-(my-s.y)*f; s.k=Math.max(.15,Math.min(8,s.k*f)); apply();
+  },{passive:false});
+  viewport.addEventListener('mousedown',e=>{
+    if(e.target.closest('.zoombar')||e.target.dataset.draggable)return;
+    drag={sx:e.clientX,sy:e.clientY,ox:getState().x,oy:getState().y};
+    viewport.classList.add('dragging');
+  });
+  window.addEventListener('mousemove',e=>{if(!drag)return;
+    const s=getState();s.x=drag.ox+e.clientX-drag.sx;s.y=drag.oy+e.clientY-drag.sy;apply();});
+  window.addEventListener('mouseup',()=>{drag=null;viewport.classList.remove('dragging')});
+}
+function addZoombar(container,zoomIn,zoomOut,reset){
+  const bar=document.createElement('div');bar.className='zoombar';
+  [['+',zoomIn],['−',zoomOut],['⟲',reset]].forEach(([t,fn])=>{
+    const b=document.createElement('button');b.textContent=t;b.title=t==='⟲'?'Reset view':(t==='+'?'Zoom in':'Zoom out');
+    b.addEventListener('click',fn);bar.appendChild(b);});
+  container.appendChild(bar);
+}
+
+/* ============ force-directed graph ============ */
+/* data: {nodes:[{id,label,group,size,fanIn,fanOut,meta}], links:[{source,target,cycle,weight}], groups:{name:colorKey}} */
+function renderForceGraph(container,data){
+  const W=container.clientWidth||900,H=container.clientHeight||560;
+  const groupNames=[...new Set(data.nodes.map(n=>n.group||''))];
+  const palette=[cssVar('--accent'),cssVar('--good'),cssVar('--warn'),cssVar('--violet'),cssVar('--bad'),'#5ec2c9','#c98fb8','#8fb0c9'];
+  const gcolor={};groupNames.forEach((g,i)=>gcolor[g]=palette[i%palette.length]);
+  const nodes=data.nodes.map(n=>({...n,x:W/2+(Math.random()-0.5)*W*0.7,y:H/2+(Math.random()-0.5)*H*0.7,vx:0,vy:0}));
+  const idx={};nodes.forEach((n,i)=>idx[n.id]=i);
+  const links=data.links.filter(l=>idx[l.source]!==undefined&&idx[l.target]!==undefined)
+    .map(l=>({...l,s:idx[l.source],t:idx[l.target]}));
+  const maxSize=Math.max(1,...nodes.map(n=>n.size||1));
+  const R=n=>6+14*Math.sqrt((n.size||1)/maxSize);
+  /* simulate */
+  const iter=nodes.length>60?220:320;
+  for(let k=0;k<iter;k++){
+    const t=1-k/iter, rep=9000*t+900;
+    for(let i=0;i<nodes.length;i++)for(let j=i+1;j<nodes.length;j++){
+      const a=nodes[i],b=nodes[j];let dx=a.x-b.x,dy=a.y-b.y;let d2=dx*dx+dy*dy||1;
+      if(d2<250000){const f=rep/d2;dx*=f;dy*=f;a.vx+=dx;a.vy+=dy;b.vx-=dx;b.vy-=dy;}
+    }
+    links.forEach(l=>{const a=nodes[l.s],b=nodes[l.t];
+      const dx=b.x-a.x,dy=b.y-a.y,d=Math.sqrt(dx*dx+dy*dy)||1;
+      const want=90+R(a)+R(b);const f=0.02*(d-want)/d;
+      a.vx+=dx*f;a.vy+=dy*f;b.vx-=dx*f;b.vy-=dy*f;});
+    nodes.forEach(n=>{
+      n.vx+=(W/2-n.x)*0.0035;n.vy+=(H/2-n.y)*0.0035;
+      n.x+=Math.max(-14,Math.min(14,n.vx));n.y+=Math.max(-14,Math.min(14,n.vy));
+      n.vx*=0.6;n.vy*=0.6;});
+  }
+  /* fit */
+  const xs=nodes.map(n=>n.x),ys=nodes.map(n=>n.y);
+  const pad=60,minx=Math.min(...xs)-pad,maxx=Math.max(...xs)+pad,miny=Math.min(...ys)-pad,maxy=Math.max(...ys)+pad;
+  const fitK=Math.min(W/(maxx-minx),H/(maxy-miny),1.6);
+  const st={k:fitK,x:(W-(maxx+minx)*fitK)/2,y:(H-(maxy+miny)*fitK)/2};
+  const init={...st};
+  const svgNS='http://www.w3.org/2000/svg';
+  const svg=document.createElementNS(svgNS,'svg');svg.setAttribute('viewBox',`0 0 ${W} ${H}`);
+  const defs=document.createElementNS(svgNS,'defs');
+  defs.innerHTML=`<marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" fill="${cssVar('--text-faint')}"/></marker>
+  <marker id="arr-cyc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" fill="${cssVar('--bad')}"/></marker>`;
+  svg.appendChild(defs);
+  const g=document.createElementNS(svgNS,'g');svg.appendChild(g);
+  const apply=()=>g.setAttribute('transform',`translate(${st.x},${st.y}) scale(${st.k})`);
+  const edgeEls=[],nodeEls=[];
+  links.forEach(l=>{
+    const p=document.createElementNS(svgNS,'path');
+    p.setAttribute('stroke',l.cycle?cssVar('--bad'):cssVar('--text-faint'));
+    p.setAttribute('stroke-opacity',l.cycle?'0.9':'0.4');
+    p.setAttribute('stroke-width',l.cycle?2:Math.min(3,0.7+Math.log2(1+(l.weight||1))*0.5));
+    p.setAttribute('fill','none');
+    p.setAttribute('marker-end',l.cycle?'url(#arr-cyc)':'url(#arr)');
+    g.appendChild(p);edgeEls.push(p);
+  });
+  nodes.forEach(n=>{
+    const grp=document.createElementNS(svgNS,'g');grp.style.cursor='grab';grp.dataset.draggable='1';
+    const c=document.createElementNS(svgNS,'circle');
+    c.setAttribute('r',R(n));c.setAttribute('fill',gcolor[n.group||'']);
+    c.setAttribute('fill-opacity','0.85');c.setAttribute('stroke',cssVar('--bg'));c.setAttribute('stroke-width','1.5');
+    c.dataset.draggable='1';
+    const t=document.createElementNS(svgNS,'text');
+    t.textContent=n.label||n.id;t.setAttribute('font-size','11');t.setAttribute('font-family',cssVar('--mono'));
+    t.setAttribute('fill',cssVar('--text'));t.setAttribute('text-anchor','middle');t.setAttribute('dy',R(n)+13);
+    t.style.pointerEvents='none';
+    grp.appendChild(c);grp.appendChild(t);g.appendChild(grp);nodeEls.push(grp);
+    grp.addEventListener('mouseenter',e=>{
+      showTip(`<b>${esc(n.label||n.id)}</b><br>${n.meta?esc(n.meta)+'<br>':''}fan-in ${n.fanIn??'–'} · fan-out ${n.fanOut??'–'}${n.size?` · ${fmt(n.size)} loc`:''}`,e.clientX,e.clientY);
+      hl(n.id);});
+    grp.addEventListener('mousemove',e=>showTip(tip.innerHTML,e.clientX,e.clientY));
+    grp.addEventListener('mouseleave',()=>{hideTip();hl(null)});
+    let dragN=null;
+    grp.addEventListener('mousedown',e=>{e.stopPropagation();dragN={mx:e.clientX,my:e.clientY,ox:n.x,oy:n.y};});
+    window.addEventListener('mousemove',e=>{if(!dragN)return;
+      n.x=dragN.ox+(e.clientX-dragN.mx)/st.k;n.y=dragN.oy+(e.clientY-dragN.my)/st.k;draw();});
+    window.addEventListener('mouseup',()=>dragN=null);
+  });
+  function hl(id){
+    if(id===null){edgeEls.forEach((p,i)=>p.setAttribute('stroke-opacity',links[i].cycle?'0.9':'0.4'));
+      nodeEls.forEach(el=>el.style.opacity='1');return;}
+    const near=new Set([id]);
+    links.forEach(l=>{if(l.source===id)near.add(l.target);if(l.target===id)near.add(l.source)});
+    edgeEls.forEach((p,i)=>{const l=links[i];
+      p.setAttribute('stroke-opacity',(l.source===id||l.target===id)?'1':'0.08');});
+    nodeEls.forEach((el,i)=>el.style.opacity=near.has(nodes[i].id)?'1':'0.25');
+  }
+  function draw(){
+    links.forEach((l,i)=>{const a=nodes[l.s],b=nodes[l.t];
+      const dx=b.x-a.x,dy=b.y-a.y,d=Math.sqrt(dx*dx+dy*dy)||1;
+      const tx=b.x-dx/d*(R(b)+3),ty=b.y-dy/d*(R(b)+3);
+      const sx=a.x+dx/d*R(a),sy=a.y+dy/d*R(a);
+      const mx=(sx+tx)/2-dy/d*10,my=(sy+ty)/2+dx/d*10;
+      edgeEls[i].setAttribute('d',`M${sx},${sy} Q${mx},${my} ${tx},${ty}`);});
+    nodes.forEach((n,i)=>nodeEls[i].setAttribute('transform',`translate(${n.x},${n.y})`));
+  }
+  draw();apply();
+  container.appendChild(svg);
+  panZoom(container,apply,()=>st);
+  addZoombar(container,
+    ()=>{st.k=Math.min(8,st.k*1.25);apply()},
+    ()=>{st.k=Math.max(.15,st.k/1.25);apply()},
+    ()=>{Object.assign(st,init);apply()});
+  if(groupNames.length>1||data.legendExtra){
+    const leg=document.createElement('div');leg.className='legend';
+    groupNames.forEach(gn=>{leg.innerHTML+=`<span><i class="sw" style="background:${gcolor[gn]}"></i>${esc(gn||'(root)')}</span>`});
+    if(data.legendExtra)leg.innerHTML+=data.legendExtra;
+    container.appendChild(leg);
+  }
+}
+
+/* ============ squarified treemap ============ */
+/* data: {items:[{name,value,metric,meta}], metricLabel, metricMax} — value drives area, metric drives heat color */
+function renderTreemap(container,data){
+  const W=container.clientWidth||900,H=container.clientHeight||520;
+  const items=data.items.filter(d=>d.value>0).sort((a,b)=>b.value-a.value);
+  const total=items.reduce((s,d)=>s+d.value,0)||1;
+  const mmax=data.metricMax??Math.max(1,...items.map(d=>d.metric||0));
+  const rects=[];
+  (function squarify(list,x,y,w,h){
+    if(!list.length)return;
+    if(list.length===1){rects.push({d:list[0],x,y,w,h});return;}
+    let row=[],rest=list.slice(),best=Infinity;
+    while(rest.length){
+      const cand=row.concat(rest[0]);
+      const sum=cand.reduce((s,d)=>s+d.value,0);
+      const side=Math.min(w,h);
+      const scale=(w*h)*(sum/list.reduce((s,d)=>s+d.value,0));
+      const len=scale/side;
+      const worst=Math.max(...cand.map(d=>{
+        const a=(d.value/sum)*side*len;const r=Math.max(len*len/ (a/side*side/ (a/len)||1),1);
+        const iw=(d.value/sum)*side, ratio=Math.max(len/iw,iw/len);return ratio;}));
+      if(worst<=best){best=worst;row=cand;rest.shift();}
+      else break;
+    }
+    const sum=row.reduce((s,d)=>s+d.value,0);
+    const frac=sum/list.reduce((s,d)=>s+d.value,0);
+    if(w>=h){const cw=w*frac;let cy=y;
+      row.forEach(d=>{const ch=h*(d.value/sum);rects.push({d,x,y:cy,w:cw,h:ch});cy+=ch;});
+      squarify(rest,x+cw,y,w-cw,h);
+    }else{const ch=h*frac;let cx=x;
+      row.forEach(d=>{const cw=w*(d.value/sum);rects.push({d,x:cx,y,w:cw,h:ch});cx+=cw;});
+      squarify(rest,x,y+ch,w,h-ch);
+    }
+  })(items,0,0,W,H);
+  const svgNS='http://www.w3.org/2000/svg';
+  const svg=document.createElementNS(svgNS,'svg');svg.setAttribute('viewBox',`0 0 ${W} ${H}`);
+  const lo=cssVar('--heat-lo'),hi=cssVar('--heat-hi');
+  rects.forEach(r=>{
+    const t=Math.pow(Math.min(1,(r.d.metric||0)/mmax),0.6);
+    const g=document.createElementNS(svgNS,'g');
+    const rc=document.createElementNS(svgNS,'rect');
+    rc.setAttribute('x',r.x+1);rc.setAttribute('y',r.y+1);
+    rc.setAttribute('width',Math.max(0,r.w-2));rc.setAttribute('height',Math.max(0,r.h-2));
+    rc.setAttribute('rx',3);rc.setAttribute('fill',lerpColor(lo,hi,t));
+    rc.setAttribute('stroke',cssVar('--bg'));rc.setAttribute('stroke-width','1');
+    g.appendChild(rc);
+    if(r.w>66&&r.h>22){
+      const tx=document.createElementNS(svgNS,'text');
+      const nm=r.d.name.split('/').pop();
+      tx.textContent=nm.length>Math.floor(r.w/6.6)?nm.slice(0,Math.floor(r.w/6.6)-1)+'…':nm;
+      tx.setAttribute('x',r.x+7);tx.setAttribute('y',r.y+16);
+      tx.setAttribute('font-size','11');tx.setAttribute('font-family',cssVar('--mono'));
+      tx.setAttribute('fill',t>0.55?'#fff':cssVar('--text'));tx.style.pointerEvents='none';
+      g.appendChild(tx);
+    }
+    g.addEventListener('mouseenter',e=>{rc.setAttribute('stroke',cssVar('--text'));
+      showTip(`<b>${esc(r.d.name)}</b><br>${esc(data.valueLabel||'size')}: ${fmt(r.d.value)}<br>${esc(data.metricLabel||'metric')}: ${fmt(r.d.metric||0)}${r.d.meta?'<br>'+esc(r.d.meta):''}`,e.clientX,e.clientY);});
+    g.addEventListener('mousemove',e=>showTip(tip.innerHTML,e.clientX,e.clientY));
+    g.addEventListener('mouseleave',()=>{rc.setAttribute('stroke',cssVar('--bg'));hideTip();});
+    svg.appendChild(g);
+  });
+  container.appendChild(svg);
+  const leg=document.createElement('div');leg.className='legend';
+  leg.innerHTML=`<span>area = ${esc(data.valueLabel||'size')}</span><span><i class="sw" style="background:${lo}"></i>low ${esc(data.metricLabel||'')}</span><span><i class="sw" style="background:${hi}"></i>high ${esc(data.metricLabel||'')}</span>`;
+  container.appendChild(leg);
+}
+
+/* ============ auto-init viz blocks ============ */
+document.querySelectorAll('.viz[data-render]').forEach(el=>{
+  const dataEl=el.nextElementSibling;
+  if(!dataEl||dataEl.type!=='application/json')return;
+  let data;try{data=JSON.parse(dataEl.textContent)}catch(e){el.textContent='data parse error';return}
+  const render=()=>{
+    if(el.dataset.done)return;el.dataset.done='1';
+    try{
+      if(el.dataset.render==='forcegraph')renderForceGraph(el,data);
+      else if(el.dataset.render==='treemap')renderTreemap(el,data);
+    }catch(e){el.innerHTML='<p style="padding:16px" class="dim">render error: '+esc(e.message)+'</p>';}
+  };
+  const panel=el.closest('.panel');
+  if(panel&&panel.classList.contains('active'))render();
+  else window.addEventListener('tab:shown',ev=>{if(panel&&ev.detail.id===panel.id)render();});
+});
+
+/* ============ mermaid (lazy per tab, with pan/zoom) ============ */
+(function(){
+  if(!document.querySelector('.mermaid'))return;
+  const s=document.createElement('script');
+  s.src='https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js';
+  s.onload=()=>{
+    if(typeof mermaid==='undefined'){document.querySelectorAll('.mermaid').forEach(n=>{n.style.cssText='white-space:pre;font-family:var(--mono);font-size:12px;padding:14px;overflow-x:auto';});return;}
+    mermaid.initialize({startOnLoad:false,securityLevel:'loose',theme:'base',
+      themeVariables:{
+        primaryColor:cssVar('--surface-2'),primaryTextColor:cssVar('--text'),
+        primaryBorderColor:cssVar('--border-strong'),lineColor:cssVar('--text-dim'),
+        secondaryColor:cssVar('--accent-dim'),tertiaryColor:cssVar('--surface'),
+        background:cssVar('--surface'),mainBkg:cssVar('--surface-2'),
+        nodeTextColor:cssVar('--text'),fontFamily:cssVar('--sans'),fontSize:'14px',
+        actorBkg:cssVar('--surface-2'),actorBorder:cssVar('--accent'),actorTextColor:cssVar('--text'),
+        signalColor:cssVar('--text-dim'),signalTextColor:cssVar('--text'),
+        labelBoxBkgColor:cssVar('--surface-2'),labelTextColor:cssVar('--text'),
+        loopTextColor:cssVar('--text-dim'),noteBkgColor:cssVar('--warn-dim'),noteTextColor:cssVar('--text'),noteBorderColor:cssVar('--warn'),
+        clusterBkg:cssVar('--accent-dim'),clusterBorder:cssVar('--border-strong'),titleColor:cssVar('--text'),
+        edgeLabelBackground:cssVar('--surface')
+      }});
+    async function renderIn(panel){
+      const nodes=[...panel.querySelectorAll('.mermaid:not([data-processed])')];
+      if(!nodes.length)return;
+      try{await mermaid.run({nodes});}catch(e){/* leaves source visible */}
+      nodes.forEach(n=>{
+        const wrap=n.closest('.mermaid-wrap');if(!wrap||wrap.dataset.pz)return;wrap.dataset.pz='1';
+        const vp=wrap.querySelector('.mviewport')||wrap;
+        const svg=n.querySelector('svg');if(!svg)return;
+        svg.style.maxWidth='none';
+        const st={k:1,x:0,y:0},init={k:1,x:0,y:0};
+        const apply=()=>{svg.style.transformOrigin='0 0';svg.style.transform=`translate(${st.x}px,${st.y}px) scale(${st.k})`};
+        panZoom(vp,apply,()=>st);
+        addZoombar(wrap,()=>{st.k=Math.min(8,st.k*1.25);apply()},()=>{st.k=Math.max(.2,st.k/1.25);apply()},()=>{Object.assign(st,init);apply()});
+      });
+    }
+    const active=document.querySelector('.panel.active');if(active)renderIn(active);
+    window.addEventListener('tab:shown',e=>{const p=document.getElementById(e.detail.id);if(p)renderIn(p);});
+  };
+  s.onerror=()=>{document.querySelectorAll('.mermaid').forEach(n=>{n.style.cssText='white-space:pre;font-family:var(--mono);font-size:12px;padding:14px;overflow-x:auto';});};
+  document.head.appendChild(s);
+})();
+</script>
+</body>
+</html>
