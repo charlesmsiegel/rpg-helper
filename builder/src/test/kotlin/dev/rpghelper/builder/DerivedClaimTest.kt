@@ -7,6 +7,7 @@ import dev.rpghelper.pack.Packs
 import dev.rpghelper.pack.map
 import java.nio.file.Files
 import java.nio.file.Path
+import kotlinx.serialization.json.jsonObject
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -92,6 +93,30 @@ class DerivedClaimTest {
     }
 
     @Test
+    fun `a claim the summary repeats is judged every time it appears`() {
+        // The chip goes on the *first* occurrence -- `Anchors.within` resolves there --
+        // so the remainder must lose only that one. Removing every occurrence dropped the
+        // later copies out of the check entirely: never judged against the fallback
+        // evidence, and rendered with neither a chip nor a footer citation.
+        val claim = CorpusPack.spec.derived.single().cites.first().claim!!
+        val repeated = withDerivedText(CorpusPack.spec, "$claim $claim")
+
+        val asked = mutableListOf<String>()
+        val recording = Judge { text, evidence ->
+            asked += text
+            overlapJudge.judge(text, evidence)
+        }
+        PackBuilder(repeated, CorpusPack.EMBEDDER, recording)
+            .buildTo(directory.resolve("repeated.rpgpack"))
+
+        assertEquals(
+            2,
+            asked.count { it == claim },
+            "both occurrences reach the judge, not just the attributed one: $asked",
+        )
+    }
+
+    @Test
     fun `a pack with a dropped summary still activates`() {
         // Dropping enrichment is not rejecting the book. A 300-page pack refused over one
         // bad summary is the "builder nobody can use" failure applied to activation.
@@ -110,4 +135,25 @@ class DerivedClaimTest {
         assertEquals("unchecked", note.severity)
         assertTrue(note.detail.contains("no judge"))
     }
+}
+
+/** The corpus with its derived summary's text replaced. */
+private fun withDerivedText(corpus: CorpusSpec, text: String): CorpusSpec {
+    val json = kotlinx.serialization.json.Json.parseToJsonElement(
+        java.nio.file.Files.readString(corpus.root.resolve("pack.json")),
+    ).jsonObject
+    val derived = json.getValue("derived") as kotlinx.serialization.json.JsonArray
+    val patched = kotlinx.serialization.json.JsonObject(
+        derived.single().jsonObject.toMutableMap().apply {
+            put("text", kotlinx.serialization.json.JsonPrimitive(text))
+        },
+    )
+    return CorpusSpec(
+        corpus.root,
+        kotlinx.serialization.json.JsonObject(
+            json.toMutableMap().apply {
+                put("derived", kotlinx.serialization.json.JsonArray(listOf(patched)))
+            },
+        ),
+    )
 }

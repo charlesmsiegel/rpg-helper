@@ -60,6 +60,51 @@ class ManifestTest {
     }
 
     @Test
+    fun `a name with a space or a hash becomes a usable URL`() {
+        // Concatenated raw, `model v2.gguf` throws in URI.create and `weights#1.bin`
+        // becomes a fragment -- so the request goes to the wrong file and *succeeds*. The
+        // manifest passes its own round-trip check either way, so the failure surfaces
+        // only later, in fetch-model, on someone else's machine.
+        val awkward = Files.createTempDirectory("awkward-names")
+        Files.writeString(awkward.resolve("model v2.gguf"), "x")
+        Files.writeString(awkward.resolve("weights#1.bin"), "y")
+        val manifest = ModelManifest.parse(
+            manifestJson("id", "name", "l", "https://x.invalid/m", awkward),
+        )
+
+        val urls = manifest.files.associate { it.name to it.url }
+        assertEquals("https://x.invalid/m/model%20v2.gguf", urls.getValue("model v2.gguf"))
+        assertEquals("https://x.invalid/m/weights%231.bin", urls.getValue("weights#1.bin"))
+
+        // And every one of them is a URI that names the path it was meant to name.
+        for (file in manifest.files) {
+            val uri = java.net.URI.create(file.url)
+            assertEquals(null, uri.fragment, "${file.url} must not carry a fragment")
+            assertTrue(uri.path.endsWith(file.name), "${uri.path} should end with ${file.name}")
+        }
+    }
+
+    @Test
+    fun `a non-ASCII name is percent-encoded from its UTF-8 bytes`() {
+        // Tested on the function rather than through a real file, because a filesystem
+        // whose encoding is ASCII cannot hold the name at all -- and the encoding rule is
+        // about bytes, which is exactly what that filesystem would take away.
+        assertEquals("mod%C3%A8le.gguf", urlSegment("modèle.gguf"))
+        assertEquals("mod%C3%A8le.gguf", java.net.URI.create("https://x.invalid/" + urlSegment("modèle.gguf")).rawPath.removePrefix("/"))
+        assertEquals("/modèle.gguf", java.net.URI.create("https://x.invalid/" + urlSegment("modèle.gguf")).path)
+    }
+
+    @Test
+    fun `unreserved characters are left alone, and a plus is not a space`() {
+        // URLEncoder is not used: it encodes for query strings, where a space becomes `+`.
+        // In a path a `+` is a literal plus sign, so the request would ask for a file that
+        // is not the one the manifest pinned.
+        assertEquals("a-b._c~d9", urlSegment("a-b._c~d9"))
+        assertEquals("a%20b", urlSegment("a b"))
+        assertEquals("a%2Bb", urlSegment("a+b"))
+    }
+
+    @Test
     fun `a directory with nothing in it is an error, not an empty manifest`() {
         val empty = Files.createTempDirectory("empty")
         val failure = runCatching {

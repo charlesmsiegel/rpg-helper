@@ -424,4 +424,53 @@ class PackLibraryTest {
             .use { it.exec("UPDATE pack_meta SET embedder_id = 'not-bundled'") }
         assertNull(library.borrow(pack.installId))
     }
+
+    // ------------------------------------------------------------------ install ids
+
+    @Test
+    fun `an install id is never handed out twice, even after an uninstall`() {
+        // A plain INTEGER PRIMARY KEY assigns max(rowid) + 1, so deleting the highest row
+        // frees its id -- and uninstall deletes the row immediately while deferring the
+        // file's unlink until the last reader closes. Reuse would stage the next install
+        // into `packs/<id>.rpgpack` while a live query is reading that exact path,
+        // truncating it under the reader, after which releasing the old lease deletes the
+        // *new* pack's bytes.
+        val first = installed(library.install(forge()))
+        val lease = library.borrow(first.installId)
+        assertTrue(lease != null, "held open, as a query in flight would hold it")
+
+        library.uninstall(first.installId)
+        val second = installed(library.install(forge()))
+
+        assertTrue(
+            second.installId > first.installId,
+            "got #${second.installId} after #${first.installId}",
+        )
+        assertTrue(Files.exists(lease!!.file), "the leased file is still the leased file")
+        lease.close()
+    }
+
+    // ------------------------------------------------------------------ the byte ceiling
+
+    @Test
+    fun `the chunk-text ceiling counts bytes, not characters`() {
+        // SQLite's length() on TEXT counts characters. Measured that way, the limit is
+        // silently three times larger for CJK and four for emoji -- so the packs this
+        // bound exists to catch are exactly the ones that pass it.
+        val small = PackLibrary(
+            db, root, setOf(PackForge.EMBEDDER),
+            PackLibrary.PackLimits(maxTextBytes = 400),
+        )
+        // Each of these is one character and four UTF-8 bytes; 150 of them is 600 bytes
+        // and 150 characters, so it passes a character count and fails a byte count.
+        val text = "\uD83D\uDD25".repeat(150)
+        val pack = forge { c ->
+            c.prepareStatement("UPDATE chunks SET text = ? WHERE chunk_id = 3").use { statement ->
+                statement.setString(1, text)
+                statement.executeUpdate()
+            }
+        }
+        val result = small.install(pack)
+        assertTrue(result is InstallResult.TooLarge, "expected a size refusal, got $result")
+    }
 }

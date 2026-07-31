@@ -42,6 +42,16 @@ choosing — overwriting another pack, or the app's own database, while the row 
 under the attacker's uid. The filename is `install_id`, an integer the app assigns, and
 nothing derived from pack content is ever concatenated into a path.
 
+**`install_id` is `AUTOINCREMENT`, and that is load-bearing rather than tidy.** A plain
+`INTEGER PRIMARY KEY` assigns `max(rowid) + 1`, so deleting the highest row frees its id
+for reuse — and uninstall deletes the row *immediately* while deferring the file's unlink
+until the last reader closes (§1.4). Uninstall the highest-id pack during a query, install
+another before that query finishes, and the new install stages into
+`packs/<install_id>.rpgpack` — the same path the live query is reading — truncating it
+under the reader, after which releasing the old lease deletes the *new* pack's bytes. With
+`AUTOINCREMENT` an id is never handed out twice for the life of the database, so the
+filename cannot collide with a file someone still holds.
+
 `pack_uid` is still validated on activation — non-empty, and within a length bound — but
 that validation is not what makes this safe. Not using it is.
 
@@ -146,7 +156,7 @@ honestly promise today.
 <!-- BEGIN GENERATED DDL: edit StateSchema.V1, not this block -->
 ```sql
 CREATE TABLE installed_packs (
-    install_id   INTEGER PRIMARY KEY,
+    install_id   INTEGER PRIMARY KEY AUTOINCREMENT,
     pack_uid     TEXT    NOT NULL,
     pack_version TEXT    NOT NULL,
     title        TEXT    NOT NULL,

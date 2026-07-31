@@ -360,7 +360,17 @@ object ConstraintParser {
         require(!primitive.isString) {
             "'$field' must be a JSON number, not the quoted string \"${primitive.content}\""
         }
-        return primitive.doubleOrNull ?: error("'$field' is not a number: ${primitive.content}")
+        val value = primitive.doubleOrNull
+            ?: error("'$field' is not a number: ${primitive.content}")
+        // `1e309` is syntactically valid JSON and parses to infinity. An infinite maximum
+        // turns a range into a rule nothing can violate; an infinite minimum turns it into
+        // one every finite value violates. Both are silent -- the parser reports success,
+        // and the dropped-constraint report, which exists precisely so a weakened rule is
+        // never invisible, says nothing.
+        if (!value.isFinite()) {
+            error("'$field' is ${primitive.content}, which is not a finite number")
+        }
+        return value
     }
 
     private fun bound(obj: JsonObject, field: String): Bound? {

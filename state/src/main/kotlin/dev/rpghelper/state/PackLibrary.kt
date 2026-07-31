@@ -426,7 +426,12 @@ class PackLibrary(
                 Triple("table rows", "SELECT count(*) FROM table_rows", limits.maxTableRows),
                 Triple(
                     "a chunk's text",
-                    "SELECT COALESCE(max(length(text)), 0) FROM chunks",
+                    // Cast to BLOB, because `length()` on TEXT counts *characters*. The
+                    // limit and its message are stated in bytes, and every game book that
+                    // is not English prose gets its ceiling silently raised otherwise --
+                    // by three for CJK, four for emoji -- so the exact packs this bound
+                    // exists to catch are the ones that pass it.
+                    "SELECT COALESCE(max(length(CAST(text AS BLOB))), 0) FROM chunks",
                     limits.maxTextBytes,
                 ),
                 Triple(

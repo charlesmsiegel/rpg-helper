@@ -57,19 +57,24 @@ object Packs {
     fun openCheck(path: Path, supportedEmbedders: Set<EmbedderContract>): String? =
         runCatching {
             JdbcDb.openReadOnly(path).use { db ->
+                // Read as Long, never narrowed to Int. `4294967297` truncates to 1 and
+                // `4294967424` truncates to 128, so a damaged or substituted file could
+                // declare exactly the gross metadata corruption this check exists to
+                // catch and be lent out anyway. The full validator reads
+                // `schema_version` as a Long for the same reason.
                 val meta = db.map(
                     "SELECT schema_version, embedder_id, embedder_dim FROM pack_meta",
-                ) { Triple(it.int(0), it.string(1), it.int(2)) }.singleOrNull()
+                ) { Triple(it.long(0), it.string(1), it.long(2)) }.singleOrNull()
                     ?: return@use "pack_meta does not hold exactly one row"
 
                 val (version, embedderId, dim) = meta
-                if (version != PackSchema.SCHEMA_VERSION) {
+                if (version != PackSchema.SCHEMA_VERSION.toLong()) {
                     return@use "schema version $version; this build understands " +
                         "${PackSchema.SCHEMA_VERSION}"
                 }
                 val contract = supportedEmbedders.firstOrNull { it.id == embedderId }
                     ?: return@use "needs embedder '$embedderId', which this build does not bundle"
-                if (contract.dim != dim) {
+                if (contract.dim.toLong() != dim) {
                     return@use "embedder '$embedderId' is ${contract.dim}-dimensional here, " +
                         "pack declares $dim"
                 }

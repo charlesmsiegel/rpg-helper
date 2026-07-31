@@ -384,7 +384,7 @@ internal fun manifestJson(
         val hex = digest.digest().joinToString("") { "%02x".format(it) }
         """    {
       "name": ${quote(name)},
-      "url": ${quote(baseUrl.trimEnd('/') + "/" + name)},
+      "url": ${quote(baseUrl.trimEnd('/') + "/" + urlSegment(name))},
       "bytes": ${Files.size(file)},
       "sha256": "$hex"
     }"""
@@ -403,6 +403,32 @@ $entries
     // digests, a single safe leaf per file name -- is enforced on the way out too.
     ModelManifest.parse(json)
     return json
+}
+
+/**
+ * A file name as one URL path segment.
+ *
+ * `model v2.gguf` and `weights#1.bin` are valid leaf names, and concatenated raw they
+ * produce a URL that either throws in `URI.create` or asks for a different path — `#`
+ * becomes a fragment, so the request goes to the wrong file and succeeds. The manifest
+ * still passes its own round-trip check, so the failure surfaces only later, in
+ * `fetch-model`, on someone else's machine.
+ *
+ * Unreserved characters per RFC 3986 pass through; everything else is percent-encoded
+ * from its UTF-8 bytes. `URLEncoder` is not used: it encodes for query strings, where a
+ * space becomes `+` rather than `%20`, which in a path is a literal plus sign.
+ */
+internal fun urlSegment(name: String): String = buildString {
+    for (byte in name.toByteArray(Charsets.UTF_8)) {
+        val character = byte.toInt().toChar()
+        if (character.isLetterOrDigit() && byte.toInt() in 0..127 ||
+            character in "-._~"
+        ) {
+            append(character)
+        } else {
+            append("%%%02X".format(byte.toInt() and 0xFF))
+        }
+    }
 }
 
 /** JSON string escaping. A file name holding a quote or a backslash is a valid file name. */

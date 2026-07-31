@@ -431,9 +431,23 @@ class PackBuilder(
         }
         // Whatever no claim span covers falls back to the whole-chunk citations, which is
         // the same rule generated answers follow: weaker, and defined.
-        val covered = regions.map { it.first }
-        val remainder = derived.text.let { text ->
-            covered.fold(text) { acc, claim -> acc.replace(claim, " ") }
+        //
+        // Built from the spans the chips are actually placed at, not by `replace`.
+        // `writeDerived` anchors each claim with `Anchors.within(text, claim)` -- the
+        // *first* occurrence -- while `replace` removed every one, so a summary that says
+        // the same sentence twice lost its later copies from the remainder: never judged
+        // against the fallback evidence, and rendered with neither a chip nor a footer.
+        val remainder = buildString {
+            val text = derived.text
+            val blanked = BooleanArray(text.length)
+            for ((claim, _) in regions) {
+                val at = text.indexOf(claim)
+                if (at < 0) continue
+                for (index in at until at + claim.length) blanked[index] = true
+            }
+            for ((index, character) in text.withIndex()) {
+                append(if (blanked[index]) ' ' else character)
+            }
         }
         for (sentence in sentences(remainder)) regions += sentence to wholeChunk
 

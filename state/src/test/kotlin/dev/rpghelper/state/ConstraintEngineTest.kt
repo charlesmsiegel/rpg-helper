@@ -342,6 +342,25 @@ class ConstraintEngineTest {
     }
 
     @Test
+    fun `a number too large to be a number is dropped`() {
+        // `1e309` is syntactically valid JSON and parses to infinity. An infinite maximum
+        // turns a range into a rule nothing can violate; an infinite minimum turns it into
+        // one every finite value violates. Both are silent -- the parser reports success,
+        // and the dropped-constraint report says nothing.
+        for (args in listOf(
+            """{"selector":"attribute.*","max":1e309}""",
+            """{"selector":"attribute.*","min":-1e309}""",
+        )) {
+            val result = ConstraintParser.parse(1, ruleset, "range", args, 1)
+            assertTrue(result.isFailure, "accepted $args")
+            assertTrue(
+                result.exceptionOrNull()!!.message!!.contains("finite"),
+                result.exceptionOrNull()!!.message!!,
+            )
+        }
+    }
+
+    @Test
     fun `malformed JSON is dropped rather than crashing the load`() {
         assertTrue(ConstraintParser.parse(1, ruleset, "range", "{not json", 1).isFailure)
         assertTrue(ConstraintParser.parse(1, ruleset, "range", """{"min":1}""", 1).isFailure)

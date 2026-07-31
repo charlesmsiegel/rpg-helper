@@ -23,7 +23,7 @@ object StateSchema {
 
     val V1: String = """
         CREATE TABLE installed_packs (
-            install_id   INTEGER PRIMARY KEY,
+            install_id   INTEGER PRIMARY KEY AUTOINCREMENT,
             pack_uid     TEXT    NOT NULL,
             pack_version TEXT    NOT NULL,
             title        TEXT    NOT NULL,

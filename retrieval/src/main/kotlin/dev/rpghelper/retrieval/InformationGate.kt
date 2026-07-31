@@ -142,6 +142,7 @@ object InformationGate {
         pack: ActivePack,
         groups: List<TermGroup>,
         superseded: SupersededSet = SupersededSet.EMPTY,
+        candidates: Collection<Long> = emptyList(),
     ): Coverage {
         // Withdrawn chunks are removed from the statistics, not only from the results. A
         // corrected passage and its correction say much the same thing, so a term the
@@ -159,16 +160,30 @@ object InformationGate {
         val total = pack.db.map(
             "SELECT count(*) FROM chunks WHERE 1=1${excluding("chunk_id")}",
         ) { it.long(0) }.single()
+
+        // **Two queries per term, and neither returns a posting list.** A valid pack may
+        // hold half a million chunks, so materializing every chunk that holds each of a
+        // 32-term query's terms is up to sixteen million boxed longs retained until gating
+        // finishes -- on a phone, to answer a question about at most fifty candidates.
+        // The frequency comes back as a count, and membership is asked only about the
+        // chunks that are actually up for admission.
+        val scope = candidates.distinct()
+        val restriction =
+            if (scope.isEmpty()) " AND rowid IS NULL" else " AND rowid IN (${scope.joinToString(",")})"
+
         val postings = mutableMapOf<String, Set<Long>>()
         val idf = mutableMapOf<String, Double>()
 
         for (term in groups.flatMap { it.terms }.distinct()) {
             val literal = LexicalQuery.literal(term).replace("'", "''")
-            val holders = pack.db.map(
-                "SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH '$literal'$exclusion",
+            val frequency = pack.db.map(
+                "SELECT count(*) FROM chunks_fts WHERE chunks_fts MATCH '$literal'$exclusion",
+            ) { it.long(0) }.single()
+            postings[term] = pack.db.map(
+                "SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH '$literal'" +
+                    "$exclusion$restriction",
             ) { it.long(0) }.toSet()
-            postings[term] = holders
-            idf[term] = idf(holders.size.toLong(), total)
+            idf[term] = idf(frequency, total)
         }
         return Coverage(postings, idf, groups)
     }
