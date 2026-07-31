@@ -66,16 +66,27 @@ killed between the two leaves either a row describing a version, title, and size
 longer match the bytes retrieval will open, or a row pointing at a file that was never
 completed.
 
-So installation is journalled:
+So installation is journalled, and **a replacement is staged beside the pack it will
+replace rather than over it**:
 
-1. Insert the row with `state = 'installing'` and its assigned `install_id`, committed.
+1. Insert a **new** row with its own `install_id` and `state = 'installing'`, committed.
 2. Copy, validate, digest, and move the file into `packs/<install_id>.rpgpack`.
-3. Update the row to `state = 'ready'` with the digest and metadata, committed.
+3. In one transaction: delete the previous `ready` row for this `pack_uid` if there is
+   one, and mark the new row `ready` with its digest and metadata.
+4. Delete the previous file, which no longer has a row.
+
+Step 1 needs the uniqueness of `pack_uid` to apply **only among `ready` rows**, which is
+why the schema declares it as a partial index rather than a column constraint. Reusing the
+existing row instead would be simpler and is unsafe: a crash before step 3 would leave
+reconciliation deleting both the half-written replacement *and* the working pack the user
+still had.
 
 **On startup the app reconciles**: every `installing` row is deleted along with any file
 under its `install_id`, and every file with no matching `ready` row is deleted. Both
-directions, because a crash can leave either. The reconciliation is idempotent and runs
-before any pack is opened.
+directions, because a crash can leave either. Because a replacement never touches the
+previous row until step 3, a crash at any point leaves the old pack installed, active, and
+intact — which is the property that matters when the thing being replaced is the book
+someone is running a game from tonight.
 
 ### Corruption after install is caught by a digest, not by the cheap checks
 
@@ -138,7 +149,7 @@ PRAGMA user_version = 1;
 
 CREATE TABLE installed_packs (
     install_id   INTEGER PRIMARY KEY,
-    pack_uid     TEXT    NOT NULL UNIQUE,
+    pack_uid     TEXT    NOT NULL,
     pack_version TEXT    NOT NULL,
     title        TEXT    NOT NULL,
     ruleset_id   TEXT,
@@ -153,6 +164,11 @@ CREATE TABLE installed_packs (
 );
 
 CREATE UNIQUE INDEX idx_packs_priority ON installed_packs(priority);
+
+-- Unique among ready rows only, so a replacement can be staged alongside the pack it
+-- replaces (§1). A column-level UNIQUE would make the journal's first step impossible.
+CREATE UNIQUE INDEX idx_packs_uid_ready
+    ON installed_packs(pack_uid) WHERE state = 'ready';
 
 -- Documents -------------------------------------------------------------------
 
@@ -338,6 +354,7 @@ The key is a hash over:
 - the **active-set fingerprint**: the ordered list of `(pack_uid, file_sha256)` for every
   active pack, in priority order
 - the generative model's identity and quantization
+- an **app-defined generation contract version**
 
 Both of the first two are more specific than they first appear, and each was wrong in an
 earlier version of this section.
@@ -355,7 +372,15 @@ whose `pack_uid` already exists replaces it (§1), and nothing requires the repl
 declare a new `pack_version` — a corrected rebuild may keep it. `file_sha256` changes
 whenever the bytes do, which is the property the cache actually needs.
 
-With both, **there is no invalidation logic**. Activate a pack, deactivate one, reorder
+The contract version is a constant in the app binary, bumped whenever anything that
+shapes a rendered card changes: retrieval thresholds, the routing partition, the
+generation prompt, attribution parsing, or the card's serialized form. Everything else in
+the key describes the *inputs*; without this, nothing describes the *code*. Cached cards
+persist in `state.db` across upgrades and are stored already rendered, so an upgraded app
+would otherwise keep serving answers built under rules it no longer follows — and the
+claim that no invalidation is needed would be true only of the pack side.
+
+With all three, **there is no invalidation logic**. Activate a pack, deactivate one, reorder
 priority, replace a book with a corrected rebuild, ask a differently-resolved follow-up,
 or change models, and the key changes — old entries stop being reachable rather than
 needing to be found and deleted. Invalidation logic is where cache bugs live, and the
@@ -417,8 +442,16 @@ A pack is a file someone else built, and activation and retrieval are both linea
 size. Nothing above stops a pack declaring ten million vectors or a million aliases, and
 the result is not a wrong answer but an app that stops responding.
 
-So activation enforces ceilings on chunk count, vector count, and `entities` row count,
-and refuses a pack that exceeds them with a message naming the limit. The numbers are
+So activation enforces ceilings on **file size** first, then on chunk count, vector count,
+and `entities` row count, and then on the size of individual values — the longest
+`chunks.text`, the largest BLOB — and refuses a pack that exceeds any of them with a
+message naming the limit.
+
+Row counts alone do not bound memory. One chunk holding a gigabyte of text, or a single
+enormous embedding BLOB, is under every count ceiling and still terminates the process
+during import — the validator materializes a value before it can judge it. Per-value
+limits are checked with SQLite's `length()`, which reads the stored size without loading
+the payload, so the check runs before the allocation it exists to prevent. The numbers are
 sized well above any real book and are **pending measurement** against the corpus, like
 the retrieval thresholds — a ceiling set by guesswork either rejects real content or
 fails to bound anything.
@@ -499,7 +532,9 @@ it is stated again here because uninstall is where it would actually get broken.
 | Replacement confirmation | installing a pack whose uid matches an inactive one leaves it inactive; no install activates a pack without confirmation |
 | Query snapshot | deactivating a pack mid-query does not change that query's results |
 | Deferred deletion | uninstalling a pack whose file a query holds open does not delete it until the reader finishes |
-| Hostile bounds | a pack exceeding a declared ceiling is refused, naming the limit |
+| Hostile bounds | a pack exceeding any ceiling is refused, naming the limit; an oversized single value is refused without being materialized |
+| Replacement crash-safety | a crash at each step of a replacement leaves the previous pack installed, active, and intact |
+| Contract version | bumping the generation contract version makes every existing cache entry unreachable |
 
 That last row is deliberately a test rather than a review checklist item. It is a single
 boolean in a manifest, its default is the wrong value, and nothing about the app's
