@@ -112,6 +112,12 @@ signal**, never an index-time injection — writing aliases into the index would
 BM25 term statistics with text that does not appear in the book and would make an alias
 change require an FTS rebuild.
 
+0. **Aliases are matched in normal form.** `entities.alias` is stored lowercased, NFC,
+   and diacritic-folded — the same form §4.3's tokenization produces — and activation
+   rejects a pack storing an alias in any other form. Otherwise a pack shipping
+   `Fireball` or `Váss` has aliases that can never match anything, silently, which is the
+   same failure tracker keys solve by normalizing at entry. Matching does not normalize on
+   the fly: an indexed lookup against `idx_entities_alias` is the point of the index.
 1. Tokenize the normalized query the same way the pinned tokenizer does (§4.3).
 2. For n from 5 down to 1, match every n-gram against `entities.alias` across all active
    packs. Matching is **greedy, longest-first, and non-overlapping**: once an n-gram
@@ -351,6 +357,7 @@ Over three kinds of list:
 - one **lexical** list per surviving pack
 - one **dense** list per surviving contract group
 - one **entity** list, holding chunks named by a matched alias with a non-NULL `chunk_id`
+  — **restricted to chunks that already appear in a gated list**
 
 ```
 score(c) = Σ  1 / (k + rank_L(c))
@@ -364,6 +371,16 @@ than as a multiplier is deliberate: an entity hit is another piece of evidence, 
 belongs in the same arithmetic as the other evidence. Its members all sit at rank 1,
 since an entity match has no internal ordering — it is a flat contribution of `1/(k+1)`,
 which is the same weight as topping one other list.
+
+**An entity hit reinforces a candidate; it never introduces one.** The entity list passes
+through no gate — an alias n-gram either matched or it did not, and there is no score to
+threshold. If it could contribute candidates of its own, a query where every pack and
+every contract gated out could still produce an answer whose entire evidence is a
+substring match, and §7.4's refusal rule would be false as written.
+
+So the list is intersected with the union of the gated lexical and dense lists before
+fusion. A chunk nothing else found is not promoted by an alias alone, and **"gating left
+no candidates" and "the app refuses" stay the same statement.**
 
 Priority breaks exact ties: among candidates with equal fused scores, the one from the
 higher-priority pack leads.
@@ -394,15 +411,34 @@ they asked about a place.
 
 Both signals supply it, and a parent is independent if **either** test passes:
 
+Before either test runs: **a parent whose redacted text is empty or whitespace-only is
+never independent.** A `setting` chunk entirely covered by its children has nothing of its
+own to contribute, and sending it to generation would contribute an empty context.
+
 **Dense.** The parent's best-scoring `content` vector carries `window_start` /
-`window_end`. The hit is independent when that window overlaps text outside the child's
-span. An `expansion` hit counts as independent by construction, because the builder
-generates a parent's expansions from its *redacted* text.
+`window_end`. Overlap alone is not evidence: a window containing the whole nested table
+plus one adjacent byte overlaps text outside the child while having scored entirely on the
+child's content, and routing would then keep a parent whose relevant material redaction is
+about to remove.
+
+So the window must carry **at least 64 bytes outside the child's span, and at least a
+quarter of its own length** — enough that the window is plausibly scoring on the parent's
+own prose rather than on a boundary sliver. An `expansion` hit counts as independent by
+construction, because the builder generates a parent's expansions from its *redacted*
+text.
 
 **Lexical.** Re-run the query terms against the parent's redacted text — the parent's
-`text` with every nested verbatim child's span excised. It is one string already in
-memory and one match test, and it answers the question directly rather than by proxy.
-Tokenization uses the same rules as §4.3.
+`text` with every nested verbatim child's span excised, tokenized by §4.3's rules.
+
+The criterion is not "any term matches", which almost any English prose satisfies through
+a word like *check* or *creature*, nor "all terms match", which nothing satisfies. It is:
+**every query term that matched inside the child's span must also match outside it.** That
+asks the question the rule is actually about — did the parent match *because of* the child
+— rather than a proxy for it. A term the child never contained is not evidence either way
+and does not participate.
+
+Both thresholds are tunable and are measured by the dedup rows of the regression suite.
+The 64-byte and quarter-length figures are starting points, not findings.
 
 Without these, "independent match" would be a rule an implementer could only guess at,
 and the guess would fall one way or the other: discard lore that was genuinely relevant,
@@ -446,7 +482,9 @@ numbers the retrieval regression suite measures recall against.
 | Gating | a pack or group with nothing above threshold contributes nothing; adding an irrelevant pack never changes the top results |
 | Refusal | with everything gated out, the refusal card fires and no generated card is produced |
 | Collapse-before-fuse | a chunk with a dozen vectors occupies one fused position |
-| Dedup | all three cases, with the independence tests exercised in both directions |
+| Dedup | all three cases, with both independence tests exercised in both directions, including a window that clears the child by one byte and a parent whose redaction leaves nothing |
+| Alias normal form | a pack storing an alias with capitals or diacritics is rejected at activation |
+| Entity reinforcement | an alias hit never introduces a candidate no gated list contained; with everything gated out the refusal still fires |
 | Composite identity | two packs each holding a chunk 1 never merge; citations resolve to the right book |
 | Regression | labelled query sets per test pack, recall@k, gated in CI |
 | Performance | retrieval latency across increasing active-pack counts, tracked as a gate |
@@ -463,6 +501,7 @@ Not open questions — mechanisms are specified. These are constants that need t
 query sets to exist before they can be set honestly:
 
 - the per-contract dense similarity thresholds, one per bundled embedder
+- the dense independence minimums in §9.1 (64 bytes, one quarter of the window)
 - the global lexical gate threshold, and whether IDF normalization (§7.3) is needed
 - per-list depth and final candidate count
 - the RRF `k`, if 60 proves wrong for lists this short
