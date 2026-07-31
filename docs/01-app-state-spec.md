@@ -2,9 +2,9 @@
 
 Everything the app owns, as opposed to everything a pack ships.
 
-Packs are read-only files (`pack-schema.md`). This document specifies the database the
+Packs are read-only files (`00-pack-schema.md`). This document specifies the database the
 app writes to: which packs are installed and active, the documents and trackers from
-`documents-and-constraints-spec.md`, model download state, and the conversational
+`07-documents-and-constraints-spec.md`, model download state, and the conversational
 window.
 
 Implementation order: **1 of 8** — see the README for the full sequence and why it runs in this order.
@@ -29,10 +29,20 @@ writing, and no app table lives inside a pack.
 <app-private>/
   state.db                 the database specified here
   packs/
-    <pack_uid>.rpgpack     installed packs, byte-identical to what was imported
+    <install_id>.rpgpack   installed packs, byte-identical to what was imported
   models/
     <model_id>/            downloaded model weights
 ```
+
+**`pack_uid` never appears in a path.** It is a `TEXT` column in a file a third party
+built, with no validated grammar, so a pack declaring a uid of `../packs/<other-uid>` or
+`../../state.db` would direct the install's final move at a file of the attacker's
+choosing — overwriting another pack, or the app's own database, while the row recorded it
+under the attacker's uid. The filename is `install_id`, an integer the app assigns, and
+nothing derived from pack content is ever concatenated into a path.
+
+`pack_uid` is still validated on activation — non-empty, and within a length bound — but
+that validation is not what makes this safe. Not using it is.
 
 All of it is app-private storage. Nothing the app writes is world-readable, and nothing
 lives on external storage where another app could modify a pack the validator has already
@@ -47,15 +57,51 @@ An activation gate that can be invalidated after the fact by anything other than
 is not a gate.
 
 Install is atomic: copy to a temporary name, run the full activation validation
-(`pack-schema.md` §7), and only then move into place under `<pack_uid>.rpgpack`. A failed
-validation leaves nothing behind and reports every violation.
+(`00-pack-schema.md` §7), and only then move into place. A failed validation leaves nothing
+behind and reports every violation.
 
-At **open** the app re-runs the cheap subset — schema version, probe vector, embedder
-contract — rather than the full validation. The expensive checks answer questions about
-bytes that cannot have changed since install, and re-walking every vector in every pack
-on every launch would make cold start scale with library size for no information. The
-cheap subset still catches storage-level corruption, which is the only way those bytes
-can differ.
+**The file move and the database row must land together.** A rename is atomic for the
+file alone; it is not atomic with inserting or updating `installed_packs`. A process
+killed between the two leaves either a row describing a version, title, and size that no
+longer match the bytes retrieval will open, or a row pointing at a file that was never
+completed.
+
+So installation is journalled:
+
+1. Insert the row with `state = 'installing'` and its assigned `install_id`, committed.
+2. Copy, validate, digest, and move the file into `packs/<install_id>.rpgpack`.
+3. Update the row to `state = 'ready'` with the digest and metadata, committed.
+
+**On startup the app reconciles**: every `installing` row is deleted along with any file
+under its `install_id`, and every file with no matching `ready` row is deleted. Both
+directions, because a crash can leave either. The reconciliation is idempotent and runs
+before any pack is opened.
+
+### Corruption after install is caught by a digest, not by the cheap checks
+
+An earlier version of this section claimed the open-time subset — schema version, probe
+vector, embedder contract — was sufficient because those bytes "cannot have changed since
+install". That argument is wrong, and the failure it admits is the worst one in the app.
+
+A bit flip in `chunks.text` leaves the schema version, the probe vector, and every
+declared dimension untouched. The pack opens, validates, and **quotes mutated text as
+byte-exact**. Flash storage does rot, over the years a character sheet is meant to
+outlive its software.
+
+So installation records the **SHA-256 of the whole pack file**, computed once after
+validation succeeds, in `installed_packs.file_sha256`.
+
+- At **open**, the cheap subset runs. It is fast and catches gross damage immediately.
+- **Full digest verification runs in the background**, not on the open path: after the
+  first launch following an install, and periodically thereafter for any pack not
+  verified within the verification interval.
+- A pack whose digest no longer matches is **deactivated**, not silently repaired, and
+  the user is told to re-import it. Its documents are untouched, exactly as for an
+  uninstall.
+
+Hashing a hundred megabytes on every launch, for every pack, would put seconds on cold
+start — and a check that makes the app feel broken is a check that gets removed. Moving
+it off the open path is what makes it survivable enough to keep.
 
 ### One version of a pack at a time
 
@@ -253,7 +299,7 @@ premise: no account, no server, nothing leaves the device. An app that says so o
 first screen and then quietly syncs a character sheet to a cloud provider has broken the
 one promise a user cannot verify for themselves.
 
-The sanctioned path off the device is export (`documents-and-constraints-spec.md` §6):
+The sanctioned path off the device is export (`07-documents-and-constraints-spec.md` §6):
 explicit, per-document, and a file the user places where they choose.
 
 This costs something real — a user who loses their phone loses their characters unless
@@ -268,7 +314,7 @@ re-importing one is the same operation as importing it the first time.
 
 ## 6. Migrations
 
-The rule from `documents-and-constraints-spec.md` §2 governs here too: a character sheet
+The rule from `07-documents-and-constraints-spec.md` §2 governs here too: a character sheet
 outlives the software that checks it.
 
 - Migrations are **forward-only**, numbered, and applied in order inside one transaction

@@ -82,24 +82,32 @@ internal fun readTextPass(db: Db): TextPass {
 }
 
 /**
- * The first run of at least three ASCII letters in [text], lowercased, or null.
+ * A complete token from [text] that is safe to search for, or null.
  *
- * Three is enough to be a real token and short enough that almost any prose supplies
- * one; a chunk of pure punctuation or non-Latin script simply yields nothing and the
- * search moves to the next chunk.
+ * FTS5 phrase matching compares whole tokens, and the pinned `unicode61` tokenizer
+ * treats letters *and digits* as token characters while folding diacritics. So a
+ * candidate is only usable when it is a maximal token that survives that tokenizer
+ * unchanged apart from case: pure ASCII letters, with no digit or non-ASCII letter
+ * adjacent to it.
+ *
+ * Taking a letter run and truncating it would produce a substring rather than a token --
+ * `Acknowledgements` clipped to twelve characters matches nothing, and so do the
+ * `damage` inside `2d6damage` and the `caf` inside `Café`. Each would reject a
+ * perfectly valid pack.
  */
-private fun asciiWord(text: String): String? {
-    var start = -1
-    for (i in text.indices) {
-        val isLetter = text[i] in 'a'..'z' || text[i] in 'A'..'Z'
-        if (isLetter) {
-            if (start < 0) start = i
-            if (i - start + 1 >= 12) return text.substring(start, i + 1).lowercase()
-        } else {
-            if (start >= 0 && i - start >= 3) return text.substring(start, i).lowercase()
-            start = -1
+internal fun asciiWord(text: String): String? {
+    var i = 0
+    while (i < text.length) {
+        if (!text[i].isLetterOrDigit()) {
+            i++
+            continue
         }
+        var end = i
+        while (end < text.length && text[end].isLetterOrDigit()) end++
+        val token = text.substring(i, end)
+        val plainAscii = token.all { it in 'a'..'z' || it in 'A'..'Z' }
+        if (plainAscii && token.length in 3..20) return token.lowercase()
+        i = end
     }
-    if (start >= 0 && text.length - start >= 3) return text.substring(start).lowercase()
     return null
 }

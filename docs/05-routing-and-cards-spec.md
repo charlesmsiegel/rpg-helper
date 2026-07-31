@@ -6,7 +6,7 @@ This is where the central guarantee is kept or lost:
 
 > **A quote and a paraphrase must never be confusable, anywhere in the app.**
 
-The pack contract exists to make byte-exact quotation possible and `retrieval-spec.md`
+The pack contract exists to make byte-exact quotation possible and `04-retrieval-spec.md`
 delivers candidates without deciding anything about them. Everything in this document is
 about not squandering that between the database and the screen.
 
@@ -44,7 +44,7 @@ unverified generation between the user and content a frontier model already prod
 the builder already claim-checked.
 
 If only one route has candidates, only that card type appears. If retrieval returned
-nothing — which happens exactly when gating left nothing (`retrieval-spec.md` §7.4) — the
+nothing — which happens exactly when gating left nothing (`04-retrieval-spec.md` §7.4) — the
 refusal card, and never a generated one.
 
 ### Card order
@@ -98,7 +98,7 @@ prevent, and a malformed span is not a reason to take the risk — the child rem
 independently retrievable and quotable, which is how the user should have been getting it
 anyway.
 
-The redacted text is also what `retrieval-spec.md` §9.1 re-runs the query against for the
+The redacted text is also what `04-retrieval-spec.md` §9.1 re-runs the query against for the
 lexical independence test, so the two uses agree by construction.
 
 ### 2.3 The query is split too
@@ -126,7 +126,7 @@ Generation is instructed to answer solely from the provided context and to decli
 mechanical sub-question outright.
 
 **A prompt instruction is a request, not a guarantee.** The claim-support suite in
-`test-infrastructure-spec.md` is what keeps this honest, and it is the reason none of the
+`02-test-infrastructure-spec.md` is what keeps this honest, and it is the reason none of the
 above is treated as sufficient on its own.
 
 ---
@@ -166,7 +166,7 @@ Prose the on-device model produced from route-3 chunks.
 | appearance | typographically unmistakable against a verbatim card |
 
 That last row is the most important design decision in the app and it belongs to
-`ui-spec.md`. What this document requires of it: the distinction must hold **at a glance,
+`06-ui-spec.md`. What this document requires of it: the distinction must hold **at a glance,
 in both themes, at every text size**, and must not depend on colour alone.
 
 ### 3.3 Derived
@@ -279,7 +279,7 @@ Off by default; a setting, not a gesture.
 | Context exclusion | verbatim-class and derived chunks never enter the generation context by any path |
 | Residual intent | when both routes fire, generation receives only the residual; an empty residual produces no card |
 | Citation integrity | every citation resolves to a chunk that was actually in context |
-| Claim support | every claim in a generated answer is entailed by the chunk it cites — see `test-infrastructure-spec.md` |
+| Claim support | every claim in a generated answer is entailed by the chunk it cites — see `02-test-infrastructure-spec.md` |
 | Empty | empty retrieval produces the refusal card and never a generated one |
 | Model absent | route 3 with no model produces the *model unavailable* card, listing the chunks with citations; quote and derived cards are unaffected |
 | Card order | quotes, then derived, then generated, across mixed results |

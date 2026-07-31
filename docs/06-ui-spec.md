@@ -101,11 +101,11 @@ The primary destination and the app's opening screen.
 | element | contents |
 |---|---|
 | query bar | text field, microphone, camera |
-| capability chips | what the active packs can do (`capabilities-spec.md` §5) |
+| capability chips | what the active packs can do (`08-capabilities-spec.md` §5) |
 | answer feed | the conversation, newest at the bottom |
 | new topic | clears the feed, and therefore the context |
 
-The feed **is** the conversational window (`app-state-spec.md` §3). One control clears
+The feed **is** the conversational window (`01-app-state-spec.md` §3). One control clears
 both, because a hidden context that silently changes what a question means is at odds with
 an app whose pitch is that you can tell where its answers came from.
 
@@ -122,7 +122,7 @@ every control.
 | priority | drag to reorder; the order is total and visible |
 | supersessions in effect | what each errata pack corrects, and in which book |
 | install from file | the only install path that exists |
-| storage used | three figures — packs, models, app data — per `app-state-spec.md` §7 |
+| storage used | three figures — packs, models, app data — per `01-app-state-spec.md` §7 |
 | build report | read from the pack's own `build_report` table |
 
 **Supersessions render from the citation snapshot** each row carries, so an errata pack
@@ -150,7 +150,7 @@ remedies are:
 
 A document with unaccepted violations shows a count. A draft shows a draft badge, because
 minimum-bound violations are suppressed while it is one
-(`documents-and-constraints-spec.md` §4.5) and a user should know that is why the sheet
+(`07-documents-and-constraints-spec.md` §4.5) and a user should know that is why the sheet
 looks clean.
 
 ### 2.4 Document view
@@ -198,7 +198,7 @@ suggest otherwise.
 | Colour independence | the distinction holds with colour removed |
 | Screen reader order | the accessibility label states the card kind before its content |
 | No quote truncation | a quote longer than the viewport is never ellipsised at any text scale |
-| Renderer safety | markdown metacharacters in a quote body render literally (`routing-and-cards-spec.md` §3.1) |
+| Renderer safety | markdown metacharacters in a quote body render literally (`05-routing-and-cards-spec.md` §3.1) |
 | Hidden controls | microphone and camera are absent, with explanation, when their models are |
 | Validation states | the three document states render distinctly and map to the right remedy |
 | Supersession display | an errata pack whose target is absent still renders its snapshot citation |

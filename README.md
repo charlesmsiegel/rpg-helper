@@ -23,15 +23,15 @@ they should be built:
 
 | # | Document | What it pins | Why here |
 |---|---|---|---|
-| — | [`pack-schema.md`](docs/pack-schema.md) | the pack format — DDL, vector layout, probe constant, dice grammar | **built**; the contract everything else reads |
-| 1 | [`app-state-spec.md`](docs/app-state-spec.md) | the app's own database, install and activation, caching, migrations, backup | nothing else can run until a pack can be installed and activated |
-| 2 | [`test-infrastructure-spec.md`](docs/test-infrastructure-spec.md) | the corpus, labelled query sets, the claim-support judge, CI gates | retrieval is unmeasurable without a corpus; building it afterwards means calibrating gates against nothing |
-| 3 | [`model-runtime-spec.md`](docs/model-runtime-spec.md) | the three on-device models, their interfaces, the download contract | retrieval needs a real embedding space; the other two models can follow |
-| 4 | [`retrieval-spec.md`](docs/retrieval-spec.md) | query grammars, supersession, gating, fusion, nesting deduplication | the core, and the least settled part of the design — attack it early, now that it is measurable |
-| 5 | [`routing-and-cards-spec.md`](docs/routing-and-cards-spec.md) | the three routes, redaction, residual intent, the five cards | where the central guarantee is enforced; needs candidates to route |
-| 6 | [`ui-spec.md`](docs/ui-spec.md) | the four surfaces, and what the quote/paraphrase distinction must survive | first point there is a usable app: a quoting rules reference that needs no downloaded model |
-| 7 | [`documents-and-constraints-spec.md`](docs/documents-and-constraints-spec.md) | documents, trackers, ruleset binding, the five constraint predicate forms | the second of the app's three promises, and independent of every one above except #1 |
-| 8 | [`capabilities-spec.md`](docs/capabilities-spec.md) | the capability vocabulary, manifests, the dice roller | the one feature whose absence the design explicitly calls acceptable |
+| — | [`00-pack-schema.md`](docs/00-pack-schema.md) | the pack format — DDL, vector layout, probe constant, dice grammar | **built**; the contract everything else reads |
+| 1 | [`01-app-state-spec.md`](docs/01-app-state-spec.md) | the app's own database, install and activation, caching, migrations, backup | nothing else can run until a pack can be installed and activated |
+| 2 | [`02-test-infrastructure-spec.md`](docs/02-test-infrastructure-spec.md) | the corpus, labelled query sets, the claim-support judge, CI gates | retrieval is unmeasurable without a corpus; building it afterwards means calibrating gates against nothing |
+| 3 | [`03-model-runtime-spec.md`](docs/03-model-runtime-spec.md) | the three on-device models, their interfaces, the download contract | retrieval needs a real embedding space; the other two models can follow |
+| 4 | [`04-retrieval-spec.md`](docs/04-retrieval-spec.md) | query grammars, supersession, gating, fusion, nesting deduplication | the core, and the least settled part of the design — attack it early, now that it is measurable |
+| 5 | [`05-routing-and-cards-spec.md`](docs/05-routing-and-cards-spec.md) | the three routes, redaction, residual intent, the five cards | where the central guarantee is enforced; needs candidates to route |
+| 6 | [`06-ui-spec.md`](docs/06-ui-spec.md) | the four surfaces, and what the quote/paraphrase distinction must survive | first point there is a usable app: a quoting rules reference that needs no downloaded model |
+| 7 | [`07-documents-and-constraints-spec.md`](docs/07-documents-and-constraints-spec.md) | documents, trackers, ruleset binding, the five constraint predicate forms | the second of the app's three promises, and independent of every one above except #1 |
+| 8 | [`08-capabilities-spec.md`](docs/08-capabilities-spec.md) | the capability vocabulary, manifests, the dice roller | the one feature whose absence the design explicitly calls acceptable |
 
 Two notes on the ordering.
 

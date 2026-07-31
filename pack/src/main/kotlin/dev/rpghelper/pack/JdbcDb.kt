@@ -51,8 +51,19 @@ class JdbcDb private constructor(private val connection: Connection) : Db {
         }
 
         override fun long(column: Int): Long = results.getLong(column + 1)
-        override fun string(column: Int): String = results.getString(column + 1)
-        override fun bytes(column: Int): ByteArray = results.getBytes(column + 1)
+
+        // A pack's own DDL declares these NOT NULL, and a pack's DDL is whatever its
+        // builder chose to write. Returning the platform type straight into Kotlin's
+        // non-null String would raise a NullPointerException -- which is not a
+        // PackReadException, escapes the validator, and puts a corrupt pack past the
+        // gate as a crash rather than a refusal.
+        override fun string(column: Int): String =
+            results.getString(column + 1)
+                ?: throw PackReadException("NULL in a column the format requires (index $column)")
+
+        override fun bytes(column: Int): ByteArray =
+            results.getBytes(column + 1)
+                ?: throw PackReadException("NULL in a column the format requires (index $column)")
     }
 
     companion object {

@@ -60,6 +60,17 @@ enum class ViolationCode {
     SPAN_INVERTED,
 
     /**
+     * A nested child's text is not what its parent's text holds at the child's offset.
+     *
+     * Both strings ship in the pack, so this is decidable here even though slice
+     * equality against the *source* is builder-only. Without it, redaction excises the
+     * wrong region of the parent: the marker replaces innocuous prose and the child's
+     * actual rule text passes into the generation context -- the precise failure
+     * redaction exists to prevent, on a pack that satisfied every other check.
+     */
+    NESTED_TEXT_MISMATCH,
+
+    /**
      * Two chunks in one source share a `stable_key`. Supersession targets
      * `(source_uid, stable_key)`, so a duplicate makes an erratum ambiguous: it would
      * filter an unrelated passage alongside the one it meant to correct.
@@ -115,6 +126,31 @@ enum class ViolationCode {
      * leaving its quotation uncitable, which is the one thing a quotation must not be.
      */
     DANGLING_SOURCE_REFERENCE,
+
+    /** Two `sources` rows share a `source_uid`, making every erratum targeting it ambiguous. */
+    DUPLICATE_SOURCE_UID,
+
+    /** A row is NULL in a reference column the format requires. */
+    MISSING_CHUNK_REFERENCE,
+
+    // --- Structured tables -------------------------------------------------------
+    /** A `table_rows` row names a `table_id` with no matching `tables` row. */
+    DANGLING_TABLE_REFERENCE,
+
+    /**
+     * A table row's stored text is not the slice of its table chunk that its span names.
+     *
+     * The roller renders outcome text under the quotation rule. Unchecked, that launders
+     * arbitrary `table_rows.text` into quotation-styled output carrying the table's own
+     * citation -- fabricated text wearing the app's most authoritative rendering.
+     */
+    TABLE_ROW_TEXT_MISMATCH,
+
+    /** A table row's span falls outside the span of the table chunk it belongs to. */
+    TABLE_ROW_SPAN_OUTSIDE_CHUNK,
+
+    /** Two rows of one table claim overlapping outcome ranges, or one is inverted. */
+    TABLE_ROW_RANGE_OVERLAP,
 
     // --- Closed vocabularies -----------------------------------------------------
     LOCATOR_SCHEME_INVALID,

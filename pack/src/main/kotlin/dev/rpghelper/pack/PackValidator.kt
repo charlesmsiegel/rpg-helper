@@ -109,16 +109,24 @@ class PackValidator(private val supportedEmbedders: Set<EmbedderContract>) {
         val text = readTextPass(db)
 
         checkLexicalIndex(db, text.canary, violations)
+        val sourceUids = mutableMapOf<Long, String>()
+        db.forEachRow("SELECT source_id, source_uid FROM sources") {
+            sourceUids[it.long(0)] = it.string(1)
+        }
+
         checkChunkShape(chunks, violations)
-        checkStableKeys(chunks, violations)
+        checkStableKeys(chunks, sourceUids, violations)
         checkNesting(chunks, violations)
         checkSiblingSpans(chunks, violations)
         checkSpanLengths(chunks, text.lengths, violations)
         checkDerivation(db, chunks, violations)
         checkClaimSpans(db, violations)
         checkVectors(db, meta.embedderDim, chunks, text.lengths, violations)
+        checkNestedText(db, violations)
         checkChunkReferences(db, chunks, violations)
         checkSourceReferences(db, chunks, violations)
+        checkSourceUids(db, violations)
+        checkTableRows(db, chunks, violations)
         checkClosedVocabularies(db, violations)
 
         return ValidationReport(violations)

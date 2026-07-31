@@ -3,7 +3,7 @@ package dev.rpghelper.pack
 /**
  * The pack contract, as the app understands it.
  *
- * [DDL] is normative. `docs/pack-schema.md` embeds this same text, and
+ * [DDL] is normative. `docs/00-pack-schema.md` embeds this same text, and
  * `SchemaDocSyncTest` fails if the two drift -- so the prose spec cannot quietly
  * describe a format the code does not implement.
  */

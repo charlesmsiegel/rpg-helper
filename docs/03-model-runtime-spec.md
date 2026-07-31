@@ -69,7 +69,7 @@ spaces, and for differing `embedder_dim` the cosine is not even computable.
 
 So the app groups active packs by contract and embeds the query once per distinct
 contract. Each group is scored, gated, and fused in its own space
-(`retrieval-spec.md` §6–7).
+(`04-retrieval-spec.md` §6–7).
 
 The cost is one embedder inference per distinct contract per query, which is the real
 constraint keeping the supported set small — not tidiness.
@@ -90,7 +90,7 @@ The same text embeds to the same vector within a device and a build. Across devi
 small numeric variation from different hardware paths is tolerable and expected.
 
 Nothing in the design depends on cross-device bit-identical embeddings: the answer cache
-keys on query text rather than on vectors (`app-state-spec.md` §4), and the retrieval
+keys on query text rather than on vectors (`01-app-state-spec.md` §4), and the retrieval
 regression suite measures recall@k on a fixed runtime rather than asserting scores.
 
 ---
@@ -163,7 +163,7 @@ text, `describeImage` must never produce an answer — and a generic completion 
 would let a fourth job appear without any of that being considered. This is the same
 reasoning that closes the capability and constraint vocabularies.
 
-`RedactedChunk` is the type carrying the redaction from `routing-and-cards-spec.md` §2.2.
+`RedactedChunk` is the type carrying the redaction from `05-routing-and-cards-spec.md` §2.2.
 That generation cannot be handed a raw chunk is enforced by the type, not by a comment.
 
 ### 4.2 None of the jobs is unconditional

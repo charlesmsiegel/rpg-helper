@@ -8,7 +8,7 @@ fusion arithmetic, the gating mechanism, and the evidence tests that decide nest
 deduplication.
 
 What leaves this pipeline is a ranked list of `(pack_uid, chunk_id)` with enough
-attached evidence for `routing-and-cards-spec.md` to decide how each one renders.
+attached evidence for `05-routing-and-cards-spec.md` to decide how each one renders.
 Retrieval never decides whether something is quoted.
 
 Implementation order: **4 of 8** — see the README for the full sequence and why it runs in this order.
@@ -90,7 +90,7 @@ the query begins with a pronoun or a demonstrative, or is elliptical (opens with
 about*, *and*, *how about*), **and** the conversation window is non-empty. Nothing else
 triggers it. A self-contained question never wakes the model, however it is phrased.
 
-When it runs, the model sees at most the last three turns (`app-state-spec.md` §3) and
+When it runs, the model sees at most the last three turns (`01-app-state-spec.md` §3) and
 rewrites the query. It never substitutes for retrieval, which runs fresh every turn.
 
 **Voice must not require the generative model.** Bundling ASR to keep voice available
@@ -176,7 +176,7 @@ Applied **before scoring**, at the candidate level.
 ### 5.1 The superseded set
 
 Computed once per change to the active set — not per query — and held with the active-set
-fingerprint from `app-state-spec.md` §4:
+fingerprint from `01-app-state-spec.md` §4:
 
 1. Collect every `supersessions` row from every **active** pack.
 2. Keep a row only when its `target_source_uid` matches a `sources.source_uid` in some
@@ -250,7 +250,7 @@ cosine divides by both norms; the pack's norm is accumulated in the same pass th
 it. Decoding is float16 → float32 with accumulation in float32.
 
 Retrieval latency across increasing active-pack counts is a tracked performance gate
-(`test-infrastructure-spec.md`), because this stage is where it degrades first.
+(`02-test-infrastructure-spec.md`), because this stage is where it degrades first.
 
 ### 6.3 Expansion vectors compete, then vanish
 

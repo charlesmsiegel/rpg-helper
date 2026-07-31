@@ -431,12 +431,12 @@ object PackForge {
     }
 
     private fun insertConstraints(connection: Connection) {
-        // The predicate vocabulary is not pinned yet (see docs/pack-schema.md), so the
-        // row shape is exercised without asserting any particular form's semantics.
+        // One instance of the `range` form from the closed vocabulary pinned in
+        // docs/07-documents-and-constraints-spec.md §4.
         connection.exec(
             """
             INSERT INTO constraints (constraint_id, form, args, chunk_id)
-            VALUES (1, 'tracker-range', '{"tracker":"hp","min":0}', 1)
+            VALUES (1, 'range', '{"selector":"hp.current","min":0}', 1)
             """.trimIndent(),
         )
     }

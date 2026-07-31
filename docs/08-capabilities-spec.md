@@ -12,7 +12,7 @@ executor and the builder's validator agreeing about what an expression means.
 Implementation order: **8 of 8** — see the README for the full sequence and why it runs in this order.
 
 Status: specified, unimplemented. The dice **grammar** is already pinned in
-`pack-schema.md` §6; this document specifies its **executor**.
+`00-pack-schema.md` §6; this document specifies its **executor**.
 
 ---
 
@@ -48,7 +48,7 @@ the pack.
 
 ### 1.2 Two levels of validation, and where the line is
 
-`pack-schema.md` §7 rejects a pack whose `capabilities` row references a chunk that does
+`00-pack-schema.md` §7 rejects a pack whose `capabilities` row references a chunk that does
 not exist. That is structural: the row is unusable and its presence means the pack was
 built wrong.
 
@@ -89,10 +89,24 @@ A `tables` row: `table_id`, the `chunk_id` of the verbatim `table` chunk it was 
 from, and `dice_expr`. Plus its `table_rows`: `seq`, `lo`, `hi`, a span, and the outcome
 text.
 
-The builder has already validated, deterministically and against the source, that the rows
-cover the expression's outcome range exactly — no gaps, no overlaps, nothing out of range —
-and that re-rendering them reproduces the source chunk. A table that could not pass ships
-with no rows at all, so **the app never has to handle a partial table.**
+The builder validates, deterministically and against the source, that the rows cover the
+expression's outcome range exactly and that re-rendering them reproduces the source chunk.
+A table that could not pass ships with no rows at all.
+
+**That is the builder's guarantee, and the app does not take it on trust.** An earlier
+version of this section concluded that "the app never has to handle a partial table" — a
+guarantee about untrusted input, sourced from the artifact under inspection. Activation
+now checks what is decidable on-device: that every `table_id` resolves, that ranges do not
+overlap and are not inverted, that each row's span lies inside its table chunk's span, and
+that each row's `text` byte-equals that slice (`00-pack-schema.md` §7).
+
+The last of those is the one that matters most, because §3.4 renders outcome text under
+the quotation rule: without it, a bad pack puts arbitrary prose into the app's most
+authoritative rendering, beneath the table's own citation.
+
+Full coverage of the expression's outcome range is checked when the roller lands, since it
+needs the grammar parser. Until then a roll that matches no row **fails closed**: no
+result, and the capability is reported as unusable rather than silently returning nothing.
 
 ### 3.2 Evaluation
 
@@ -100,7 +114,10 @@ with no rows at all, so **the app never has to handle a partial table.**
    (§1.2); it cannot happen for a pack whose builder used the same grammar version, and
    the app does not guess at expressions it does not recognise.
 2. Roll each die **independently** and sum, then apply the modifier.
-3. Find the row whose `[lo, hi]` contains the result. Exactly one will, by construction.
+3. Find the row whose `[lo, hi]` contains the result. Activation has already established
+   that at most one can, and that no row is inverted. If none matches — possible until
+   range-coverage validation lands with this parser — the roll fails closed: no result,
+   and the capability is reported unusable.
 4. Present the result.
 
 **Independent dice, not a uniform draw over the range.** `2d6` and `d11+1` share the range
@@ -136,7 +153,7 @@ app rolled what it said it rolled, and it is the only visible evidence that `2d6
 dice.
 
 The outcome text is a validated span of the table chunk, so it renders under the same
-rule as any quotation (`routing-and-cards-spec.md` §3.1): plain text, no markdown
+rule as any quotation (`05-routing-and-cards-spec.md` §3.1): plain text, no markdown
 interpretation, byte-exact.
 
 ---
@@ -200,7 +217,7 @@ actually do is visible rather than discovered by accident.
 Chips reflect the active set: activating a pack that ships a roller adds its chips,
 deactivating removes them. A chip whose underlying chunk has been superseded disappears
 along with it — capabilities, `tables`, `entities`, and `constraints` rows are all
-deactivated together with the chunk they are rooted at (`retrieval-spec.md` §5.2), because
+deactivated together with the chunk they are rooted at (`04-retrieval-spec.md` §5.2), because
 each is addressed by id and never passes through retrieval. Without that, an erratum's
 corrected table would be unquotable in search while the *original* stayed rollable, and
 the app would quietly roll on obsolete rows.

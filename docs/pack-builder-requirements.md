@@ -8,7 +8,7 @@ The builder runs on a desktop. It may use frontier models and may include
 hand-authoring tools. It is not resource-constrained.
 
 Status: accumulating. Nothing here is implemented — but the format it targets now is:
-see `pack-schema.md` for the pinned DDL, vector layout, probe constant, and dice
+see `00-pack-schema.md` for the pinned DDL, vector layout, probe constant, and dice
 grammar, and the app's `:pack` module for the checks a pack must survive at activation.
 
 ---
@@ -201,7 +201,7 @@ flagged violation can link to the passage it came from. Without this table the a
 constraint engine has nothing to load and every game's rules would have to be built
 into the binary.
 
-Exact DDL is pinned by the app's schema spec, `pack-schema.md`, which is now written
+Exact DDL is pinned by the app's schema spec, `00-pack-schema.md`, which is now written
 and implemented. The builder targets a `schema_version` and the app refuses packs it
 does not recognize.
 

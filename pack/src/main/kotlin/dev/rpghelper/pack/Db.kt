@@ -7,7 +7,7 @@ package dev.rpghelper.pack
  * SQLite on Android later without either being a rewrite. That is a real, near-term
  * swap rather than speculative generality: `sqlite-jdbc` ships native desktop
  * libraries and cannot run on a device, and the platform's own SQLite cannot be relied
- * on for FTS5 (see `docs/pack-schema.md`, "SQLite on the device").
+ * on for FTS5 (see `docs/00-pack-schema.md`, "SQLite on the device").
  *
  * Deliberately read-only and deliberately tiny. Packs are read-only at runtime, and
  * every query this module issues is a static string, so there is no parameter binding

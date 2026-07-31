@@ -370,7 +370,7 @@ form's arguments. Packs instantiate forms and never compose expressions; no code
 eval, no callbacks. `chunk_id` cites the passage stating the rule, so a flagged
 violation can link to the text behind it.
 
-The vocabulary is pinned in `documents-and-constraints-spec.md` §4: five forms, a
+The vocabulary is pinned in `07-documents-and-constraints-spec.md` §4: five forms, a
 two-shape selector grammar, and bounds that may reference another tracker. The app
 validates a row's `chunk_id` reference at activation and its `form`/`args` when the
 constraint engine loads it.
@@ -512,8 +512,12 @@ violation is visible the builder's guarantees have demonstrably not held.
 | vector numerics | all elements finite; L2 norm above `1e-6` |
 | vector windows | `content` rows have an in-range window; `expansion` rows have none |
 | chunk shape | `kind` and `origin` in vocabulary; citation and span columns present or absent per origin; derived chunks declare no parent |
+| required columns | a NULL where the format requires a value is a violation, not an exception — the pack's own `NOT NULL` declarations are not evidence |
 | spans | `span_end - span_start` equals the UTF-8 byte length of `text`; spans not inverted |
-| stable keys | `(source_id, stable_key)` is unique |
+| nested text | a child's `text` byte-equals its parent's `text` sliced at the child's offset |
+| stable keys | `(source_uid, stable_key)` is unique |
+| source identity | `sources.source_uid` is unique |
+| table rows | every `table_id` resolves; ranges are non-overlapping and not inverted; each row's span lies inside its table chunk's span, and its `text` byte-equals that slice |
 | nesting | child contained in parent; same source; at most one level; siblings do not overlap |
 | derivation | derived chunks cite at least one chunk; every cited chunk exists and has `origin='source'` |
 | claim spans | in range of the derived text, non-empty, not inverted, on UTF-8 boundaries |
@@ -540,7 +544,20 @@ rule:
   alongside the one it meant to correct.
 - **Foreign keys are not enforcement.** SQLite does not validate rows inserted while
   foreign-key enforcement was off, which is the default, so every `REFERENCES` clause in
-  the DDL above is documentation. Reference checks are code.
+  the DDL above is documentation. Reference checks are code. The same applies to
+  `NOT NULL` and `UNIQUE`: the DDL ships *inside* the pack, so it records what that
+  builder chose to declare. Every one of those properties is checked here.
+- **Nested text agreement is decidable and load-bearing.** Slice equality against the
+  normalized *source* is builder-only, because the pack ships only its hash. Slice
+  equality of a child against its *parent's own shipped text* needs nothing the pack does
+  not carry — and without it, containment and span-length both pass for a child whose
+  span points at the wrong region, so redaction excises innocuous prose and the child's
+  real rule text passes into the generation context.
+- **`table_rows` feeds quotation-styled output.** The roller renders outcome text under
+  the quotation rule, so unchecked rows would launder arbitrary prose into the app's most
+  authoritative rendering beneath the table's own citation. Coverage of the dice
+  expression's full outcome range needs the grammar parser and lands with the roller;
+  everything decidable without it is checked at activation.
 
 ### The builder checks, at build time
 
@@ -582,7 +599,7 @@ Deliberately deferred, with what unblocks each:
 
 - ~~The constraint predicate vocabulary.~~ **Closed.** The five forms — `range`,
   `sum_range`, `count_range`, `requires`, `excludes` — their selector and bound grammars,
-  and their evaluation semantics are pinned in `documents-and-constraints-spec.md` §4.
+  and their evaluation semantics are pinned in `07-documents-and-constraints-spec.md` §4.
   The `constraints` row shape here is unchanged; `form` and `args` now have a defined
   vocabulary rather than an open one.
 - **The derivation rule for `stable_key`.** The column is pinned and required; how a

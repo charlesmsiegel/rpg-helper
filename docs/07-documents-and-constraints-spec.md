@@ -4,10 +4,10 @@ Characters and the rules that judge them.
 
 `android-app-design.md` §6 establishes what this subsystem is for and what it must not
 become. It leaves one thing explicitly open — *"the exact five predicate forms and their
-arguments"* — which `pack-schema.md` §8 in turn records as the reason the constraint
+arguments"* — which `00-pack-schema.md` §8 in turn records as the reason the constraint
 vocabulary is unpinned. This document closes that.
 
-Storage is `app-state-spec.md`'s concern; this document defines the model and the
+Storage is `01-app-state-spec.md`'s concern; this document defines the model and the
 semantics. Where the two touch, this one is normative about *meaning* and that one is
 normative about *columns*.
 
@@ -427,7 +427,7 @@ easy to break with an innocuous-looking migration.
 - **Guided creation.** A wizard over this vocabulary, per §9. It needs no new predicate
   forms; it needs an ordering over them, which is a separate question.
 - **Tracker display metadata.** Nothing here says how a tracker is *shown* — grouping,
-  ordering, labels, widget. That belongs to `ui-spec.md`, and pushing it into the pack
+  ordering, labels, widget. That belongs to `06-ui-spec.md`, and pushing it into the pack
   format would mean packs shipping layout, which is a much larger commitment than
   shipping rules.
 - **Derived trackers.** Values computed from other values (a dice pool from two

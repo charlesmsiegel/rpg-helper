@@ -7,7 +7,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * Keeps `docs/pack-schema.md` and the code honest about each other.
+ * Keeps `docs/00-pack-schema.md` and the code honest about each other.
  *
  * The spec is the contract a second team will build a pack builder against, and a
  * specification that has quietly diverged from the implementation is worse than no
@@ -29,7 +29,7 @@ class SchemaDocSyncTest {
         assertEquals(
             PackSchema.DDL.trim(),
             documented,
-            "docs/pack-schema.md has drifted from PackSchema.DDL; regenerate the block",
+            "docs/00-pack-schema.md has drifted from PackSchema.DDL; regenerate the block",
         )
     }
 
@@ -44,7 +44,7 @@ class SchemaDocSyncTest {
         assertEquals(
             ProbeVector.canonicalBytes().joinToString("") { "%02x".format(it) },
             hex,
-            "the probe encoding in docs/pack-schema.md does not match ProbeVector",
+            "the probe encoding in docs/00-pack-schema.md does not match ProbeVector",
         )
     }
 
@@ -52,7 +52,7 @@ class SchemaDocSyncTest {
     fun `the documented schema version is the one the code enforces`() {
         assertTrue(
             spec.contains("`schema_version = ${PackSchema.SCHEMA_VERSION}`"),
-            "docs/pack-schema.md does not state schema_version ${PackSchema.SCHEMA_VERSION}",
+            "docs/00-pack-schema.md does not state schema_version ${PackSchema.SCHEMA_VERSION}",
         )
     }
 
@@ -85,10 +85,10 @@ class SchemaDocSyncTest {
     private fun locateSpec(): Path {
         var directory: Path? = Path.of("").toAbsolutePath()
         while (directory != null) {
-            val candidate = directory.resolve("docs/pack-schema.md")
+            val candidate = directory.resolve("docs/00-pack-schema.md")
             if (Files.isRegularFile(candidate)) return candidate
             directory = directory.parent
         }
-        error("could not find docs/pack-schema.md above ${Path.of("").toAbsolutePath()}")
+        error("could not find docs/00-pack-schema.md above ${Path.of("").toAbsolutePath()}")
     }
 }

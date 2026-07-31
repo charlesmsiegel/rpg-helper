@@ -161,7 +161,7 @@ distrust, because its output looks like data by the time the app sees it.
 
 ## 4. Shared conformance vectors
 
-`conformance/dice-vectors.json` (`capabilities-spec.md` §4) is consumed by both the app's
+`conformance/dice-vectors.json` (`08-capabilities-spec.md` §4) is consumed by both the app's
 roller and the builder's validator. Neither owns it.
 
 Without shared vectors, the dice grammar is a specification two teams can each believe they
