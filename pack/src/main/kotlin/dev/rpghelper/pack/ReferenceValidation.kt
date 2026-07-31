@@ -3,6 +3,8 @@ package dev.rpghelper.pack
 import dev.rpghelper.pack.ViolationCode.DANGLING_CHUNK_REFERENCE
 import dev.rpghelper.pack.ViolationCode.DANGLING_SOURCE_REFERENCE
 import dev.rpghelper.pack.ViolationCode.DANGLING_TABLE_REFERENCE
+import dev.rpghelper.pack.ViolationCode.ALIAS_NOT_NORMALIZED
+import dev.rpghelper.pack.ViolationCode.DUPLICATE_SOURCE_ID
 import dev.rpghelper.pack.ViolationCode.DUPLICATE_SOURCE_UID
 import dev.rpghelper.pack.ViolationCode.GAP_REASON_INVALID
 import dev.rpghelper.pack.ViolationCode.MISSING_CHUNK_REFERENCE
@@ -72,15 +74,44 @@ internal fun checkChunkReferences(
  * aimed at it ambiguous across two books.
  */
 internal fun checkSourceUids(db: Db, out: MutableList<Violation>) {
-    val seen = mutableMapOf<String, Long>()
+    val byUid = mutableMapOf<String, Long>()
+    val ids = mutableSetOf<Long>()
     db.forEachRow("SELECT source_id, source_uid FROM sources") { row ->
         val id = row.long(0)
         val uid = row.string(1)
-        val first = seen.putIfAbsent(uid, id)
-        if (first != null) {
+
+        val firstWithUid = byUid.putIfAbsent(uid, id)
+        if (firstWithUid != null) {
             out += Violation(
                 DUPLICATE_SOURCE_UID,
-                "sources $first and $id share source_uid '$uid'",
+                "sources $firstWithUid and $id share source_uid '$uid'",
+            )
+        }
+        // The PRIMARY KEY declaration is the builder's word, like everything else in the
+        // pack's DDL. Two rows sharing an id leave every citation join free to return
+        // either book, attributing authoritative text to the wrong source.
+        if (!ids.add(id)) {
+            out += Violation(DUPLICATE_SOURCE_ID, "two sources rows share source_id $id")
+        }
+    }
+}
+
+/**
+ * `entities.alias` must be stored in the form a query is tokenized into.
+ *
+ * Matching is an indexed lookup against `idx_entities_alias`, not a fold-on-the-fly
+ * comparison — that is the point of the index. So an alias holding capitals or diacritics
+ * can never match anything, silently, for the life of the pack. It is the same failure
+ * tracker keys avoid by normalizing at entry, and the same remedy: reject it at the door.
+ */
+internal fun checkAliasNormalization(db: Db, out: MutableList<Violation>) {
+    db.forEachRow("SELECT entity_id, alias FROM entities") { row ->
+        val alias = row.string(1)
+        val folded = Utf8.foldForIndex(alias)
+        if (alias != folded) {
+            out += Violation(
+                ALIAS_NOT_NORMALIZED,
+                "entities ${row.long(0)} stores alias '$alias'; the indexed form is '$folded'",
             )
         }
     }

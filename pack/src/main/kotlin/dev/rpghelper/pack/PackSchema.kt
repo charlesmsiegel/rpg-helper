@@ -18,6 +18,14 @@ object PackSchema {
      */
     const val SCHEMA_VERSION: Int = 1
 
+    /**
+     * Longest `pack_uid` the format accepts.
+     *
+     * Generous for any real identifier, and bounded so an unbounded string cannot bloat
+     * the app's own install record.
+     */
+    const val MAX_PACK_UID_LENGTH: Int = 200
+
     /** `chunks.kind`. */
     val KINDS: Set<String> =
         setOf("rules", "table", "statblock", "readaloud", "glossary", "setting")

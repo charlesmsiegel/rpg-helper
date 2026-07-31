@@ -7,6 +7,7 @@ import dev.rpghelper.pack.ViolationCode.FTS_INDEX_UNUSABLE
 import dev.rpghelper.pack.ViolationCode.MALFORMED_SCHEMA
 import dev.rpghelper.pack.ViolationCode.MISSING_TABLE
 import dev.rpghelper.pack.ViolationCode.PACK_META_NOT_SINGLETON
+import dev.rpghelper.pack.ViolationCode.PACK_UID_INVALID
 import dev.rpghelper.pack.ViolationCode.PROBE_VECTOR_MALFORMED
 import dev.rpghelper.pack.ViolationCode.PROBE_VECTOR_MISMATCH
 import dev.rpghelper.pack.ViolationCode.UNKNOWN_EMBEDDER
@@ -102,6 +103,7 @@ class PackValidator(private val supportedEmbedders: Set<EmbedderContract>) {
         }
 
         val meta = readMeta(db)
+        checkPackUid(meta, violations)
         checkEmbedderContract(db, meta, violations)
         checkRulesetBinding(db, meta, violations)
 
@@ -127,6 +129,7 @@ class PackValidator(private val supportedEmbedders: Set<EmbedderContract>) {
         checkSourceReferences(db, chunks, violations)
         checkSourceUids(db, violations)
         checkTableRows(db, chunks, violations)
+        checkAliasNormalization(db, violations)
         checkClosedVocabularies(db, violations)
 
         return ValidationReport(violations)
@@ -150,6 +153,24 @@ class PackValidator(private val supportedEmbedders: Set<EmbedderContract>) {
                 embedderDim = it.int(6),
             )
         }.single()
+
+    /**
+     * `pack_uid` is an identity the app keys installs and cache entries on.
+     *
+     * It is never used as a path component (`01-app-state-spec.md` §1), so this is not
+     * what makes installation safe. It bounds a different problem: a blank uid would enter
+     * the unique install namespace and make every other blank-uid pack look like a
+     * replacement for it, silently inheriting an activation the user never granted.
+     */
+    private fun checkPackUid(meta: PackMeta, out: MutableList<Violation>) {
+        if (meta.packUid.isBlank() || meta.packUid.length > PackSchema.MAX_PACK_UID_LENGTH) {
+            out += Violation(
+                PACK_UID_INVALID,
+                "pack_uid must be non-blank and at most ${PackSchema.MAX_PACK_UID_LENGTH} " +
+                    "characters; this one is ${meta.packUid.length}",
+            )
+        }
+    }
 
     private fun checkEmbedderContract(db: Db, meta: PackMeta, out: MutableList<Violation>) {
         if (meta.embedderDim <= 0) {
@@ -253,16 +274,24 @@ class PackValidator(private val supportedEmbedders: Set<EmbedderContract>) {
         // always agree, so this counts the index's own per-document rows. The shadow
         // table is part of FTS5's documented on-disk structure, but if a future build
         // omits it the check is skipped rather than turned into a false rejection.
-        val indexed = try {
-            db.map("SELECT count(*) FROM chunks_fts_docsize") { it.long(0) }.singleOrNull()
+        // Compare the indexed *identifiers*, not how many there are. Equal counts do not
+        // establish equal sets: an index missing chunk 5 while carrying a stray document
+        // 999 has exactly the right cardinality, and a canary drawn from another chunk
+        // still passes -- leaving chunk 5 permanently invisible to lexical search under
+        // an activation that claimed complete coverage.
+        val unindexed = try {
+            db.map(
+                "SELECT c.chunk_id FROM chunks c " +
+                    "LEFT JOIN chunks_fts_docsize d ON d.id = c.chunk_id WHERE d.id IS NULL",
+            ) { it.long(0) }
         } catch (e: PackReadException) {
-            null
+            null // a build without the shadow table skips this rather than false-rejecting
         }
-        if (indexed != null && indexed != chunkCount) {
+        if (unindexed != null && unindexed.isNotEmpty()) {
             out += Violation(
                 FTS_INDEX_UNUSABLE,
-                "chunks_fts indexes $indexed of $chunkCount chunks; the rest are invisible " +
-                    "to lexical search",
+                "chunks_fts does not index ${unindexed.size} of $chunkCount chunks " +
+                    "(${unindexed.take(5).joinToString()}); they are invisible to lexical search",
             )
             return
         }

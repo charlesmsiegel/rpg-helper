@@ -210,4 +210,88 @@ class PackValidatorHardeningTest {
     fun `canary takes the first usable token`() {
         assertEquals("grappling", asciiWord("Grappling. To grapple a creature…"))
     }
+
+    // ---------------------------------------------------- second review round
+
+    @Test
+    fun `reports a NULL numeric column instead of reading it as zero`() {
+        // getLong returns 0 for SQL NULL, so a NULL source_id would read as source 0 --
+        // a value the validator reasons about as resolved while every join finds nothing.
+        val report = validate {
+            it.relax("chunks")
+            it.exec("UPDATE chunks SET chunk_id = NULL WHERE rowid = 3")
+        }
+        assertTrue(
+            ViolationCode.MALFORMED_SCHEMA in report.codes,
+            "expected MALFORMED_SCHEMA, got:\n$report",
+        )
+    }
+
+    @Test
+    fun `rejects two sources sharing a source_id`() {
+        // The PRIMARY KEY declaration is the builder's word. A duplicate leaves every
+        // citation join free to return either book.
+        assertRejects(ViolationCode.DUPLICATE_SOURCE_ID) {
+            it.relax("sources")
+            it.exec("UPDATE sources SET source_id = 1 WHERE source_id = 2")
+        }
+    }
+
+    @Test
+    fun `rejects an index that omits a chunk while holding a stray document`() {
+        // Equal cardinality, unequal sets: the count check alone passes and the canary,
+        // drawn from another chunk, still succeeds.
+        assertRejects(ViolationCode.FTS_INDEX_UNUSABLE) {
+            it.exec("DELETE FROM chunks_fts WHERE rowid = 5")
+            it.exec("INSERT INTO chunks_fts (rowid, text, heading_path) VALUES (999, 'x', '')")
+        }
+    }
+
+    @Test
+    fun `rejects an alias that is not in indexed form`() {
+        // Matching is an indexed lookup, so this alias could never fire.
+        assertRejects(ViolationCode.ALIAS_NOT_NORMALIZED) {
+            it.exec("UPDATE entities SET alias = 'Fireball' WHERE entity_id = 1")
+        }
+    }
+
+    @Test
+    fun `rejects an alias carrying diacritics the tokenizer folds away`() {
+        assertRejects(ViolationCode.ALIAS_NOT_NORMALIZED) {
+            it.exec("UPDATE entities SET alias = 'v\u00e1ss' WHERE entity_id = 1")
+        }
+    }
+
+    @Test
+    fun `rejects a non-verbatim child of a verbatim-class parent`() {
+        // An exact slice of rule text, reclassified as setting: retrieved alone it goes
+        // to generation, because a child candidate has no ancestor span redacted from it.
+        assertRejects(ViolationCode.NONVERBATIM_CHILD_OF_VERBATIM_PARENT) {
+            it.exec("UPDATE chunks SET kind = 'setting' WHERE chunk_id = 2")
+        }
+    }
+
+    @Test
+    fun `rejects a blank pack uid`() {
+        // A blank uid enters the unique install namespace, so every other blank-uid pack
+        // looks like a replacement for it.
+        assertRejects(ViolationCode.PACK_UID_INVALID) {
+            it.exec("UPDATE pack_meta SET pack_uid = '   '")
+        }
+    }
+
+    @Test
+    fun `rejects an overlong pack uid`() {
+        assertRejects(ViolationCode.PACK_UID_INVALID) {
+            it.exec("UPDATE pack_meta SET pack_uid = printf('%.*c', 500, 'x')")
+        }
+    }
+
+    @Test
+    fun `folds text the way the pinned tokenizer does`() {
+        assertEquals("cafe", Utf8.foldForIndex("Caf\u00e9"))
+        assertEquals("vass", Utf8.foldForIndex("V\u00e1ss"))
+        assertEquals("grapple", Utf8.foldForIndex("Grapple"))
+        assertEquals("grapple", Utf8.foldForIndex("grapple"))
+    }
 }

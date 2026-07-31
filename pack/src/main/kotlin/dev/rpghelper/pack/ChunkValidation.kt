@@ -15,6 +15,7 @@ import dev.rpghelper.pack.ViolationCode.DERIVED_CHUNK_NO_DERIVATION
 import dev.rpghelper.pack.ViolationCode.DUPLICATE_STABLE_KEY
 import dev.rpghelper.pack.ViolationCode.NESTED_TEXT_MISMATCH
 import dev.rpghelper.pack.ViolationCode.NESTING_CROSS_SOURCE
+import dev.rpghelper.pack.ViolationCode.NONVERBATIM_CHILD_OF_VERBATIM_PARENT
 import dev.rpghelper.pack.ViolationCode.NESTING_NOT_CONTAINED
 import dev.rpghelper.pack.ViolationCode.NESTING_TOO_DEEP
 import dev.rpghelper.pack.ViolationCode.PARENT_CHUNK_MISSING
@@ -141,6 +142,18 @@ internal fun checkNesting(chunks: Map<Long, ChunkRow>, out: MutableList<Violatio
                 "chunk ${chunk.id} names parent $parentId, which is not in this pack",
             )
             continue
+        }
+        // The builder requires a child of a verbatim-class parent to be verbatim-eligible.
+        // Unenforced it is a hole in the central guarantee: a `setting` child carved out
+        // of a `rules` parent is an exact slice of rule text, and routing sends it to
+        // generation because a child candidate has no ancestor span redacted from it.
+        val parentVerbatim = parent.isSource && parent.kind in PackSchema.VERBATIM_ELIGIBLE_KINDS
+        if (parentVerbatim && chunk.kind !in PackSchema.VERBATIM_ELIGIBLE_KINDS) {
+            out += Violation(
+                NONVERBATIM_CHILD_OF_VERBATIM_PARENT,
+                "chunk ${chunk.id} is '${chunk.kind}' but nests inside verbatim-class " +
+                    "chunk $parentId; its text would reach generation unredacted",
+            )
         }
         if (parent.parentId != null) {
             // Deeper structures signal the parent was chunked too coarsely.

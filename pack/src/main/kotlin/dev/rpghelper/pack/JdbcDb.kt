@@ -50,7 +50,16 @@ class JdbcDb private constructor(private val connection: Connection) : Db {
             return results.wasNull()
         }
 
-        override fun long(column: Int): Long = results.getLong(column + 1)
+        // getLong returns 0 for SQL NULL. Left unchecked, a NULL sources.source_id
+        // reads as source 0 -- a value the validator then reasons about as if it
+        // resolved, while every runtime join against it finds nothing.
+        override fun long(column: Int): Long {
+            val value = results.getLong(column + 1)
+            if (results.wasNull()) {
+                throw PackReadException("NULL in a column the format requires (index $column)")
+            }
+            return value
+        }
 
         // A pack's own DDL declares these NOT NULL, and a pack's DDL is whatever its
         // builder chose to write. Returning the platform type straight into Kotlin's

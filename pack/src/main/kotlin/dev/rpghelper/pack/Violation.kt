@@ -71,6 +71,16 @@ enum class ViolationCode {
     NESTED_TEXT_MISMATCH,
 
     /**
+     * A non-verbatim child nested inside a verbatim-class parent.
+     *
+     * The builder forbids it, and unenforced it is a hole in the central guarantee: a
+     * `setting` child carved out of a `rules` parent is an exact slice of rule text that
+     * routing sends to generation, because a child candidate has no ancestor span
+     * redacted from it.
+     */
+    NONVERBATIM_CHILD_OF_VERBATIM_PARENT,
+
+    /**
      * Two chunks in one source share a `stable_key`. Supersession targets
      * `(source_uid, stable_key)`, so a duplicate makes an erratum ambiguous: it would
      * filter an unrelated passage alongside the one it meant to correct.
@@ -130,6 +140,15 @@ enum class ViolationCode {
     /** Two `sources` rows share a `source_uid`, making every erratum targeting it ambiguous. */
     DUPLICATE_SOURCE_UID,
 
+    /**
+     * Two `sources` rows share a `source_id`.
+     *
+     * The pack's own PRIMARY KEY declaration is not evidence. A duplicate leaves every
+     * citation join able to return either book, attributing authoritative text to the
+     * wrong source.
+     */
+    DUPLICATE_SOURCE_ID,
+
     /** A row is NULL in a reference column the format requires. */
     MISSING_CHUNK_REFERENCE,
 
@@ -153,6 +172,17 @@ enum class ViolationCode {
     TABLE_ROW_RANGE_OVERLAP,
 
     // --- Closed vocabularies -----------------------------------------------------
+    /** `pack_uid` is blank, or longer than the format allows. */
+    PACK_UID_INVALID,
+
+    /**
+     * An `entities.alias` is not stored in the form the query is tokenized into.
+     *
+     * Matching is an indexed lookup, so an alias holding capitals or diacritics can never
+     * fire -- silently, and for the life of the pack.
+     */
+    ALIAS_NOT_NORMALIZED,
+
     LOCATOR_SCHEME_INVALID,
     PAGE_LABEL_SCHEME_INVALID,
     GAP_REASON_INVALID,
