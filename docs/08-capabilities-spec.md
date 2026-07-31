@@ -115,9 +115,10 @@ The last of those is the one that matters most, because §3.4 renders outcome te
 the quotation rule: without it, a bad pack puts arbitrary prose into the app's most
 authoritative rendering, beneath the table's own citation.
 
-Full coverage of the expression's outcome range is checked when the roller lands, since it
-needs the grammar parser. Until then a roll that matches no row **fails closed**: no
-result, and the capability is reported as unusable rather than silently returning nothing.
+Full coverage of the expression's outcome range is checked at activation as well, now
+that the grammar is implemented. A roll that somehow matches no row still **fails
+closed** — no result, and the capability reported unusable — because a defence that
+depends on an earlier check having run is not a defence.
 
 ### 3.2 Evaluation
 
@@ -125,10 +126,10 @@ result, and the capability is reported as unusable rather than silently returnin
    (§1.2); it cannot happen for a pack whose builder used the same grammar version, and
    the app does not guess at expressions it does not recognise.
 2. Roll each die **independently** and sum, then apply the modifier.
-3. Find the row whose `[lo, hi]` contains the result. Activation has already established
-   that at most one can, and that no row is inverted. If none matches — possible until
-   range-coverage validation lands with this parser — the roll fails closed: no result,
-   and the capability is reported unusable.
+3. Find the row whose `[lo, hi]` contains the result. Activation has established that
+   exactly one will: rows are non-overlapping, non-inverted, and cover the expression's
+   range. If none matches anyway, the roll fails closed — no result, and the capability
+   reported unusable — because a defence that assumes an earlier check ran is not one.
 4. Present the result.
 
 **Independent dice, not a uniform draw over the range.** `2d6` and `d11+1` share the range

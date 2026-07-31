@@ -3,6 +3,8 @@ package dev.rpghelper.pack
 import dev.rpghelper.pack.ViolationCode.DANGLING_CHUNK_REFERENCE
 import dev.rpghelper.pack.ViolationCode.DANGLING_SOURCE_REFERENCE
 import dev.rpghelper.pack.ViolationCode.DANGLING_TABLE_REFERENCE
+import dev.rpghelper.pack.ViolationCode.DICE_EXPR_UNPARSEABLE
+import dev.rpghelper.pack.ViolationCode.TABLE_ROWS_INCOMPLETE
 import dev.rpghelper.pack.ViolationCode.ALIAS_NOT_NORMALIZED
 import dev.rpghelper.pack.ViolationCode.DUPLICATE_SOURCE_ID
 import dev.rpghelper.pack.ViolationCode.DUPLICATE_SOURCE_UID
@@ -131,8 +133,23 @@ internal fun checkAliasNormalization(db: Db, out: MutableList<Violation>) {
  */
 internal fun checkTableRows(db: Db, chunks: Map<Long, ChunkRow>, out: MutableList<Violation>) {
     val tableChunk = mutableMapOf<Long, Long>()
-    db.forEachRow("SELECT table_id, chunk_id FROM tables") { row ->
-        tableChunk[row.long(0)] = row.long(1)
+    val expressions = mutableMapOf<Long, DiceExpression>()
+    db.forEachRow("SELECT table_id, chunk_id, dice_expr FROM tables") { row ->
+        val tableId = row.long(0)
+        tableChunk[tableId] = row.long(1)
+        val expr = row.string(2)
+        val parsed = DiceExpression.parse(expr)
+        if (parsed == null) {
+            // The app does not guess at expressions it does not recognise. A pack built
+            // against a newer grammar declares a newer schema_version and is refused
+            // before reaching here; anything else is a builder defect.
+            out += Violation(
+                DICE_EXPR_UNPARSEABLE,
+                "table $tableId declares dice_expr '$expr', which the pinned grammar refuses",
+            )
+        } else {
+            expressions[tableId] = parsed
+        }
     }
 
     val ranges = mutableMapOf<Long, MutableList<Triple<Long, Long, Long>>>()
@@ -179,7 +196,8 @@ internal fun checkTableRows(db: Db, chunks: Map<Long, ChunkRow>, out: MutableLis
     }
 
     for ((tableId, rows) in ranges) {
-        rows.sortedBy { it.first }.zipWithNext { earlier, later ->
+        val sorted = rows.sortedBy { it.first }
+        sorted.zipWithNext { earlier, later ->
             if (later.first <= earlier.second) {
                 out += Violation(
                     TABLE_ROW_RANGE_OVERLAP,
@@ -188,6 +206,55 @@ internal fun checkTableRows(db: Db, chunks: Map<Long, ChunkRow>, out: MutableLis
                 )
             }
         }
+        expressions[tableId]?.let { checkCoverage(tableId, it, sorted, out) }
+    }
+}
+
+/**
+ * A table's rows must cover its expression's outcome range exactly.
+ *
+ * The roller finds the row containing a result and asserts exactly one will. That
+ * assertion was the *builder's*, made about the artifact under inspection: a gap leaves a
+ * roll with no row, and an out-of-range row can never come up. Now that the grammar is
+ * implemented the range is computable here, so the assertion is the app's own.
+ */
+private fun checkCoverage(
+    tableId: Long,
+    expression: DiceExpression,
+    sorted: List<Triple<Long, Long, Long>>,
+    out: MutableList<Violation>,
+) {
+    val low = expression.min.toLong()
+    val high = expression.max.toLong()
+
+    val outside = sorted.filter { it.first < low || it.second > high }
+    if (outside.isNotEmpty()) {
+        out += Violation(
+            TABLE_ROWS_INCOMPLETE,
+            "table $tableId rows ${outside.map { it.third }} fall outside " +
+                "'$expression' range [$low, $high]",
+        )
+        return
+    }
+
+    var expected = low
+    for ((rowLow, rowHigh, _) in sorted) {
+        if (rowLow > expected) {
+            out += Violation(
+                TABLE_ROWS_INCOMPLETE,
+                "table $tableId has no row for ${if (rowLow - expected == 1L) "$expected" else
+                    "$expected-${rowLow - 1}"} of '$expression' range [$low, $high]",
+            )
+            return
+        }
+        if (rowHigh >= expected) expected = rowHigh + 1
+    }
+    if (expected <= high) {
+        out += Violation(
+            TABLE_ROWS_INCOMPLETE,
+            "table $tableId has no row for ${if (high == expected) "$expected" else
+                "$expected-$high"} of '$expression' range [$low, $high]",
+        )
     }
 }
 

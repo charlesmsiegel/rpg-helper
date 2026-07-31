@@ -294,4 +294,44 @@ class PackValidatorHardeningTest {
         assertEquals("grapple", Utf8.foldForIndex("Grapple"))
         assertEquals("grapple", Utf8.foldForIndex("grapple"))
     }
+
+    // ---------------------------------------------------- table coverage
+
+    @Test
+    fun `rejects a table with a gap in its outcome range`() {
+        // The roller asserts exactly one row contains a result. That assertion used to be
+        // the builder's, made about the artifact under inspection; a gap leaves a roll
+        // with no row at all.
+        assertRejects(ViolationCode.TABLE_ROWS_INCOMPLETE) {
+            it.exec("DELETE FROM table_rows WHERE seq = 3")
+        }
+    }
+
+    @Test
+    fun `rejects a table whose rows stop short of its range`() {
+        assertRejects(ViolationCode.TABLE_ROWS_INCOMPLETE) {
+            it.exec("DELETE FROM table_rows WHERE seq = 5")
+        }
+    }
+
+    @Test
+    fun `rejects a row outside the expression's range`() {
+        // An outcome that can never be rolled.
+        assertRejects(ViolationCode.TABLE_ROWS_INCOMPLETE) {
+            it.exec("UPDATE table_rows SET lo = 7, hi = 7 WHERE seq = 5")
+        }
+    }
+
+    @Test
+    fun `rejects a dice expression the grammar refuses`() {
+        assertRejects(ViolationCode.DICE_EXPR_UNPARSEABLE) {
+            it.exec("UPDATE tables SET dice_expr = '4d6kh3'")
+        }
+    }
+
+    @Test
+    fun `accepts a table whose rows cover its range exactly`() {
+        val report = validate()
+        assertTrue(report.isValid, "the fixture's d6 table covers 1-6:\n$report")
+    }
 }

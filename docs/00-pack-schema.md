@@ -537,7 +537,8 @@ violation is visible the builder's guarantees have demonstrably not held.
 | nested text | a child's `text` byte-equals its parent's `text` sliced at the child's offset |
 | stable keys | `(source_uid, stable_key)` is unique |
 | source identity | `sources.source_uid` is unique |
-| table rows | every `table_id` resolves; ranges are non-overlapping and not inverted; each row's span lies inside its table chunk's span, and its `text` byte-equals that slice |
+| dice expressions | every `tables.dice_expr` parses under the pinned grammar |
+| table rows | every `table_id` resolves; ranges are non-overlapping, not inverted, and **cover the expression's outcome range exactly**; each row's span lies inside its table chunk's span, and its `text` byte-equals that slice |
 | nesting | child contained in parent; same source; at most one level; siblings do not overlap |
 | derivation | derived chunks cite at least one chunk; every cited chunk exists and has `origin='source'` |
 | claim spans | in range of the derived text, non-empty, not inverted, on UTF-8 boundaries |
@@ -585,9 +586,10 @@ rule:
   real rule text passes into the generation context.
 - **`table_rows` feeds quotation-styled output.** The roller renders outcome text under
   the quotation rule, so unchecked rows would launder arbitrary prose into the app's most
-  authoritative rendering beneath the table's own citation. Coverage of the dice
-  expression's full outcome range needs the grammar parser and lands with the roller;
-  everything decidable without it is checked at activation.
+  authoritative rendering beneath the table's own citation. Coverage of the outcome range
+  is checked here too, now that the grammar is implemented: the roller's claim that
+  exactly one row contains any result was previously the *builder's* claim about the
+  artifact under inspection, and a gap leaves a roll with no row at all.
 
 ### The builder checks, at build time
 

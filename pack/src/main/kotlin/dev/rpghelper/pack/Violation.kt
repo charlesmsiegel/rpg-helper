@@ -171,6 +171,17 @@ enum class ViolationCode {
     /** Two rows of one table claim overlapping outcome ranges, or one is inverted. */
     TABLE_ROW_RANGE_OVERLAP,
 
+    /** A `tables.dice_expr` does not parse under the pinned grammar. */
+    DICE_EXPR_UNPARSEABLE,
+
+    /**
+     * A table's rows do not cover its expression's outcome range exactly.
+     *
+     * A gap means a roll can find no row; an out-of-range row can never be rolled. Both
+     * were previously left to the builder, whose word is the thing under inspection.
+     */
+    TABLE_ROWS_INCOMPLETE,
+
     // --- Closed vocabularies -----------------------------------------------------
     /** `pack_uid` is blank, or longer than the format allows. */
     PACK_UID_INVALID,
