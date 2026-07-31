@@ -50,24 +50,62 @@ described. Building follows risk and what unblocks a usable app.
 
 ## Status
 
-Early. The pack contract, its activation gate, and the app's own state layer are
-implemented; retrieval and the interface are not.
+The whole read path works end to end today, on the JVM, against a real pack: build a
+corpus into a `.rpgpack`, put it through the app's own activation gate, ask it a question,
+and get quote cards carrying the book's bytes and citations resolved out of the same file.
 
 | Component | State |
 |---|---|
 | Specifications | written for every subsystem; the pack and state schemas are enforced against the code by test |
 | Pack reader + activation validator (`:pack`) | implemented |
-| App state — install journal, documents, trackers (`:state`) | implemented |
-| Retrieval, answer cards, model runtime, capabilities, UI | specified, unimplemented |
-| Android app module | not started |
-| Pack builder | separate project, not started |
+| App state — install journal, documents, trackers, constraints (`:state`) | implemented |
+| Retrieval — aliases, gating, fusion, supersession, nesting (`:retrieval`) | implemented |
+| Routing and the five cards (`:routing`) | implemented, including pack-backed citation resolvers |
+| Model interfaces, attributions, claim support, downloader (`:model`) | implemented; no weights bundled |
+| Capabilities and the dice roller (`:capabilities`) | implemented |
+| Pack builder (`:builder`) | implemented; anchors, claim judging, expansion generation |
+| Command-line tool (`:cli`) | implemented — `build`, `verify`, `ask`, `roll`, `fetch-model` |
+| Test corpus (`corpus/srd`) | Emberlight, an original CC BY 4.0 game written for this purpose |
+| Android app module | not started — the one thing needing an SDK this repository does not have |
 
-Both are plain Kotlin/JVM libraries, deliberately Android-free so far. `:pack` holds the
-format definition and every check a pack must survive before the app will activate it;
-SQLite sits behind a small read-only `Db` interface, backed by `sqlite-jdbc` here and by a
-bundled SQLite on the device later. `:state` owns the app's own database — the install
-journal, documents, and trackers — and is separate rather than a widening of `:pack`,
-because a pack must never be writable by construction.
+Two things are deliberately absent rather than unfinished.
+
+**No model weights.** `:model` defines the three models as interfaces and ships a
+deterministic stand-in embedder with no weights at all, which is what makes the
+*structural* test tier possible: activation, routing, redaction, capabilities, and the
+whole fusion pipeline run end to end in milliseconds, before any weights exist. The
+generative half runs against the `Generator` interface, so every card and every guard is
+exercised by fakes. Point `fetch-model` at a manifest and the download path is real,
+resumable, and digest-verified.
+
+**No UI.** `06-ui-spec.md` is written and unimplemented; it needs the `:app` module.
+
+Every module is a plain Kotlin/JVM library, deliberately Android-free so far. `:pack`
+holds the format definition and every check a pack must survive before the app will
+activate it; SQLite sits behind a small read-only `Db` interface, backed by `sqlite-jdbc`
+here and by a bundled SQLite on the device later. `:state` owns the app's own database —
+the install journal, documents, and trackers — and is separate rather than a widening of
+`:pack`, because a pack must never be writable by construction. `:cli` is the only module
+that depends on all the others: it is the wiring, and every seam it crosses is a seam the
+app will have to cross too.
+
+## Trying it
+
+```sh
+./gradlew :cli:installDist
+CLI=cli/build/install/cli/bin/cli
+
+$CLI build corpus/srd /tmp/srd.rpgpack     # assemble, then run the app's activation gate
+$CLI ask /tmp/srd.rpgpack -- "how do I grapple someone"
+$CLI ask --why /tmp/srd.rpgpack -- "what lives in the cinder marches"
+$CLI roll /tmp/srd.rpgpack 1
+```
+
+The first prints a quote card: the book's bytes, unwrapped and unrenderered, under its
+citation. The second prints a list of passages and says the model that would phrase them
+has not been downloaded — which is the app's honest state before a download, not a mode
+built for the command line. `--why` shows what each signal contributed and what was gated
+out.
 
 ## Building
 
@@ -87,6 +125,8 @@ on every pull request. Restoring the `push`/`pull_request` triggers is a one-lin
 change once Actions is available.
 
 The suite covers the float16 codec exhaustively (all 65 536 bit patterns, against the
-JDK), the probe vector's own properties, and one deliberately-corrupted pack per
-rejection case the app promises to make. Test packs are forged in-process by
-`PackForge`, so the fixtures cannot drift from the schema they are built against.
+JDK), the probe vector's own properties, one deliberately-corrupted pack per rejection
+case the app promises to make, retrieval recall over a labelled query set, and the whole
+read path from corpus directory to rendered card. Test packs are forged in-process by
+`PackForge` and the corpus is assembled at test time from committed text, so no fixture
+can drift from the schema it is built against.

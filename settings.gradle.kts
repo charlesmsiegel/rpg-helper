@@ -7,3 +7,5 @@ include(":model")
 include(":builder")
 include(":capabilities")
 include(":routing")
+
+include(":cli")
