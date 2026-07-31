@@ -183,6 +183,60 @@ class RulesTest {
         assertFalse(check.clean)
     }
 
+    // ------------------------------------------------------------------ list states
+
+    @Test
+    fun `the four validation states are four different things`() {
+        // The distinction the Documents list rests on: `partly validated` exists so the
+        // label cannot overclaim, and `unbound` and `unvalidated` have different remedies.
+        val validated = sheet("aptitude.might" to 3.0, "aptitude.wits" to 3.0)
+        val unbound = sheet("aptitude.might" to 3.0, ruleset = null)
+        val unvalidated = sheet("aptitude.might" to 3.0, ruleset = "some-other-game")
+
+        val states = withLibrary { Rules.states(it, documents) }.associateBy { it.documentId }
+        assertEquals(Validation.VALIDATED, states.getValue(validated).validation)
+        assertEquals(Validation.UNBOUND, states.getValue(unbound).validation)
+        assertEquals(Validation.UNVALIDATED, states.getValue(unvalidated).validation)
+    }
+
+    @Test
+    fun `a list row counts unaccepted violations and accepted ones separately`() {
+        val id = sheet("aptitude.might" to 7.0, "aptitude.wits" to 9.0)
+        // Three: each aptitude is over the book's maximum of 5, and together they are over
+        // its total of 10. The sum is a separate rule and fires as one.
+        val before = withLibrary { Rules.states(it, documents) }.single { it.documentId == id }
+        assertEquals(3, before.violations)
+        assertEquals(0, before.accepted)
+
+        val one = withLibrary { Rules.check(it, documents, id) }.flagged.first().violation
+        documents.accept(id, one.fingerprint, RULESET)
+
+        val after = withLibrary { Rules.states(it, documents) }.single { it.documentId == id }
+        assertEquals(2, after.violations, "an accepted deviation is not a flag")
+        assertEquals(1, after.accepted, "and it is not gone either")
+    }
+
+    @Test
+    fun `a draft row says minimums are not being checked`() {
+        val id = sheet("aptitude.might" to 1.0)
+        assertTrue(withLibrary { Rules.states(it, documents) }.single { it.documentId == id }.draft)
+    }
+
+    // ------------------------------------------------------------------ tap-through
+
+    @Test
+    fun `a violation opens the passage that states the rule, byte for byte`() {
+        val id = sheet("aptitude.might" to 7.0, "aptitude.wits" to 3.0)
+        val violation = withLibrary { Rules.check(it, documents, id) }
+            .flagged.single { "might" in it.violation.explanation }.violation
+
+        val passage = withLibrary { Rules.passage(it, violation) }
+        assertTrue(passage != null, "the rule has to resolve to a passage")
+        assertTrue(!passage.text.isNullOrBlank(), "and to the book's own words")
+        assertEquals("srd:emberlight", passage.ref.packUid)
+        assertTrue(passage.citation != null, "under a real citation")
+    }
+
     // ------------------------------------------------------------------ the app's path
 
     @Test

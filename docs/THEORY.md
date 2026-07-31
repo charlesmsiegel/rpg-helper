@@ -248,9 +248,12 @@ with no positive queries passing. **A result computed over nothing is not a pass
 and the fifth time a bug arrives in the same shape it is the shape that needs a name, not
 the instance.
 
-Still absent: an Android surface for documents. The engine, the loader, and the CLI path are
-attached; `:app` has no sheet screen, so on the device this remains reachable only through
-the tool.
+`:app` has the surface too: a Documents list grouped by campaign, and a document view where
+a violation renders beside the tracker it names and taps through to the passage that states
+the rule. `Validation` has four states because their remedies differ, and *partly validated*
+is the one that had to exist — a dropped constraint row has no natural symptom at all, so
+without it a sheet reads as validated while a rule it should have been checked against never
+ran.
 
 ### 4.7 Assumptions no test enforces
 

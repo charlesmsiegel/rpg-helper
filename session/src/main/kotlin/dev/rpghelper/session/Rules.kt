@@ -1,6 +1,7 @@
 package dev.rpghelper.session
 
 import dev.rpghelper.pack.ChunkRef
+import dev.rpghelper.pack.PackSchema
 import dev.rpghelper.pack.map
 import dev.rpghelper.routing.Citation
 import dev.rpghelper.routing.PackCitations
@@ -61,6 +62,68 @@ data class RuleCheck(
      */
     val clean: Boolean get() = !unchecked && flagged.isEmpty() && accepted.isEmpty()
 }
+
+/**
+ * How much checking a document has actually had — **four states, because four remedies**.
+ *
+ * `06-ui-spec.md` §2.3. [PARTLY_VALIDATED] is the one that has to exist: a malformed
+ * constraint row is dropped rather than rejecting the whole pack, so without it a document
+ * would read as *validated* while a rule it should have been checked against never ran.
+ * Unlike a missing capability, which shows as a control that never appears, a missing
+ * constraint has no natural symptom at all.
+ */
+enum class Validation {
+    /** Bound to a ruleset an active pack supplies, and every constraint loaded. */
+    VALIDATED,
+
+    /** As above, but *N* constraints could not be loaded. The Packs surface names them. */
+    PARTLY_VALIDATED,
+
+    /** Bound, but the pack is absent or inactive. Install or activate it. */
+    UNVALIDATED,
+
+    /** No ruleset. Trackers work and nothing is checked. */
+    UNBOUND,
+}
+
+/** One document as a list shows it. */
+data class SheetState(
+    val documentId: Long,
+    val title: String,
+    val campaign: String?,
+    val draft: Boolean,
+    val validation: Validation,
+    /** Unaccepted violations. The number a list badge shows. */
+    val violations: Int,
+    /** Deliberate deviations, kept out of the count and out of the flags. */
+    val accepted: Int,
+    /** Constraint rows the pack could not load. Non-zero is what makes a sheet *partly*. */
+    val dropped: Int,
+)
+
+/**
+ * A passage, quoted, for tap-through from a violation.
+ *
+ * The feature that makes constraints worth having: a flag saying *aptitude.might is 7, this
+ * game allows 1–5* is useful, and one that also opens the paragraph on page 2 saying so is
+ * what settles the argument. Byte-exact and cited, like every other quotation this app
+ * shows — a rule rendered as a paraphrase would be the app arguing on its own authority.
+ */
+data class Passage(
+    val ref: ChunkRef,
+    /**
+     * The chunk's own bytes, or **null when the chunk may not be quoted**.
+     *
+     * A pack may root a constraint at any chunk it likes, including a builder-written
+     * summary. Rendering that under the quotation rule would launder derived prose into the
+     * book's own words beneath a real citation — past the routing partition that exists to
+     * stop exactly that, and through a surface that never goes near the router. So the same
+     * `origin == "source" && kind ∈ VERBATIM_ELIGIBLE_KINDS` test is made here, and a
+     * chunk that fails it yields a citation the user can follow and no quotation.
+     */
+    val text: String?,
+    val citation: Citation?,
+)
 
 /**
  * Loads a ruleset's constraints out of the active set and evaluates documents against them.
@@ -181,6 +244,77 @@ object Rules {
             accepted = flagged.filter { it.accepted },
             dropped = set.dropped,
             unchecked = false,
+        )
+    }
+
+    /**
+     * Every document, with how much checking it has had.
+     *
+     * Constraints are loaded **once per ruleset**, not once per document: a campaign is
+     * typically a dozen sheets bound to the same game, and re-reading and re-parsing the
+     * same rows for each of them would make opening the list a function of how many
+     * characters the user has rather than of how many games.
+     */
+    fun states(library: Library, documents: DocumentStore): List<SheetState> {
+        val byRuleset = mutableMapOf<String, ConstraintSet>()
+        return documents.all().map { document ->
+            val rulesetId = document.rulesetId
+            if (rulesetId == null) {
+                return@map SheetState(
+                    documentId = document.documentId,
+                    title = document.title,
+                    campaign = document.campaign,
+                    draft = document.draft,
+                    validation = Validation.UNBOUND,
+                    violations = 0,
+                    accepted = 0,
+                    dropped = 0,
+                )
+            }
+            val set = byRuleset.getOrPut(rulesetId) { constraintsFor(library, rulesetId) }
+            val trackers = documents.trackers(document.documentId)
+            val accepted = documents.acceptances(document.documentId)
+                .filter { it.rulesetId == rulesetId }
+                .map { it.fingerprint }
+                .toSet()
+            val violations = if (set.constraints.isEmpty()) emptyList() else
+                ConstraintEngine(set.constraints).evaluate(trackers, document.draft)
+
+            SheetState(
+                documentId = document.documentId,
+                title = document.title,
+                campaign = document.campaign,
+                draft = document.draft,
+                validation = when {
+                    set.constraints.isEmpty() -> Validation.UNVALIDATED
+                    set.dropped.isNotEmpty() -> Validation.PARTLY_VALIDATED
+                    else -> Validation.VALIDATED
+                },
+                violations = violations.count { it.fingerprint !in accepted },
+                accepted = violations.count { it.fingerprint in accepted },
+                dropped = set.dropped.size,
+            )
+        }
+    }
+
+    /**
+     * The passage a violation came from, quoted byte for byte.
+     *
+     * Returns null when the chunk cannot be resolved — a damaged pack, or a rule from a book
+     * that has since been deactivated. The caller shows the violation either way: hiding a
+     * real rule because its locator broke is the worse trade.
+     */
+    fun passage(library: Library, violation: Violation): Passage? {
+        val ref = chunkOf(library, violation)
+        val pack = library.packs.firstOrNull { it.packUid == ref.packUid } ?: return null
+        val row = pack.db.map(
+            "SELECT text, kind, origin FROM chunks WHERE chunk_id = ${ref.chunkId}",
+        ) { Triple(it.string(0), it.string(1), it.string(2)) }.firstOrNull() ?: return null
+        val quotable = row.third == "source" && row.second in PackSchema.VERBATIM_ELIGIBLE_KINDS
+        return Passage(
+            ref = ref,
+            text = if (quotable) row.first else null,
+            citation = PackCitations(library.packs).resolve(ref),
         )
     }
 

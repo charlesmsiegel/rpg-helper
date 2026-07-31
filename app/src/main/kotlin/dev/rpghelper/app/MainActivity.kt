@@ -64,6 +64,7 @@ class MainActivity : ComponentActivity() {
 /** The surfaces this build has. Each one owns its own ViewModel and its own store handle. */
 enum class Destination(val label: String) {
     ASK("Ask"),
+    DOCUMENTS("Documents"),
     PACKS("Packs"),
 }
 
@@ -97,6 +98,7 @@ fun RootScreen() {
         }
         when (destination) {
             Destination.ASK -> AskScreen()
+            Destination.DOCUMENTS -> DocumentsScreen()
             Destination.PACKS -> PacksScreen()
         }
     }
