@@ -99,6 +99,40 @@ probe encoding the code produces, and every kind and locator scheme in the vocab
 A spec that has quietly diverged from its implementation is worse than none, because
 people trust it.
 
+## Review round
+
+Automated review found eight gaps, all real, all of the same shape: properties the
+schema spec implies that the validator did not check, letting a pack activate while
+being unusable in a way the design forbids.
+
+Three were structural rather than missing conditions:
+
+- **The validator could throw instead of refuse.** A pack with every relation name but a
+  missing column raised a driver exception straight through `validateFile`, putting a
+  corrupt pack *past* the activation gate as a crash. Driver failures now become
+  `PackReadException` at the `Db` boundary — which also keeps the abstraction honest for
+  the Android implementation — and the validator turns that into `MALFORMED_SCHEMA`.
+- **`chunks_fts` was checked by name only.** `sqlite_master` lists virtual tables as
+  ordinary tables, so a plain table passed. Nothing else in the validator queries the
+  index, so the failure would have surfaced at the user's first search. It is now probed
+  with a term drawn from a chunk's own text, which also catches an index that was never
+  populated — the worse of the two failures, since it is silent.
+- **Foreign keys are documentation.** SQLite does not validate rows inserted while
+  enforcement was off, so `chunks.source_id` could name a book the pack does not
+  contain, leaving a quotation uncitable.
+
+The remaining five: derived chunks could declare a parent (passing every nesting check
+vacuously, since both spans are NULL); `stable_key` was required but not unique, which
+would make an erratum match two passages; sibling overlap compared only adjacent spans
+after sorting, so one long sibling enclosing several short ones reported one pair and
+missed the rest, contradicting the promise to report every violation; three closed
+vocabularies were declared and never consulted; and a pack could ship constraints with
+no `ruleset_id`, making them permanently unloadable.
+
+`PackValidator` was split at this point — `ChunkValidation`, `VectorValidation`,
+`ReferenceValidation`, and a thin orchestrator — because the additions took it past 800
+lines, which the design above named as the signal that a file is doing too much.
+
 ## Not in this slice
 
 Retrieval, the answer cards, documents and trackers, the constraint engine, the dice

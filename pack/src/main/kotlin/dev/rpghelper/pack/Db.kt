@@ -15,12 +15,27 @@ package dev.rpghelper.pack
  */
 interface Db : AutoCloseable {
 
-    /** Streams rows, so a pass over every vector or every chunk's text retains none of it. */
+    /**
+     * Streams rows, so a pass over every vector or every chunk's text retains none of it.
+     *
+     * @throws PackReadException if the file cannot answer the query -- a missing column,
+     * a relation that is not the kind of relation it claimed to be, or corruption.
+     */
     fun forEachRow(sql: String, action: (Row) -> Unit)
 
     /** Names of every table and view in the file, including virtual tables. */
     fun tableNames(): Set<String>
 }
+
+/**
+ * A pack could not be read as the format requires.
+ *
+ * Driver failures are wrapped in this rather than surfacing `SQLException`, so the
+ * validator can turn a malformed pack into a violation without importing JDBC -- and so
+ * the Android implementation can report the same condition from an entirely different
+ * exception hierarchy.
+ */
+class PackReadException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
 
 /**
  * One row of a result set. Columns are zero-indexed, matching Android's `Cursor`
@@ -43,4 +58,18 @@ fun <T> Db.map(sql: String, transform: (Row) -> T): List<T> {
     val out = mutableListOf<T>()
     forEachRow(sql) { out += transform(it) }
     return out
+}
+
+/**
+ * The `CREATE` statement [relation] was declared with, or null if there is no such relation.
+ *
+ * Used to tell a real FTS5 virtual table from an ordinary table wearing its name. The
+ * relation name is a constant from [PackSchema], never user or pack input.
+ */
+fun Db.declarationOf(relation: String): String? {
+    var declaration: String? = null
+    forEachRow("SELECT sql FROM sqlite_master WHERE name = '$relation'") {
+        declaration = it.stringOrNull(0)
+    }
+    return declaration
 }

@@ -500,16 +500,42 @@ violation is visible the builder's guarantees have demonstrably not held.
 | area | check |
 |---|---|
 | format | required tables present; `pack_meta` is exactly one row; `schema_version` recognised |
+| readability | every query the format requires succeeds — a relation present in name but missing a column is a violation, never a thrown exception |
+| lexical index | `chunks_fts` is declared as an FTS5 virtual table **and** answers a `MATCH` for a term taken from a chunk's own text with that chunk |
 | embedder | `embedder_id` is bundled; `embedder_dim` matches that contract and is positive |
 | vector layout | probe decodes to the pinned constant; `length(blob) == embedder_dim * 2` |
 | vector numerics | all elements finite; L2 norm above `1e-6` |
 | vector windows | `content` rows have an in-range window; `expansion` rows have none |
-| chunk shape | `kind` and `origin` in vocabulary; citation and span columns present or absent per origin |
+| chunk shape | `kind` and `origin` in vocabulary; citation and span columns present or absent per origin; derived chunks declare no parent |
 | spans | `span_end - span_start` equals the UTF-8 byte length of `text`; spans not inverted |
+| stable keys | `(source_id, stable_key)` is unique |
 | nesting | child contained in parent; same source; at most one level; siblings do not overlap |
 | derivation | derived chunks cite at least one chunk; every cited chunk exists and has `origin='source'` |
 | claim spans | in range of the derived text, non-empty, not inverted, on UTF-8 boundaries |
-| references | `entities`, `tables`, `capabilities`, `constraints`, `supersessions` resolve to chunks that exist |
+| chunk references | `entities`, `tables`, `capabilities`, `constraints`, `supersessions` resolve to chunks that exist |
+| source references | `chunks`, `source_page_labels`, `source_gaps` resolve to sources that exist |
+| closed vocabularies | `locator_scheme`, page-label `scheme`, and gap `reason` are all in their sets |
+| ruleset binding | a pack shipping `constraints` rows declares a `ruleset_id` |
+
+Three of these deserve a note, because the reason they exist is not obvious from the
+rule:
+
+- **The lexical index is probed, not just named.** `sqlite_master` lists a virtual table
+  as an ordinary `table`, so checking the name admits a plain table wearing it — and
+  nothing else in the validator queries the index. The failure would surface at the
+  user's first search, either as a thrown `MATCH` error or, for an FTS5 table that was
+  simply never populated, as an empty lexical result on every query forever. The probe
+  uses a term drawn from a chunk's own text, so a pass proves the index exists, is
+  queryable, and indexes the content it claims to.
+- **`stable_key` uniqueness is enforced here rather than by a `UNIQUE` constraint.** The
+  DDL is shipped inside the pack, so its constraints describe what its builder chose to
+  declare and guarantee nothing about the file in hand. A duplicate does not make a pack
+  unreadable — it makes it un-amendable, since an erratum targeting
+  `(source_uid, stable_key)` would match both chunks and filter an unrelated passage
+  alongside the one it meant to correct.
+- **Foreign keys are not enforcement.** SQLite does not validate rows inserted while
+  foreign-key enforcement was off, which is the default, so every `REFERENCES` clause in
+  the DDL above is documentation. Reference checks are code.
 
 ### The builder checks, at build time
 

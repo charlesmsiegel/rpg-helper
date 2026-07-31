@@ -4,6 +4,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.sql.Connection
 import java.sql.ResultSet
+import java.sql.SQLException
 import org.sqlite.SQLiteConfig
 
 /**
@@ -15,11 +16,20 @@ import org.sqlite.SQLiteConfig
 class JdbcDb private constructor(private val connection: Connection) : Db {
 
     override fun forEachRow(sql: String, action: (Row) -> Unit) {
-        connection.createStatement().use { statement ->
-            statement.executeQuery(sql).use { results ->
-                val row = ResultSetRow(results)
-                while (results.next()) action(row)
+        try {
+            connection.createStatement().use { statement ->
+                statement.executeQuery(sql).use { rows ->
+                    val row = ResultSetRow(rows)
+                    while (rows.next()) action(row)
+                }
             }
+        } catch (e: SQLException) {
+            // A pack is a file someone else built. A query failing against it is a fact
+            // about the pack, not an error in this program, so it must reach the
+            // validator as something it can report rather than as a driver exception the
+            // caller never expected. (`action` is this module's own code and does not
+            // raise SQLException, so nothing of the caller's is captured here.)
+            throw PackReadException("query failed against this pack: $sql", e)
         }
     }
 
