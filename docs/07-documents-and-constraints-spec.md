@@ -199,9 +199,18 @@ A single tracker's value lies within bounds.
   "args": { "selector": "hp.current", "max": { "tracker": "hp.max" } } }
 ```
 
-Applies only when the selected tracker is present, and only to `number` trackers. A
-prefix selector applies the same bounds to every match independently — *no attribute
-above 5* is one row, not eight.
+Applies to every `number` tracker the selector matches **that exists on the document**,
+regardless of its value. A prefix selector applies the same bounds to every match
+independently — *no attribute above 5* is one row, not eight.
+
+**`range` is the one form that does not use presence (§3.3).** Presence treats zero as
+absence, which is right for counting Virtues and wrong here: a Strength of 0 is a value,
+it violates *1–5*, and under presence semantics no form in this vocabulary could ever say
+so. An *absent* tracker still does not fire — the sheet is incomplete, not illegal — but a
+tracker set to zero is a tracker with a value.
+
+`requires`, `excludes`, and `count_range` keep presence semantics, because each is asking
+whether the user *took* something, and a Virtue at zero was not taken.
 
 > Strength is 6. This game allows 1–5. — *Core Rulebook*, p. 42
 
@@ -215,11 +224,22 @@ trackers contribute nothing.
   "args": { "selector": "attribute.physical.*", "min": 7, "max": 7 } }
 
 { "form": "sum_range",
-  "args": { "selector": "freebie.*", "max": { "tracker": "freebie.budget" } } }
+  "args": { "selector": "freebie.spent.*", "max": { "tracker": "budget.freebie" } } }
 ```
 
 This is point-buy, and it is the form that most needs the tracker-reference bound: a
 budget that varies by campaign is a tracker, not a constant.
+
+**A selector must not match its own bound tracker.** The second example originally
+selected `freebie.*` while bounding on `freebie.budget`, which the selector matches — so
+the sum was *budget plus everything spent* and the constraint failed the moment a single
+point was spent. The budget now lives outside the selected namespace.
+
+That is an easy authoring mistake and a silent one, so it is checked rather than merely
+warned about: a constraint whose selector matches its own bound tracker is **dropped when
+the engine loads it**, and reported alongside other dropped constraints. Dropping is right
+here rather than rejecting the pack, because the rule is unusable but nothing else in the
+book is.
 
 > Physical attributes total 9. This game allows exactly 7. — *Core Rulebook*, p. 18
 
@@ -268,6 +288,18 @@ document holding both violates that one rule — the app does not additionally r
 from B's side, and a pack declaring both directions produces one violation, not two.
 Mutual exclusion is a property of a pair, and reporting it twice would make a
 conscientious pack look like it had twice the problems of a careless one.
+
+**The pair is canonicalised before anything identifies it.** `A excludes B` and
+`B excludes A` are different `(form, args)` and would fingerprint differently (§4.7), so
+whichever row happened to survive deduplication would decide the acceptance key — and a
+pack rebuild or a change in load order could pick the other one, resurrecting a house rule
+the user had already accepted.
+
+So a violation of `excludes` is identified by the **unordered pair**, sorted: the fingerprint
+is taken over `{"form": "excludes", "pair": [lower, higher]}` with the two selectors in
+lexical order, never over the row as written. Where several rows produce the same pair,
+the citation shown is the one from the highest-priority pack, and ties fall to the lowest
+`constraint_id` — a rule stated so that two implementations pick the same passage.
 
 > Keen Sight cannot be taken with Blind. — *Core Rulebook*, p. 83
 
@@ -321,8 +353,22 @@ it is pack-local and there is nothing in the format that keeps it stable across 
 rebuild, the same reason supersession does not use `chunk_id`.
 
 So acceptance is keyed by a **constraint fingerprint**: the SHA-256 of the canonical JSON
-form of `(form, args)`, scoped by `ruleset_id`. Canonical means object keys sorted,
-no insignificant whitespace, numbers in their shortest round-tripping form.
+object
+
+```json
+{ "ruleset_id": "<the pack's ruleset>", "form": "<form>", "args": { … } }
+```
+
+with object keys sorted, no insignificant whitespace, and numbers in their shortest
+round-tripping form. For `excludes`, `args` is the canonical unordered pair from §4.4
+rather than the row as written.
+
+**`ruleset_id` is inside the hash, not merely "scoping" it.** Acceptances survive
+rebinding (§5), so a document that accepted a generic `range` on `hp.current` under one
+game would otherwise carry that acceptance into another game whose pack declares the
+identical predicate — silently suppressing a rule the user never saw. Including the
+ruleset means an acceptance goes dormant on rebinding and becomes live again if the
+document returns, which is the behaviour §5 actually promises.
 
 This needs no new pack column, because a constraint's identity genuinely *is* what it
 says. Rebuild the pack and the fingerprint is unchanged; edit the rule's arguments and it
@@ -397,8 +443,26 @@ Deliberate properties:
 - **Unknown top-level keys are preserved on round-trip** so a document exported by a
   later version and re-imported by an earlier one does not quietly lose data.
 
+### Import is an entry point, and normalizes like one
+
 Import validates the format version and the tracker types, and refuses a file it cannot
 read rather than importing it partially.
+
+**It also applies §3.1's key rules**, because import is the second way tracker keys enter
+the app and the first way a key nobody typed can arrive. A `.rpgdoc` carrying
+`Attribute.Strength` or `str` would otherwise sit alongside a constraint selecting
+`attribute.strength` and never match it — recreating exactly the silent-validation failure
+normalize-on-entry exists to eliminate, on a document the user has every reason to think
+is checked.
+
+So keys are lowercased and NFC-folded on import, and a key with a malformed segment is a
+refusal rather than a silent pass. A file that normalizes two distinct keys onto the same
+key is also refused: merging them would discard a value.
+
+**Unknown top-level keys are stored, not just remembered.** They go into
+`documents.extensions` (`01-app-state-spec.md` §2) so they survive an app restart. Keeping
+them only in the importer's transient object would satisfy an export taken immediately and
+lose them on every later one, which is worse than not promising it.
 
 ---
 
@@ -411,9 +475,13 @@ read rather than importing it partially.
 | Key normalization | case folding and rejection of malformed segments |
 | Draft suppression | minimum bounds silent while draft, live after; maximums live throughout |
 | Exclusion symmetry | one violation per pair regardless of how many directions the pack declares |
-| Fingerprint stability | unchanged across a pack rebuild and across key reordering in `args`; changed when an argument changes |
+| Fingerprint stability | unchanged across a pack rebuild and across key reordering in `args`; changed when an argument changes, and when the ruleset changes |
 | Binding lifecycle | deactivation leaves the document byte-identical; reinstall restores validation and acceptances exactly |
-| Export round-trip | property-tested: export → import → export is stable, and unknown keys survive |
+| Export round-trip | property-tested: export → import → **restart** → export is stable, and unknown keys survive |
+| Import normalization | mixed-case and malformed keys are normalized or refused, never stored as written; colliding keys refuse |
+| Zero values | `range` fires on a tracker explicitly set to 0 and stays silent on an absent one; `count_range` does the opposite |
+| Selector self-reference | a `sum_range` whose selector matches its own bound tracker is dropped and reported |
+| Exclusion identity | `A excludes B` and `B excludes A` produce one violation with one fingerprint, whichever order they load in |
 | Multi-pack rulesets | constraints from two packs both load; a superseded constraint does not |
 
 The binding-lifecycle row is the one that most deserves a property test rather than an
