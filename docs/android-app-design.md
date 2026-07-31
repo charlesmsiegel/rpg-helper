@@ -758,9 +758,14 @@ ships in which release and nothing above it.
 
 - ~~The five constraint predicate forms and their arguments (§6).~~ **Settled** in
   `documents-and-constraints-spec.md`; the schema spec is no longer blocked.
-- Relevance floor for triggering the refusal card. Too low and it never fires; too
-  high and it fires on good queries. Needs the labelled query sets from §8 before it
-  can be set with any honesty.
+- ~~Relevance floor for triggering the refusal card.~~ **Dissolved** in
+  `retrieval-spec.md` §7.4. There is no separate floor: a threshold on the fused score
+  would measure rank rather than relevance, since RRF puts the top candidate at roughly
+  `1/(k+1)` whether it is the right answer or the least-wrong of a list of junk. The
+  per-contract and per-pack gates are the only place an absolute measure of match
+  quality exists, so the app refuses exactly when gating leaves no candidates. Those
+  gate thresholds still need the labelled query sets; the third constant does not
+  exist.
 - ~~Whether generated setting answers are cached, and what invalidates the cache when
   pack activation or priority changes.~~ **Settled** in `app-state-spec.md` §4: cached,
   keyed by the normalized query plus an active-set fingerprint plus model identity — so
