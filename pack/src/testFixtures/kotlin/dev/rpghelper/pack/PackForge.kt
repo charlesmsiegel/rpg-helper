@@ -23,6 +23,13 @@ object PackForge {
     /** The contract the forged pack declares. Deliberately tiny; the validator is dimension-agnostic. */
     val EMBEDDER = EmbedderContract(id = "test-embedder-8", dim = 8)
 
+    /** The identity every forged pack claims, so a caller can name it without reading the file. */
+    const val PACK_UID = "test:pack:core"
+
+    /** The `source_uid`s the forged pack's two books carry. */
+    const val CORE_SOURCE_UID = "test:core:1e"
+    const val ADVENTURE_SOURCE_UID = "test:adv:1e"
+
     /** Distinguishes packs within one test's temporary directory. */
     private val counter = java.util.concurrent.atomic.AtomicInteger()
 
@@ -182,7 +189,7 @@ object PackForge {
                                    ruleset_id, embedder_id, embedder_dim, probe_vector,
                                    license_id, license_text, attribution, built_at,
                                    builder_version, signature)
-            VALUES (1, ?, 'test:pack:core', '1.0.0', 'Forged Test Pack', 'test-srd-1e',
+            VALUES (1, ?, '$PACK_UID', '1.0.0', 'Forged Test Pack', 'test-srd-1e',
                     ?, ?, ?, 'CC-BY-4.0', 'Test licence text', 'Test attribution',
                     '2026-07-31T00:00:00Z', 'forge/1.0.0', NULL)
             """.trimIndent(),
@@ -199,9 +206,9 @@ object PackForge {
             """
             INSERT INTO sources (source_id, source_uid, title, edition, publisher,
                                  text_sha256, locator_scheme)
-            VALUES (1, 'test:core:1e', 'Test Core Rulebook', '1e', 'Test Press',
+            VALUES (1, '$CORE_SOURCE_UID', 'Test Core Rulebook', '1e', 'Test Press',
                     '${"0".repeat(64)}', 'page'),
-                   (2, 'test:adv:1e', 'Test Adventure', '1e', 'Test Press',
+                   (2, '$ADVENTURE_SOURCE_UID', 'Test Adventure', '1e', 'Test Press',
                     '${"1".repeat(64)}', 'page')
             """.trimIndent(),
         )
@@ -431,12 +438,12 @@ object PackForge {
     }
 
     private fun insertConstraints(connection: Connection) {
-        // The predicate vocabulary is not pinned yet (see docs/pack-schema.md), so the
-        // row shape is exercised without asserting any particular form's semantics.
+        // One instance of the `range` form from the closed vocabulary pinned in
+        // docs/07-documents-and-constraints-spec.md §4.
         connection.exec(
             """
             INSERT INTO constraints (constraint_id, form, args, chunk_id)
-            VALUES (1, 'tracker-range', '{"tracker":"hp","min":0}', 1)
+            VALUES (1, 'range', '{"selector":"hp.current","min":0}', 1)
             """.trimIndent(),
         )
     }
@@ -470,12 +477,26 @@ object PackForge {
 
 // ---------------------------------------------------------------------- JDBC helpers
 
-internal fun Connection.exec(sql: String) {
+fun Connection.exec(sql: String) {
     createStatement().use { it.execute(sql) }
 }
 
+/**
+ * Rebuilds [table] without its constraints, preserving rows.
+ *
+ * The canonical DDL declares NOT NULL and UNIQUE, so a defect that violates one cannot be
+ * injected with an UPDATE. That is the point: a pack ships its own DDL, so those
+ * declarations describe what its builder chose to write and guarantee nothing whatever
+ * about the file in hand.
+ */
+fun Connection.relax(table: String) {
+    exec("CREATE TABLE ${table}_lax AS SELECT * FROM $table")
+    exec("DROP TABLE $table")
+    exec("ALTER TABLE ${table}_lax RENAME TO $table")
+}
+
 /** Binds one row and executes it. */
-internal fun Connection.prepare(sql: String, bind: (PreparedStatement) -> Unit) {
+fun Connection.prepare(sql: String, bind: (PreparedStatement) -> Unit) {
     prepareStatement(sql).use { statement ->
         bind(statement)
         statement.executeUpdate()
@@ -483,6 +504,6 @@ internal fun Connection.prepare(sql: String, bind: (PreparedStatement) -> Unit) 
 }
 
 /** Hands the statement over so the caller can add and execute a batch. */
-internal fun Connection.prepareBatch(sql: String, fill: (PreparedStatement) -> Unit) {
+fun Connection.prepareBatch(sql: String, fill: (PreparedStatement) -> Unit) {
     prepareStatement(sql).use(fill)
 }

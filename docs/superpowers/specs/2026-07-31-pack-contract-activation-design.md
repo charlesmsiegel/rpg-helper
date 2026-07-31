@@ -27,7 +27,7 @@ exist, and all would otherwise each invent their own fixtures.
 **No `:app` module yet.** This container has no Android SDK, and in this slice the
 module would hold no logic — an empty artifact whose only claim is that it compiles.
 The Android-specific decisions it would have forced (bundled SQLite, minSdk) are
-recorded in `pack-schema.md`, where they are useful now. `:pack` is plain Kotlin/JVM,
+recorded in `00-pack-schema.md`, where they are useful now. `:pack` is plain Kotlin/JVM,
 so the whole slice is verifiable with `./gradlew :pack:test`.
 
 **Defer the constraint predicate vocabulary rather than invent it.** It is the open
@@ -57,7 +57,7 @@ boundary validation and slice equality; not true of those three:
 - Containment and sibling overlap compare integers already stored in the pack.
 - Claim spans index into the derived chunk's own `text`, which ships in the pack.
 
-All three moved into the activation gate. §8 has been amended, and `pack-schema.md` §7
+All three moved into the activation gate. §8 has been amended, and `00-pack-schema.md` §7
 carries the full split.
 
 ## Design
@@ -94,7 +94,7 @@ Verified by mutation: with `PackValidator.validate` stubbed to return no violati
 of 38 validator tests fail. The two that survive are the two asserting validity, which
 is correct.
 
-`SchemaDocSyncTest` asserts `docs/pack-schema.md` contains the DDL the code uses, the
+`SchemaDocSyncTest` asserts `docs/00-pack-schema.md` contains the DDL the code uses, the
 probe encoding the code produces, and every kind and locator scheme in the vocabulary.
 A spec that has quietly diverged from its implementation is worse than none, because
 people trust it.

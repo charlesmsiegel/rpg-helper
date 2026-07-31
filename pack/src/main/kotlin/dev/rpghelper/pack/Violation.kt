@@ -10,6 +10,16 @@ package dev.rpghelper.pack
  */
 enum class ViolationCode {
     // --- File and format ---------------------------------------------------------
+    /**
+     * The pack holds more rows, or a larger single value, than this build will read.
+     *
+     * Not a statement that the pack is malformed -- a legitimate 300-page book is far below
+     * every one of these -- but that reading it far enough to find out would cost more
+     * memory than refusing it. Raised before any content is materialized, which is the only
+     * point at which the refusal is cheaper than the failure.
+     */
+    PACK_EXCEEDS_LIMITS,
+
     MISSING_TABLE,
     PACK_META_NOT_SINGLETON,
     UNSUPPORTED_SCHEMA_VERSION,
@@ -58,6 +68,27 @@ enum class ViolationCode {
     DERIVED_CHUNK_NESTED,
 
     SPAN_INVERTED,
+
+    /**
+     * A nested child's text is not what its parent's text holds at the child's offset.
+     *
+     * Both strings ship in the pack, so this is decidable here even though slice
+     * equality against the *source* is builder-only. Without it, redaction excises the
+     * wrong region of the parent: the marker replaces innocuous prose and the child's
+     * actual rule text passes into the generation context -- the precise failure
+     * redaction exists to prevent, on a pack that satisfied every other check.
+     */
+    NESTED_TEXT_MISMATCH,
+
+    /**
+     * A non-verbatim child nested inside a verbatim-class parent.
+     *
+     * The builder forbids it, and unenforced it is a hole in the central guarantee: a
+     * `setting` child carved out of a `rules` parent is an exact slice of rule text that
+     * routing sends to generation, because a child candidate has no ancestor span
+     * redacted from it.
+     */
+    NONVERBATIM_CHILD_OF_VERBATIM_PARENT,
 
     /**
      * Two chunks in one source share a `stable_key`. Supersession targets
@@ -116,7 +147,93 @@ enum class ViolationCode {
      */
     DANGLING_SOURCE_REFERENCE,
 
+    /**
+     * Two `chunks` rows share a `chunk_id`.
+     *
+     * The PRIMARY KEY declaration is the builder's word, like everything else in a pack's
+     * DDL. A duplicate makes every runtime lookup and citation join free to return either
+     * row -- pairing retrieved text with the wrong source -- and it silently shrinks the
+     * validator's own view of the pack, so the checks that would have caught the rest of
+     * the damage never see the missing rows.
+     */
+    DUPLICATE_CHUNK_ID,
+
+    /** Two `sources` rows share a `source_uid`, making every erratum targeting it ambiguous. */
+    DUPLICATE_SOURCE_UID,
+
+    /**
+     * Two `sources` rows share a `source_id`.
+     *
+     * The pack's own PRIMARY KEY declaration is not evidence. A duplicate leaves every
+     * citation join able to return either book, attributing authoritative text to the
+     * wrong source.
+     */
+    DUPLICATE_SOURCE_ID,
+
+    /** A row is NULL in a reference column the format requires. */
+    MISSING_CHUNK_REFERENCE,
+
+    /**
+     * A `supersessions` row whose superseding chunk is one the same row withdraws.
+     *
+     * The correction is the one thing that must survive its own application. A row
+     * naming a chunk carrying the targeted `(source_uid, stable_key)` deactivates the
+     * replacement text along with the text it replaces, so the user is left with the
+     * rule silently gone and no notice of why — strictly worse than shipping no errata.
+     */
+    SUPERSESSION_WITHDRAWS_ITSELF,
+
+    // --- Structured tables -------------------------------------------------------
+    /** A `table_rows` row names a `table_id` with no matching `tables` row. */
+    DANGLING_TABLE_REFERENCE,
+
+    /**
+     * Two `tables` rows share a `table_id`.
+     *
+     * Validation would check every row against whichever definition the query returned
+     * last, while the roller resolves the same id to either — rolling on one table's
+     * outcomes and rendering them beneath the other's citation.
+     */
+    DUPLICATE_TABLE_ID,
+
+    /**
+     * A table row's stored text is not the slice of its table chunk that its span names.
+     *
+     * The roller renders outcome text under the quotation rule. Unchecked, that launders
+     * arbitrary `table_rows.text` into quotation-styled output carrying the table's own
+     * citation -- fabricated text wearing the app's most authoritative rendering.
+     */
+    TABLE_ROW_TEXT_MISMATCH,
+
+    /** A table row's span falls outside the span of the table chunk it belongs to. */
+    TABLE_ROW_SPAN_OUTSIDE_CHUNK,
+
+    /** Two rows of one table claim overlapping outcome ranges, or one is inverted. */
+    TABLE_ROW_RANGE_OVERLAP,
+
+    /** A `tables.dice_expr` does not parse under the pinned grammar. */
+    DICE_EXPR_UNPARSEABLE,
+
+    /**
+     * A table's rows do not cover its expression's outcome range exactly.
+     *
+     * A gap means a roll can find no row; an out-of-range row can never be rolled. Both
+     * were previously left to the builder, whose word is the thing under inspection.
+     */
+    TABLE_ROWS_INCOMPLETE,
+
     // --- Closed vocabularies -----------------------------------------------------
+    /** `pack_uid` is blank, or longer than the format allows. */
+    PACK_UID_INVALID,
+
+    /**
+     * An `entities.alias` is not stored in the form the query is tokenized into.
+     *
+     * Matching is an indexed lookup, so an alias holding capitals or diacritics can never
+     * fire -- silently, and for the life of the pack.
+     */
+    ALIAS_NOT_NORMALIZED,
+
     LOCATOR_SCHEME_INVALID,
     PAGE_LABEL_SCHEME_INVALID,
     GAP_REASON_INVALID,

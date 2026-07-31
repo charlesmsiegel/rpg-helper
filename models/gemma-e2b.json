@@ -1,0 +1,20 @@
+{
+  "_comment": [
+    "PLACEHOLDER DIGESTS AND URLS. ModelManifest.parse refuses this file as written, on",
+    "purpose: an unverified multi-gigabyte download is the failure this whole mechanism",
+    "exists to prevent. See models/README.md for how to complete it.",
+    "",
+    "Sizes below are order-of-magnitude for a 4-bit quantization and are not measurements."
+  ],
+  "id": "gemma-e2b-q4",
+  "display_name": "Gemma E2B (4-bit)",
+  "license": "Gemma Terms of Use",
+  "files": [
+    {
+      "name": "gemma-e2b-q4.gguf",
+      "url": "https://REPLACE-ME/gemma-e2b-q4.gguf",
+      "bytes": 1500000000,
+      "sha256": "REPLACE-WITH-THE-SHA256-OF-THE-ARTIFACT-YOU-DOWNLOADED"
+    }
+  ]
+}

@@ -10,6 +10,8 @@ vocabulary. This is that document.
 It is owned by the app, as those documents assume: the app is what refuses a pack it
 cannot read, so the app is where the definition of readable lives.
 
+Implementation order: **done** — this is the contract the rest builds on.
+
 Status: `schema_version = 1`. Implemented by `:pack`; the DDL below is generated from
 `PackSchema.DDL` and `SchemaDocSyncTest` fails the build if they drift.
 
@@ -368,7 +370,23 @@ form's arguments. Packs instantiate forms and never compose expressions; no code
 eval, no callbacks. `chunk_id` cites the passage stating the rule, so a flagged
 violation can link to the text behind it.
 
-**The vocabulary itself is not yet pinned** — see §8.
+The vocabulary is pinned in `07-documents-and-constraints-spec.md` §4: five forms, a
+two-shape selector grammar, and bounds that may reference another tracker.
+
+The app validates a row's `chunk_id` reference at activation — including that it is
+present, since the DDL's `NOT NULL` is the builder's word — and its `form` and `args` when
+the constraint engine loads them.
+
+**A row that fails the payload check is dropped, and the drop is visible.** Rejecting a
+300-page book over one malformed constraint is disproportionate, but silently dropping one
+is worse than it looks: unlike a capability, whose absence shows as a control that never
+appears, a missing constraint leaves a document displaying as *validated* while a rule it
+should have been checked against never loaded. The user is told their sheet is legal on
+evidence that was never gathered.
+
+So a ruleset with dropped constraints is reported on the Packs surface like any other
+dropped enrichment, **and** the affected documents show how many rules could not be loaded
+(`06-ui-spec.md` §2.3). The label never claims more checking than happened.
 
 ---
 
@@ -463,11 +481,28 @@ Grammar, and nothing else parses:
 expr     := form modifier?
 form     := NdS | dS | 'd%'
 modifier := ('+' | '-') integer
-N, S     := positive integers
+N, S     := positive integers, N <= 100 and S <= 1000
 ```
 
+- **The operands are bounded.** `N <= 100`, `S <= 1000`. Unbounded "positive integers"
+  is not implementable: `2d2147483647` is grammatical and overflows a 32-bit outcome range
+  to a *negative* maximum, at which point a coverage check accepts a table with no rows —
+  a rollable table where every result has no outcome, reached through arithmetic rather
+  than through a missing row. The distribution is a convolution `N` times over `S` faces,
+  so `100d1000` is already the largest thing worth computing on a phone, and a table
+  needing more is not a table anyone printed.
+- **The grammar is case-sensitive and admits no whitespace.** `2D6` and `d6 + 1` do not
+  parse. Both were already implied by the production rules and neither was stated, which
+  is exactly the sort of gap that produces two implementations disagreeing politely.
 - `d%` is exactly 1–100. Books printing `00` map to 100 at build time, and the mapping
   is recorded rather than assumed.
+- **`d%` is a literal form, not `NdS` with a `%` for `S`.** `2d%` does not parse. The
+  production writes `'d%'` quoted for that reason, but it is the kind of detail a reader
+  supplies a count to out of symmetry, so it is stated: a table rolling two percentile
+  dice is `2d100`, which carries none of the `00` mapping.
+- **`d100` is a separate, legal expression**, being `dS` with `S = 100`. It is not a
+  spelling of `d%` and carries none of its `00` mapping; the two coincide only in their
+  outcome range.
 - Exploding dice, drop-lowest, and rerolls are not expressible. A table needing them
   ships quotable and not rollable.
 - Both the outcome **range** and the **distribution** are part of the definition.
@@ -501,18 +536,26 @@ violation is visible the builder's guarantees have demonstrably not held.
 |---|---|
 | format | required tables present; `pack_meta` is exactly one row; `schema_version` recognised |
 | readability | every query the format requires succeeds — a relation present in name but missing a column is a violation, never a thrown exception |
-| lexical index | `chunks_fts` is declared as an FTS5 virtual table **and** answers a `MATCH` for a term taken from a chunk's own text with that chunk |
+| lexical index | `chunks_fts` is declared as an FTS5 virtual table, indexes one document per chunk, **and** answers a `MATCH` for a term taken from a chunk's own text with that chunk |
+| constraints | `form` is in the closed vocabulary and `args` parses; a row failing either is dropped at load with a visible consequence, not silently |
 | embedder | `embedder_id` is bundled; `embedder_dim` matches that contract and is positive |
 | vector layout | probe decodes to the pinned constant; `length(blob) == embedder_dim * 2` |
 | vector numerics | all elements finite; L2 norm above `1e-6` |
 | vector windows | `content` rows have an in-range window; `expansion` rows have none |
 | chunk shape | `kind` and `origin` in vocabulary; citation and span columns present or absent per origin; derived chunks declare no parent |
+| required columns | a NULL where the format requires a value is a violation, not an exception — the pack's own `NOT NULL` declarations are not evidence |
 | spans | `span_end - span_start` equals the UTF-8 byte length of `text`; spans not inverted |
-| stable keys | `(source_id, stable_key)` is unique |
+| nested text | a child's `text` byte-equals its parent's `text` sliced at the child's offset |
+| stable keys | `(source_uid, stable_key)` is unique |
+| source identity | `sources.source_uid` is unique, and so is `sources.source_id` |
+| dice expressions | every `tables.dice_expr` parses under the pinned grammar |
+| table rows | every `table_id` resolves; ranges are non-overlapping, not inverted, and **cover the expression's outcome range exactly**; each row's span lies inside its table chunk's span, and its `text` byte-equals that slice |
 | nesting | child contained in parent; same source; at most one level; siblings do not overlap |
 | derivation | derived chunks cite at least one chunk; every cited chunk exists and has `origin='source'` |
 | claim spans | in range of the derived text, non-empty, not inverted, on UTF-8 boundaries |
 | chunk references | `entities`, `tables`, `capabilities`, `constraints`, `supersessions` resolve to chunks that exist |
+| lexical index | declared FTS5, external-content over `chunks(chunk_id)`, tokenizer exactly `unicode61 remove_diacritics 2`, and its document set equal to the chunk set in **both** directions |
+| supersession self-reference | no `supersessions` row names as its correction a chunk carrying the `(source_uid, stable_key)` that same row withdraws |
 | source references | `chunks`, `source_page_labels`, `source_gaps` resolve to sources that exist |
 | closed vocabularies | `locator_scheme`, page-label `scheme`, and gap `reason` are all in their sets |
 | ruleset binding | a pack shipping `constraints` rows declares a `ruleset_id` |
@@ -524,9 +567,19 @@ rule:
   as an ordinary `table`, so checking the name admits a plain table wearing it — and
   nothing else in the validator queries the index. The failure would surface at the
   user's first search, either as a thrown `MATCH` error or, for an FTS5 table that was
-  simply never populated, as an empty lexical result on every query forever. The probe
-  uses a term drawn from a chunk's own text, so a pass proves the index exists, is
-  queryable, and indexes the content it claims to.
+  never populated, as an empty lexical result on every query forever.
+
+  Two checks, because neither suffices alone. The index must hold **one document per
+  chunk**, which catches an index populated for some chunks and not others — invisible to
+  any single probe, and permanent. And a **canary term** taken from a chunk's own text
+  must return that chunk, which proves the relation answers `MATCH` and resolves rowids
+  correctly.
+
+  Together these establish that the index exists, is queryable, covers every chunk, and
+  returns the right rowid for at least one. They do **not** establish that every chunk's
+  content was indexed correctly — that would need a term per chunk. The claim is scoped
+  deliberately: an earlier version of this note said the probe proved the index "indexes
+  the content it claims to", which one term cannot show.
 - **`stable_key` uniqueness is enforced here rather than by a `UNIQUE` constraint.** The
   DDL is shipped inside the pack, so its constraints describe what its builder chose to
   declare and guarantee nothing about the file in hand. A duplicate does not make a pack
@@ -535,7 +588,21 @@ rule:
   alongside the one it meant to correct.
 - **Foreign keys are not enforcement.** SQLite does not validate rows inserted while
   foreign-key enforcement was off, which is the default, so every `REFERENCES` clause in
-  the DDL above is documentation. Reference checks are code.
+  the DDL above is documentation. Reference checks are code. The same applies to
+  `NOT NULL` and `UNIQUE`: the DDL ships *inside* the pack, so it records what that
+  builder chose to declare. Every one of those properties is checked here.
+- **Nested text agreement is decidable and load-bearing.** Slice equality against the
+  normalized *source* is builder-only, because the pack ships only its hash. Slice
+  equality of a child against its *parent's own shipped text* needs nothing the pack does
+  not carry — and without it, containment and span-length both pass for a child whose
+  span points at the wrong region, so redaction excises innocuous prose and the child's
+  real rule text passes into the generation context.
+- **`table_rows` feeds quotation-styled output.** The roller renders outcome text under
+  the quotation rule, so unchecked rows would launder arbitrary prose into the app's most
+  authoritative rendering beneath the table's own citation. Coverage of the outcome range
+  is checked here too, now that the grammar is implemented: the roller's claim that
+  exactly one row contains any result was previously the *builder's* claim about the
+  artifact under inspection, and a gap leaves a roll with no row at all.
 
 ### The builder checks, at build time
 
@@ -575,17 +642,30 @@ the two lists above merge into one suite run on both sides.
 
 Deliberately deferred, with what unblocks each:
 
-- **The constraint predicate vocabulary.** The `constraints` row shape is pinned so
-  packs are writable, but the closed set of `form` values and their `args` is not.
-  Blocked on the design question in `android-app-design.md` §10; lands with the
-  constraint engine. Until then a pack may ship `constraints` rows and the app will
-  validate their references and ignore their semantics.
+- ~~The constraint predicate vocabulary.~~ **Closed.** The five forms — `range`,
+  `sum_range`, `count_range`, `requires`, `excludes` — their selector and bound grammars,
+  and their evaluation semantics are pinned in `07-documents-and-constraints-spec.md` §4.
+  The `constraints` row shape here is unchanged; `form` and `args` now have a defined
+  vocabulary rather than an open one.
 - **The derivation rule for `stable_key`.** The column is pinned and required; how a
   builder computes a value that survives a rebuild is open. The app only ever compares
   values, so this can be settled without a schema change.
-- **The signing scheme.** `pack_meta.signature` exists and is nullable. Verification is
-  unspecified, and depends on the pack distribution question, which is open on both
-  sides.
+- **The signing scheme.** `pack_meta.signature` exists, is nullable, is written NULL by
+  the builder, and is verified by nothing. Verification is unspecified and depends on the
+  pack distribution question, which is open on both sides.
+
+  **What this means for the activation gate, stated plainly because it is easy to read the
+  other way:** activation answers *is this a well-formed pack this build can read?* It
+  never answers *did this come from anyone in particular?* Every check the gate makes is a
+  property it can verify from the bytes in hand — the schema, the tokenizer, the vector
+  layout, the probe constant, the reference graph. None of them is evidence of origin, and
+  a hostile pack that satisfies all of them activates. The gate is what stops a malformed
+  or hostile pack from *crashing the app or laundering text into quotation styling*; it is
+  not, and cannot currently be, what tells a user the book is the publisher's.
+
+  The one thing the app carries about provenance-of-authorship is `build_report`, and that
+  is the builder's own claim about itself rather than anything verified — which is exactly
+  why it is surfaced at install rather than treated as a check.
 - **Whether normalized source text ships in the pack.** Would let the two validation
   lists in §7 merge; roughly doubles text size.
 - **Images.** The on-device model accepts image input, so storing page images is

@@ -20,11 +20,13 @@ import kotlin.math.sqrt
  */
 internal fun checkVectors(
     db: Db,
-    embedderDim: Int,
+    embedderDim: Long,
     chunks: Map<Long, ChunkRow>,
     textLengths: Map<Long, Int>,
     out: MutableList<Violation>,
 ) {
+    // Long throughout: the product overflows Int for a dimension a pack is free to
+    // declare, and an overflowed expectation matches blobs that are nothing like it.
     val expectedBytes = embedderDim * PackSchema.VECTOR_ELEMENT_BYTES
 
     db.forEachRow(
@@ -50,7 +52,7 @@ internal fun checkVectors(
         }
 
         val blob = row.bytes(3)
-        if (blob.size != expectedBytes) {
+        if (blob.size.toLong() != expectedBytes) {
             // Decoding past this point would compare arbitrary numbers.
             out += Violation(
                 VECTOR_LENGTH_MISMATCH,

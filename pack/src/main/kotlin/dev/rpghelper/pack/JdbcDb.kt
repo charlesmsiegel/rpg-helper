@@ -33,6 +33,14 @@ class JdbcDb private constructor(private val connection: Connection) : Db {
         }
     }
 
+    override fun execute(sql: String) {
+        try {
+            connection.createStatement().use { it.execute(sql) }
+        } catch (e: SQLException) {
+            throw PackReadException("statement failed against this pack: $sql", e)
+        }
+    }
+
     override fun tableNames(): Set<String> {
         val names = mutableSetOf<String>()
         forEachRow("SELECT name FROM sqlite_master WHERE type IN ('table', 'view')") {
@@ -50,9 +58,40 @@ class JdbcDb private constructor(private val connection: Connection) : Db {
             return results.wasNull()
         }
 
-        override fun long(column: Int): Long = results.getLong(column + 1)
-        override fun string(column: Int): String = results.getString(column + 1)
-        override fun bytes(column: Int): ByteArray = results.getBytes(column + 1)
+        // getLong returns 0 for SQL NULL. Left unchecked, a NULL sources.source_id
+        // reads as source 0 -- a value the validator then reasons about as if it
+        // resolved, while every runtime join against it finds nothing.
+        override fun long(column: Int): Long {
+            val value = results.getLong(column + 1)
+            if (results.wasNull()) {
+                throw PackReadException("NULL in a column the format requires (index $column)")
+            }
+            return value
+        }
+
+        // A pack's own DDL declares these NOT NULL, and a pack's DDL is whatever its
+        // builder chose to write. Returning the platform type straight into Kotlin's
+        // non-null String would raise a NullPointerException -- which is not a
+        // PackReadException, escapes the validator, and puts a corrupt pack past the
+        // gate as a crash rather than a refusal.
+        override fun string(column: Int): String =
+            results.getString(column + 1)
+                ?: throw PackReadException("NULL in a column the format requires (index $column)")
+
+        // Same treatment as long(): getDouble returns 0.0 for SQL NULL, and a bm25 of
+        // 0.0 on the negated scale is a perfectly ordinary weak-but-real match rather
+        // than an obvious sentinel, so it would be reasoned about instead of noticed.
+        override fun double(column: Int): Double {
+            val value = results.getDouble(column + 1)
+            if (results.wasNull()) {
+                throw PackReadException("NULL in a column the format requires (index $column)")
+            }
+            return value
+        }
+
+        override fun bytes(column: Int): ByteArray =
+            results.getBytes(column + 1)
+                ?: throw PackReadException("NULL in a column the format requires (index $column)")
     }
 
     companion object {

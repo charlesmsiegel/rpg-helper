@@ -7,7 +7,7 @@ package dev.rpghelper.pack
  * SQLite on Android later without either being a rewrite. That is a real, near-term
  * swap rather than speculative generality: `sqlite-jdbc` ships native desktop
  * libraries and cannot run on a device, and the platform's own SQLite cannot be relied
- * on for FTS5 (see `docs/pack-schema.md`, "SQLite on the device").
+ * on for FTS5 (see `docs/00-pack-schema.md`, "SQLite on the device").
  *
  * Deliberately read-only and deliberately tiny. Packs are read-only at runtime, and
  * every query this module issues is a static string, so there is no parameter binding
@@ -25,6 +25,20 @@ interface Db : AutoCloseable {
 
     /** Names of every table and view in the file, including virtual tables. */
     fun tableNames(): Set<String>
+
+    /**
+     * Runs a statement that returns no rows.
+     *
+     * **This does not make a pack writable.** The connection is opened `SQLITE_OPEN_READONLY`
+     * and stays that way; what this reaches is SQLite's `temp` database, which is separate
+     * from the file and writable regardless. The only statements this program issues through
+     * it build the per-connection `temp.withdrawn` table that supersession is applied from —
+     * a table whose alternative was pasting a hundred thousand chunk ids into the text of
+     * every query.
+     *
+     * @throws PackReadException if the statement fails.
+     */
+    fun execute(sql: String)
 }
 
 /**
@@ -47,6 +61,15 @@ interface Row {
     fun long(column: Int): Long
     fun string(column: Int): String
     fun bytes(column: Int): ByteArray
+
+    /**
+     * A REAL column.
+     *
+     * Nothing the pack *stores* is a REAL — the format has no floating-point columns, and
+     * embeddings are BLOBs. This exists for `bm25()`, which is a value SQLite computes
+     * rather than one a builder wrote, and is the only place retrieval reads one.
+     */
+    fun double(column: Int): Double
 
     fun longOrNull(column: Int): Long? = if (isNull(column)) null else long(column)
     fun stringOrNull(column: Int): String? = if (isNull(column)) null else string(column)

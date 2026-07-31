@@ -3,7 +3,7 @@ package dev.rpghelper.pack
 /**
  * The pack contract, as the app understands it.
  *
- * [DDL] is normative. `docs/pack-schema.md` embeds this same text, and
+ * [DDL] is normative. `docs/00-pack-schema.md` embeds this same text, and
  * `SchemaDocSyncTest` fails if the two drift -- so the prose spec cannot quietly
  * describe a format the code does not implement.
  */
@@ -18,9 +18,26 @@ object PackSchema {
      */
     const val SCHEMA_VERSION: Int = 1
 
+    /**
+     * Longest `pack_uid` the format accepts.
+     *
+     * Generous for any real identifier, and bounded so an unbounded string cannot bloat
+     * the app's own install record.
+     */
+    const val MAX_PACK_UID_LENGTH: Int = 200
+
     /** `chunks.kind`. */
     val KINDS: Set<String> =
         setOf("rules", "table", "statblock", "readaloud", "glossary", "setting")
+
+    /**
+     * The pinned FTS5 tokenizer, named so activation can check it rather than assume it.
+     *
+     * The app tokenizes queries this way, so an index built any other way folds terms
+     * differently — and the divergence is silent, appearing only for the words where the
+     * two disagree.
+     */
+    const val TOKENIZER: String = "unicode61 remove_diacritics 2"
 
     /** `chunks.origin`. */
     val ORIGINS: Set<String> = setOf("source", "derived")

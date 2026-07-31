@@ -1,0 +1,193 @@
+{
+  "_comment": [
+    "The labelled query set, one per test pack. Labels reference (source_uid, stable_key)",
+    "and never chunk_id: a pack-local id does not survive a rebuild of the corpus, and a",
+    "label set that silently re-points at different passages after a fixture change is",
+    "worse than no label set -- it keeps reporting a recall number for the wrong",
+    "questions. Same reason supersession targets a stable key.",
+    "",
+    "Negative queries carry an empty 'relevant' list and assert the refusal. They are as",
+    "important as the positive ones: the refusal is the visible half of the",
+    "refuse-rather-than-hallucinate rule, and a retrieval change that quietly starts",
+    "answering them is exactly the regression that would otherwise ship.",
+    "",
+    "The threshold is a mean over every query, positives and negatives alike. It is not 1.0 because one positive is a known miss (see its notes); every negative must still refuse, which the harness asserts separately and absolutely rather than folding into the mean. A refusal that quietly becomes an answer is the regression this set exists to catch, and an average is the wrong instrument for catching it.",
+    "",
+    "TWO THRESHOLDS, because there are two tiers. 'structural_threshold' is what the deterministic stand-in embedder must meet on every PR: it measures that the pipeline works, not that the embeddings are good. 'threshold' is the semantic tier's gate, run when a real embedder contract is bundled. Queries needing genuine semantic bridging -- GM-facing phrasings that share almost no vocabulary with the passage -- are expected to miss structurally and to pass semantically. Keeping one number for both would either make the per-PR gate untrue or make the semantic gate meaningless."
+  ],
+  "pack": "srd:emberlight",
+  "recall_at": 5,
+  "threshold": 0.9,
+  "queries": [
+    {
+      "query": "how do I grapple someone",
+      "relevant": [
+        {
+          "source_uid": "srd:emberlight:core",
+          "stable_key": "srd:core:seizing"
+        }
+      ],
+      "notes": "table slang; the book calls it seizing and never says grapple"
+    },
+    {
+      "query": "what happens when I grab a creature and win",
+      "relevant": [
+        {
+          "source_uid": "srd:emberlight:core",
+          "stable_key": "srd:core:seizing"
+        }
+      ]
+    },
+    {
+      "query": "what does held mean",
+      "relevant": [
+        {
+          "source_uid": "srd:emberlight:door",
+          "stable_key": "srd:door:held"
+        },
+        {
+          "source_uid": "srd:emberlight:core",
+          "stable_key": "srd:core:conditions"
+        }
+      ],
+      "notes": "KNOWN MISS on this corpus. Scores 0.278 on the information gate, just under the 0.283 of the 'warhorse' negative, because across twenty chunks the word 'mean' occurs nowhere and so counts as unmatched information exactly as 'warhorse' does. The threshold is set above both, which loses this question and holds every refusal. On a real SRD 'mean' appears throughout and the overlap disappears."
+    },
+    {
+      "query": "how do I put out a fire on someone who is burning",
+      "relevant": [
+        {
+          "source_uid": "srd:emberlight:core",
+          "stable_key": "srd:core:conditions"
+        }
+      ]
+    },
+    {
+      "query": "how many points do I get for aptitudes",
+      "relevant": [
+        {
+          "source_uid": "srd:emberlight:core",
+          "stable_key": "srd:core:aptitudes"
+        }
+      ]
+    },
+    {
+      "query": "what is the hardest difficulty",
+      "relevant": [
+        {
+          "source_uid": "srd:emberlight:core",
+          "stable_key": "srd:core:difficulty"
+        }
+      ]
+    },
+    {
+      "query": "how much harm can a character take",
+      "relevant": [
+        {
+          "source_uid": "srd:emberlight:core",
+          "stable_key": "srd:core:harm"
+        }
+      ]
+    },
+    {
+      "query": "what does iron-handed require",
+      "relevant": [
+        {
+          "source_uid": "srd:emberlight:core",
+          "stable_key": "srd:core:boons"
+        }
+      ]
+    },
+    {
+      "query": "roll two sixes",
+      "relevant": [
+        {
+          "source_uid": "srd:emberlight:core",
+          "stable_key": "srd:core:resolution"
+        }
+      ],
+      "notes": "the Bright Success rule, asked without its name"
+    },
+    {
+      "query": "cinder hound stats",
+      "relevant": [
+        {
+          "source_uid": "srd:emberlight:core",
+          "stable_key": "srd:core:cinder-hound"
+        }
+      ]
+    },
+    {
+      "query": "what lives in the cinder marches",
+      "relevant": [
+        {
+          "source_uid": "srd:emberlight:core",
+          "stable_key": "srd:core:marches"
+        }
+      ],
+      "notes": "route 3: lore, answered generatively over redacted text"
+    },
+    {
+      "query": "what do travellers say about the mountain",
+      "relevant": [
+        {
+          "source_uid": "srd:emberlight:core",
+          "stable_key": "srd:core:marches"
+        }
+      ],
+      "notes": "The rumour table is nested inside the Marches lore, so the lore chunk genuinely answers this and is what nesting dedup surfaces when the parent matches independently. Labelling only the child would be asserting a dedup outcome the spec does not call for."
+    },
+    {
+      "query": "does heavy ashfall make it harder to see",
+      "relevant": [
+        {
+          "source_uid": "srd:emberlight:core",
+          "stable_key": "srd:core:ashfall"
+        }
+      ]
+    },
+    {
+      "query": "why is nothing alive on the old road",
+      "relevant": [
+        {
+          "source_uid": "srd:emberlight:core",
+          "stable_key": "srd:core:old-road"
+        }
+      ]
+    },
+    {
+      "query": "what do the players hear at the start of the ascent",
+      "relevant": [
+        {
+          "source_uid": "srd:emberlight:door",
+          "stable_key": "srd:door:ascent-boxed"
+        }
+      ],
+      "notes": "SEMANTIC TIER. A GM-facing phrasing sharing almost no vocabulary with the boxed text it asks about -- 'hear' and 'players' occur nowhere in it. Nothing lexical can bridge that and no surface-overlap stand-in can either, which is the whole reason the dense half of the pipeline exists."
+    },
+    {
+      "query": "why won't the hounds attack while we are roped together",
+      "relevant": [
+        {
+          "source_uid": "srd:emberlight:door",
+          "stable_key": "srd:door:hounds"
+        }
+      ]
+    },
+    {
+      "query": "how much does a warhorse cost",
+      "relevant": [],
+      "notes": "no economy in this game at all; must refuse"
+    },
+    {
+      "query": "what are the rules for starship combat",
+      "relevant": [],
+      "notes": "wrong genre entirely; must refuse"
+    },
+    {
+      "query": "how does spellcasting work",
+      "relevant": [],
+      "notes": "plausible for a fantasy game and absent from this one, which is the hard case"
+    }
+  ],
+  "structural_threshold": 0.8
+}

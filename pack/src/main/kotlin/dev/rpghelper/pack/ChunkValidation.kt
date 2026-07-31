@@ -13,7 +13,9 @@ import dev.rpghelper.pack.ViolationCode.DERIVED_CHUNK_HAS_SOURCE_COLUMNS
 import dev.rpghelper.pack.ViolationCode.DERIVED_CHUNK_NESTED
 import dev.rpghelper.pack.ViolationCode.DERIVED_CHUNK_NO_DERIVATION
 import dev.rpghelper.pack.ViolationCode.DUPLICATE_STABLE_KEY
+import dev.rpghelper.pack.ViolationCode.NESTED_TEXT_MISMATCH
 import dev.rpghelper.pack.ViolationCode.NESTING_CROSS_SOURCE
+import dev.rpghelper.pack.ViolationCode.NONVERBATIM_CHILD_OF_VERBATIM_PARENT
 import dev.rpghelper.pack.ViolationCode.NESTING_NOT_CONTAINED
 import dev.rpghelper.pack.ViolationCode.NESTING_TOO_DEEP
 import dev.rpghelper.pack.ViolationCode.PARENT_CHUNK_MISSING
@@ -28,7 +30,7 @@ import dev.rpghelper.pack.ViolationCode.SPAN_LENGTH_MISMATCH
  *
  * Everything here is decidable from the pack alone. Boundary validation and slice
  * equality are absent because they need the normalized source bytes, which the pack
- * does not ship -- see `docs/pack-schema.md` §7.
+ * does not ship -- see `docs/00-pack-schema.md` §7.
  */
 internal fun checkChunkShape(chunks: Map<Long, ChunkRow>, out: MutableList<Violation>) {
     for (chunk in chunks.values) {
@@ -108,16 +110,23 @@ internal fun checkChunkShape(chunks: Map<Long, ChunkRow>, out: MutableList<Viola
  * UNIQUE constraint for this, and could not be trusted if it did -- the pack ships its
  * own DDL -- so it is enforced here.
  */
-internal fun checkStableKeys(chunks: Map<Long, ChunkRow>, out: MutableList<Violation>) {
+internal fun checkStableKeys(
+    chunks: Map<Long, ChunkRow>,
+    sourceUids: Map<Long, String>,
+    out: MutableList<Violation>,
+) {
     chunks.values
         .filter { it.isSource && it.stableKey != null }
-        .groupBy { it.sourceId to it.stableKey }
+        // Grouped by source_uid, not source_id: supersession targets
+        // (source_uid, stable_key), so two `sources` rows sharing a uid would make an
+        // erratum ambiguous across them in exactly the way this check prevents within one.
+        .groupBy { sourceUids[it.sourceId] to it.stableKey }
         .forEach { (key, sharing) ->
             if (sharing.size > 1) {
                 out += Violation(
                     DUPLICATE_STABLE_KEY,
                     "chunks ${sharing.map { it.id }.sorted().joinToString()} in source " +
-                        "${key.first} all claim stable_key '${key.second}'",
+                        "'${key.first}' all claim stable_key '${key.second}'",
                 )
             }
         }
@@ -133,6 +142,18 @@ internal fun checkNesting(chunks: Map<Long, ChunkRow>, out: MutableList<Violatio
                 "chunk ${chunk.id} names parent $parentId, which is not in this pack",
             )
             continue
+        }
+        // The builder requires a child of a verbatim-class parent to be verbatim-eligible.
+        // Unenforced it is a hole in the central guarantee: a `setting` child carved out
+        // of a `rules` parent is an exact slice of rule text, and routing sends it to
+        // generation because a child candidate has no ancestor span redacted from it.
+        val parentVerbatim = parent.isSource && parent.kind in PackSchema.VERBATIM_ELIGIBLE_KINDS
+        if (parentVerbatim && chunk.kind !in PackSchema.VERBATIM_ELIGIBLE_KINDS) {
+            out += Violation(
+                NONVERBATIM_CHILD_OF_VERBATIM_PARENT,
+                "chunk ${chunk.id} is '${chunk.kind}' but nests inside verbatim-class " +
+                    "chunk $parentId; its text would reach generation unredacted",
+            )
         }
         if (parent.parentId != null) {
             // Deeper structures signal the parent was chunked too coarsely.
@@ -339,6 +360,57 @@ internal fun checkClaimSpans(db: Db, out: MutableList<Violation>) {
                 CLAIM_SPAN_NOT_UTF8_BOUNDARY,
                 "chunk_derivation $derivationId claim span [$start, $end) splits a " +
                     "multi-byte character",
+            )
+        }
+    }
+}
+
+/**
+ * A nested child's text must be exactly what its parent's text holds at the child's
+ * offset.
+ *
+ * Redaction excises `[C.span_start - P.span_start, C.span_end - P.span_start)` from the
+ * parent before it becomes generation context. Containment and span-length checks both
+ * pass for a pack whose child span points at the wrong region, and the consequence is
+ * that redaction removes innocuous prose while the child's actual rule text travels into
+ * the prompt.
+ *
+ * Slice equality against the normalized *source* is builder-only because the pack ships
+ * only its hash. Slice equality against the *parent's own shipped text* needs nothing
+ * the pack does not already carry, which is exactly the line §7 of the schema spec draws.
+ */
+internal fun checkNestedText(db: Db, out: MutableList<Violation>) {
+    db.forEachRow(
+        """
+        SELECT c.chunk_id, c.text, c.span_start, c.span_end,
+               p.chunk_id, p.text, p.span_start
+        FROM chunks c
+        JOIN chunks p ON p.chunk_id = c.parent_chunk_id
+        WHERE c.origin = 'source' AND p.origin = 'source'
+          AND c.span_start IS NOT NULL AND c.span_end IS NOT NULL
+          AND p.span_start IS NOT NULL
+        """.trimIndent(),
+    ) { row ->
+        val childId = row.long(0)
+        val childText = row.string(1).toByteArray(Charsets.UTF_8)
+        val childStart = row.long(2)
+        val childEnd = row.long(3)
+        val parentId = row.long(4)
+        val parentText = row.string(5).toByteArray(Charsets.UTF_8)
+        val parentStart = row.long(6)
+
+        val from = childStart - parentStart
+        val to = childEnd - parentStart
+        // Containment and span-length failures are reported by their own checks; this
+        // one only speaks about spans that are otherwise well-formed.
+        if (from < 0 || to > parentText.size || from >= to) return@forEachRow
+
+        val slice = parentText.copyOfRange(from.toInt(), to.toInt())
+        if (!slice.contentEquals(childText)) {
+            out += Violation(
+                NESTED_TEXT_MISMATCH,
+                "chunk $childId's text is not what parent $parentId holds at bytes " +
+                    "[$from, $to) of its own text; redaction would excise the wrong region",
             )
         }
     }

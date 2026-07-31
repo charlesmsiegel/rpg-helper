@@ -1,0 +1,111 @@
+EMBERLIGHT
+A Game of Cinders and Small Courage
+
+Second Edition
+
+Written for the rpg-helper project as an openly licensed test corpus.
+Published by the Cinder Press. All text in this document is released under
+the Creative Commons Attribution 4.0 International licence.
+
+This page and the two that follow it are front matter and carry no rules.
+
+CHAPTER ONE: HOW TO PLAY
+
+Resolution. When the outcome of an action is uncertain and failure would cost
+something, roll two six-sided dice and add the Aptitude the Warden names. If the
+total meets or beats the Difficulty, the action succeeds. On a total of exactly
+the Difficulty, the action succeeds at a cost the Warden describes. Rolling two
+sixes is a Bright Success and always succeeds regardless of Difficulty.
+
+Aptitudes. Every character has four Aptitudes: Might, Grace, Wits, and Heart.
+Each is rated from 1 to 5. A newly made character distributes ten points among
+the four, and no Aptitude may begin above 4. Aptitudes are not skills; the
+Warden asks for the one that fits the fiction.
+
+Difficulty. The Warden sets Difficulty before dice are rolled, never after. A
+Difficulty of 7 is an ordinary task under pressure, 10 is hard, and 13 is at the
+edge of what a person can do. There is no Difficulty above 15; beyond that the
+answer is simply no.
+
+Seizing. To seize a creature, make a contested roll: your Might against the
+target's higher of Might or Grace. Both sides roll two dice and add the named
+Aptitude. On a win the target becomes Held. A Held creature may not move away
+from you and rolls at a penalty of two on every action that is not an attempt to
+escape. Escaping is itself a contested roll on the escaping creature's turn.
+
+Seizing is dangerous in the open, and a failed attempt leaves you exposed. When
+a seizing attempt fails, the Warden may roll on the following table.
+
+d6 | Mishap
+1 | You lose your footing and are Shaken until your next turn
+2 | Your grip tears cloth, not flesh, and the target moves freely
+3 | You are dragged one pace toward whatever the target chooses
+4 | Nothing further goes wrong
+5 | Nothing further goes wrong
+6 | You catch a limb after all; the target is Held despite the failure
+
+Conditions. A condition lasts until something in the fiction ends it. Held is
+described above. A Shaken creature rolls at a penalty of one until it takes a
+turn doing nothing else. A Burning creature takes one harm at the end of each of
+its turns until the fire is put out, which takes an action and a Grace roll
+against Difficulty 7.
+
+Harm. A character can take three harm before falling. Falling is not dying. A
+fallen character is out of the scene and recovers after a night's rest unless
+the Warden and the players agree that the fiction demands otherwise.
+
+Boons. A character may take up to three Boons at creation. A Boon is a small
+named advantage: Ember-Touched, Iron-Handed, Quiet-Footed, Long-Sighted. Some
+Boons require a minimum Aptitude, which is listed with the Boon. Iron-Handed
+requires Might 3 or better and lets you seize a creature one size larger than
+yourself.
+
+CHAPTER TWO: THE CINDER MARCHES
+
+The Cinder Marches are the low country east of the Ember, where the ash falls
+warm and the light never quite goes out. Three generations ago the mountain
+opened and has been burning quietly ever since. The people who stayed learned to
+read the ash the way sailors read weather, and they call themselves Wardens
+without meaning anything grand by it. Nothing grows here that did not learn to
+grow in the dark, and nothing walks here that did not learn to walk quietly.
+
+Travellers in the Marches trade rumours the way they trade salt, and most of
+what they say is at least partly true.
+
+d6 | Rumour
+1 | The mountain is not burning; something inside it is
+2 | A warden's lantern will not light within sight of the old road
+3 | The ash tastes of iron in the week before it snows
+4 | There is a door in the Ember that opens from the far side
+5 | Cinder hounds will not cross running water, and know why
+6 | Someone is paying good coin for ash taken from the summit
+
+Ashfall. Ash falls on the Marches for roughly nine days in ten, and the locals
+grade it by how much of it you can see through. Thin ash is a nuisance. Heavy
+ash halves the distance anyone can see and makes every Wits roll that depends on
+sight one Difficulty harder. Wardens carry a length of red cord for exactly this
+reason and tie themselves together in a line when the fall turns heavy.
+
+The Old Road. The road up to the summit was cut before the mountain opened and
+is the only path that does not require climbing. It is also the only place in
+the Marches where nothing at all lives, which the Wardens consider a fact worth
+respecting rather than a mystery worth solving.
+
+CHAPTER THREE: BESTIARY
+
+Cinder Hound. Might 3, Grace 4, Wits 1, Heart 1. Harm 2. A cinder hound hunts
+by heat rather than by scent and is entirely uninterested in anything colder
+than a living body. It attacks with a bite that leaves the target Burning on a
+Bright Success.
+
+Ash Warden. Might 2, Grace 3, Wits 4, Heart 3. Harm 3. An ash warden is a person
+who has walked the Marches long enough to be counted by them. It knows the
+weather, the road, and the names of everyone who has gone up the mountain in the
+last forty years.
+
+OPEN LICENCE NOTICE
+
+This document is licensed under the Creative Commons Attribution 4.0
+International licence. You are free to share and adapt this material for any
+purpose, including commercially, provided you give appropriate credit. The full
+text of the licence accompanies this document and is not reproduced here.

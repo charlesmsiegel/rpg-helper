@@ -44,7 +44,24 @@ internal class TextPass(
  */
 internal class Canary(val chunkId: Long, val term: String)
 
-internal fun loadChunks(db: Db): Map<Long, ChunkRow> =
+/**
+ * Every chunk, keyed by id, plus any id that appeared more than once.
+ *
+ * The duplicates travel with the map because a map cannot represent them: `associateBy`
+ * keeps whichever row it saw last, so every downstream shape, nesting, stable-key, and
+ * reference check would be validating a view with rows silently missing from it.
+ */
+internal class ChunkTable(val byId: Map<Long, ChunkRow>, val duplicateIds: Set<Long>)
+
+internal fun loadChunks(db: Db): ChunkTable {
+    val rows = readChunkRows(db)
+    val seen = mutableSetOf<Long>()
+    val duplicates = mutableSetOf<Long>()
+    for (row in rows) if (!seen.add(row.id)) duplicates += row.id
+    return ChunkTable(rows.associateBy { it.id }, duplicates)
+}
+
+private fun readChunkRows(db: Db): List<ChunkRow> =
     db.map(
         """
         SELECT chunk_id, kind, origin, source_id, heading_path, page_label_start,
@@ -65,7 +82,7 @@ internal fun loadChunks(db: Db): Map<Long, ChunkRow> =
             stableKey = it.stringOrNull(9),
             parentId = it.longOrNull(10),
         )
-    }.associateBy { it.id }
+    }
 
 internal fun readTextPass(db: Db): TextPass {
     val lengths = HashMap<Long, Int>()
@@ -82,24 +99,46 @@ internal fun readTextPass(db: Db): TextPass {
 }
 
 /**
- * The first run of at least three ASCII letters in [text], lowercased, or null.
+ * A complete token from [text] that is safe to search for, or null.
  *
- * Three is enough to be a real token and short enough that almost any prose supplies
- * one; a chunk of pure punctuation or non-Latin script simply yields nothing and the
- * search moves to the next chunk.
+ * FTS5 phrase matching compares whole tokens, and the pinned `unicode61` tokenizer
+ * treats letters *and digits* as token characters while folding diacritics. So a
+ * candidate is only usable when it is a maximal token that survives that tokenizer
+ * unchanged apart from case: pure ASCII letters, with no digit or non-ASCII letter
+ * adjacent to it.
+ *
+ * Taking a letter run and truncating it would produce a substring rather than a token --
+ * `Acknowledgements` clipped to twelve characters matches nothing, and so do the
+ * `damage` inside `2d6damage` and the `caf` inside `Café`. Each would reject a
+ * perfectly valid pack.
  */
-private fun asciiWord(text: String): String? {
-    var start = -1
-    for (i in text.indices) {
-        val isLetter = text[i] in 'a'..'z' || text[i] in 'A'..'Z'
-        if (isLetter) {
-            if (start < 0) start = i
-            if (i - start + 1 >= 12) return text.substring(start, i + 1).lowercase()
-        } else {
-            if (start >= 0 && i - start >= 3) return text.substring(start, i).lowercase()
-            start = -1
+internal fun asciiWord(text: String): String? {
+    // **Token runs are found by code point, using the index's own token rule**, and only
+    // then filtered to the all-ASCII-letter ones. Scanning UTF-16 `Char`s with
+    // `isLetterOrDigit` disagreed with `unicode61` twice over: it rejects `Ⅳ` and every
+    // private-use glyph, which the index treats as token characters, and it reads *both*
+    // halves of a surrogate pair as separators. Given `𐌀abc` that picked `abc` as the
+    // canary while the index had stored the single token `𐌀abc` -- so the probe found
+    // nothing and refused a correctly populated pack.
+    var i = 0
+    while (i < text.length) {
+        val start = text.codePointAt(i)
+        if (!Tokenizer.isTokenCharacter(start)) {
+            i += Character.charCount(start)
+            continue
         }
+        var end = i
+        while (end < text.length) {
+            val codePoint = text.codePointAt(end)
+            if (!Tokenizer.isTokenCharacter(codePoint)) break
+            end += Character.charCount(codePoint)
+        }
+        val token = text.substring(i, end)
+        // Plain ASCII letters only, so the token is its own folded form: anything the
+        // tokenizer would rewrite is a token whose stored spelling this cannot predict.
+        val plainAscii = token.all { it in 'a'..'z' || it in 'A'..'Z' }
+        if (plainAscii && token.length in 3..20) return token.lowercase()
+        i = end
     }
-    if (start >= 0 && text.length - start >= 3) return text.substring(start).lowercase()
     return null
 }

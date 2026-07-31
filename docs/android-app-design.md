@@ -6,7 +6,7 @@ elsewhere (see `pack-builder-requirements.md`).
 This document specifies what the app does and why. It does not pin schemas — the
 schema spec does that, and this document defers to it wherever DDL is involved.
 
-The schema spec this document defers to is `pack-schema.md`.
+The schema spec this document defers to is `00-pack-schema.md`.
 
 Status: designed. The pack contract and the activation gate are implemented in the
 `:pack` module (§8's on-device rejection cases are covered by tests); everything else
@@ -551,9 +551,12 @@ The rule underneath: a character sheet outlives the software that checks it. Los
 validator is an inconvenience; losing or silently rewriting a character is not
 recoverable.
 
-**Still to pin: the exact five predicate forms and their arguments.** These go in the
-schema spec alongside the DDL, since the builder and the app must agree on them
-byte-for-byte. Everything above constrains what they may be.
+**The five predicate forms are pinned** in `07-documents-and-constraints-spec.md` §4:
+`range`, `sum_range`, `count_range`, `requires`, and `excludes`, over a two-shape
+selector grammar, with bounds that may reference another tracker rather than only a
+literal. That last detail is what lets one tracker constrain another -- current against
+maximum, spent against budget -- which every game in this genre needs and which no
+composition-free set of five forms could otherwise express.
 
 ---
 
@@ -717,7 +720,7 @@ These are all questions a pack can answer about itself, which is the line separa
 them from the builder's list.
 
 The full activation check set, and the codes each failure reports, are pinned in
-`pack-schema.md` §7 and implemented in the `:pack` module.
+`00-pack-schema.md` §7 and implemented in the `:pack` module.
 
 If the normalized source text ever ships in the pack (still open — it roughly doubles
 text size), full span re-validation becomes possible on-device and these rows merge.
@@ -753,16 +756,27 @@ ships in which release and nothing above it.
 
 ## 10. Open Questions
 
-- The five constraint predicate forms and their arguments (§6) — blocks the schema
-  spec.
-- Relevance floor for triggering the refusal card. Too low and it never fires; too
-  high and it fires on good queries. Needs the labelled query sets from §8 before it
-  can be set with any honesty.
-- Whether generated setting answers are cached, and what invalidates the cache when
-  pack activation or priority changes.
+- ~~The five constraint predicate forms and their arguments (§6).~~ **Settled** in
+  `07-documents-and-constraints-spec.md`; the schema spec is no longer blocked.
+- ~~Relevance floor for triggering the refusal card.~~ **Dissolved** in
+  `04-retrieval-spec.md` §7.4. There is no separate floor: a threshold on the fused score
+  would measure rank rather than relevance, since RRF puts the top candidate at roughly
+  `1/(k+1)` whether it is the right answer or the least-wrong of a list of junk. The
+  per-contract and per-pack gates are the only place an absolute measure of match
+  quality exists, so the app refuses exactly when gating leaves no candidates. Those
+  gate thresholds still need the labelled query sets; the third constant does not
+  exist.
+- ~~Whether generated setting answers are cached, and what invalidates the cache when
+  pack activation or priority changes.~~ **Settled** in `01-app-state-spec.md` §4: cached,
+  keyed by the normalized query plus an active-set fingerprint plus model identity — so
+  there is no invalidation logic at all, because anything that would change the answer
+  changes the key.
 - Pack distribution and entitlement: install-from-file is settled, a catalog is not.
   Depends on the signing scheme, which is open on the builder side too.
-- Whether the conversational window is user-visible and clearable, or purely internal.
+- ~~Whether the conversational window is user-visible and clearable, or purely
+  internal.~~ **Settled** in `01-app-state-spec.md` §3: the window *is* the answer feed.
+  One control clears both, and there is no hidden context that could change what a
+  question means without the user being able to see it.
 
 ### Settled: camera queries never answer from the image
 

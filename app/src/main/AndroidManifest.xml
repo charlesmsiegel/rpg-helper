@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!--
+      Two permissions, each with code behind it. Asking for one before there is code that
+      uses it is how an offline app stops being believable, so both were absent until the
+      surfaces that need them existed.
+
+      INTERNET: the model download, and nothing else. There is no analytics, no sync, and no
+      remote content — a pack is a file the user imported and everything derived from it is
+      computed here. The Models surface is the only place a socket is opened, and it says so
+      on screen.
+    -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!--
+      RECORD_AUDIO: voice input, transcribed by an on-device recognizer or not at all. The
+      microphone control is hidden outright on a device that cannot assert offline
+      recognition, so this permission is never requested on a device where granting it could
+      send audio to a server. See `Voice.kt` and `03-model-runtime-spec.md` §3.1.
+    -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <!--
+      Package visibility for the on-device recognizer. Without this the query returns
+      nothing on API 30+, and the app would conclude the device cannot transcribe locally
+      and hide the microphone — a permissions default silently deciding a product question.
+    -->
+    <queries>
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+    </queries>
+
+    <application
+        android:allowBackup="false"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.RpgHelper">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
