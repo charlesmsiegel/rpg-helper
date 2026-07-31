@@ -154,7 +154,7 @@ class ModelDownloaderTest {
         val downloader = ModelDownloader(directory, serving(failAfter = 17_321))
         assertTrue(downloader.download(manifest()) is DownloadResult.Failed)
 
-        val partial = directory.resolve("weights.gguf.partial")
+        val partial = directory.resolve(".weights.gguf.partial")
         assertTrue(Files.exists(partial), "the bytes so far survive the failure")
         assertEquals(17_321L, Files.size(partial))
 
@@ -167,7 +167,7 @@ class ModelDownloaderTest {
     fun `verification covers the whole file, not the resumed tail`() {
         // A resume that stitched a good tail onto a corrupt prefix would otherwise pass,
         // which is the one way a resumable download can be worse than a plain one.
-        Files.write(directory.resolve("weights.gguf.partial"), ByteArray(17_321) { 9 })
+        Files.write(directory.resolve(".weights.gguf.partial"), ByteArray(17_321) { 9 })
 
         val result = ModelDownloader(directory, serving()).download(manifest())
         assertTrue(result is DownloadResult.Failed, "got $result")
@@ -178,7 +178,7 @@ class ModelDownloaderTest {
     fun `a server that ignores Range starts over rather than concatenating`() {
         // Appending a complete copy to an existing prefix produces a file that is longer
         // than declared and fails only at the digest, after fetching everything twice.
-        Files.write(directory.resolve("weights.gguf.partial"), weights.copyOfRange(0, 5_000))
+        Files.write(directory.resolve(".weights.gguf.partial"), weights.copyOfRange(0, 5_000))
 
         val result = ModelDownloader(directory, serving(honourRange = false)).download(manifest())
         assertTrue(result is DownloadResult.Complete, "got $result")
@@ -191,7 +191,7 @@ class ModelDownloaderTest {
         // reported as starting where we asked, so the caller appends a whole body to the
         // partial file, fails the digest after spending the bandwidth, and fails the same
         // way on every retry instead of restarting cleanly.
-        Files.write(directory.resolve("weights.gguf.partial"), weights.copyOfRange(0, 5_000))
+        Files.write(directory.resolve(".weights.gguf.partial"), weights.copyOfRange(0, 5_000))
 
         val lying = RangeFetcher { _, _ -> ByteArrayInputStream(weights) to 0L }
         val result = ModelDownloader(directory, lying).download(manifest())
@@ -205,7 +205,7 @@ class ModelDownloaderTest {
 
     @Test
     fun `a partial longer than the declared file is discarded rather than resumed onto`() {
-        Files.write(directory.resolve("weights.gguf.partial"), ByteArray(weights.size + 500))
+        Files.write(directory.resolve(".weights.gguf.partial"), ByteArray(weights.size + 500))
 
         val result = ModelDownloader(directory, serving()).download(manifest())
         assertTrue(result is DownloadResult.Complete, "got $result")
@@ -256,7 +256,7 @@ class ModelDownloaderTest {
     @Test
     fun `discardPartials clears an interrupted download on demand`() {
         ModelDownloader(directory, serving(failAfter = 100)).download(manifest())
-        assertTrue(Files.exists(directory.resolve("weights.gguf.partial")))
+        assertTrue(Files.exists(directory.resolve(".weights.gguf.partial")))
 
         ModelDownloader(directory, serving()).discardPartials(manifest())
         assertEquals(0, Files.list(directory).use { it.count() })

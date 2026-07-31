@@ -153,9 +153,15 @@ private fun ask(arguments: List<String>): Int {
         library.dropped.forEach { System.err.println("note: $it") }
 
         // One embedding per distinct contract, because a pack built two years ago and one
-        // built today can name different embedders and both must keep working.
-        val vectors = BUNDLED.embedPerContract(question, library.active.distinctContracts)
-        val retrieved = Pipeline.retrieve(question, library.active, vectors, GATES)
+        // built today can name different embedders and both must keep working -- and it
+        // happens *inside* retrieval, after the alias rewrite. Embedding what the user
+        // typed would give the phrasing bridge to lexical search alone.
+        val retrieved = Pipeline.retrieve(
+            question,
+            library.active,
+            gates = GATES,
+            embed = { rewritten, contracts -> BUNDLED.embedPerContract(rewritten, contracts) },
+        )
 
         val router = Router(
             PackCitations(library.packs),
@@ -168,6 +174,10 @@ private fun ask(arguments: List<String>): Int {
             retrieved,
             generator = null,
             activePacks = library.packs.map { it.packUid },
+            // A refusal card offers to search inactive packs -- but only if it is told
+            // there are any. Left at its default the remedy disappears exactly when it
+            // would help: a library holding the answer in a book the user switched off.
+            hasInactivePacks = store?.library?.installed()?.any { !it.active } ?: false,
         )
         print(renderAnswer(answer, diagnostics = why))
         store?.close()
@@ -193,7 +203,17 @@ private fun install(arguments: List<String>): Int {
             is InstallResult.Installed -> {
                 val pack = result.pack
                 println("installed #${pack.installId}: ${pack.title} (${pack.packUid} ${pack.packVersion})")
-                println("  inactive until you activate it")
+                // Replacing a live book keeps it live -- the user activated that pack and
+                // did not ask for it to go dark. Saying "inactive" regardless would be
+                // the tool describing a state the library is not in, and the very next
+                // `ask` would answer from content it had just called inactive.
+                println(
+                    if (pack.active) {
+                        "  active, replacing the copy that was active before"
+                    } else {
+                        "  inactive until you activate it"
+                    },
+                )
                 0
             }
             is InstallResult.NeedsConfirmation -> {
@@ -292,7 +312,9 @@ private fun roll(arguments: List<String>): Int {
         // cited like any other quotation rather than paraphrased into the roll line.
         val citation = PackCitations(library.packs)
             .resolve(dev.rpghelper.pack.ChunkRef(library.packs.single().packUid, result.chunkId))
-        println("  \" ${result.row.text}")
+        // Every line, not just the first. An outcome carrying a newline had its later
+        // lines printed flush left, where nothing marks them as the book's own words.
+        result.row.text.lineSequence().forEach { println("  \" $it") }
         citation?.let { println("    — ${dev.rpghelper.routing.render(it)}") }
         return 0
     }

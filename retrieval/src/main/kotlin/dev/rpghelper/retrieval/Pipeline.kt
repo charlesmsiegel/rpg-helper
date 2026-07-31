@@ -111,9 +111,24 @@ object Pipeline {
         active: ActiveSet,
         queryVectors: Map<String, FloatArray> = emptyMap(),
         gates: Gates = Gates(),
+        /**
+         * Embeds the **rewritten** query, once per contract, if supplied.
+         *
+         * Given, it replaces [queryVectors] — and it exists because the two are not the
+         * same query. Alias expansion is a *query rewrite*: the whole point of storing
+         * *seizing* beside *grapple* is that the user's word reaches text the book never
+         * uses. Embedding what the user typed hands that bridge to lexical search alone,
+         * so a paraphrase that only the canonical would have matched produces no dense
+         * candidate and no independent dense evidence — the half of the pipeline the
+         * alias table exists to reach.
+         */
+        embed: ((String, Set<String>) -> Map<String, FloatArray>)? = null,
     ): Retrieved {
         val normalized = QueryNormalizer.normalize(rawQuery)
-        val rewritten = AliasRewriter(loadAliases(active)).rewrite(normalized)
+        // Only the aliases this query could match. See `AliasRewriter.candidatePhrases`.
+        val rewritten = AliasRewriter(
+            loadAliases(active, AliasRewriter.candidatePhrases(normalized)),
+        ).rewrite(normalized)
 
         // **One capped representation drives both.** Capping the groups and capping the
         // flattened terms independently lets the two disagree: a multi-word alias can put
@@ -145,6 +160,8 @@ object Pipeline {
             trimmed += own.joinToString(" ")
         }
         val expression = LexicalQuery.build(groups.flatMap { it.terms })
+        val vectors = embed?.invoke(rewritten.terms.joinToString(" "), active.distinctContracts)
+            ?: queryVectors
         val gatedOut = mutableListOf<String>()
         trimmed.forEach { gatedOut += "alias expansions dropped for '$it': term budget" }
         val lists = mutableListOf<RetrievalList>()
@@ -185,8 +202,8 @@ object Pipeline {
         // punctuation-only *chunk* embeds to that same uniform vector, so a
         // punctuation-only query would score cosine 1.0 against it, clear any gate, and
         // answer `???` with whatever unrelated card that chunk belongs to.
-        val densable = if (groups.isEmpty()) emptyMap() else queryVectors
-        if (groups.isEmpty() && queryVectors.isNotEmpty()) {
+        val densable = if (groups.isEmpty()) emptyMap() else vectors
+        if (groups.isEmpty() && vectors.isNotEmpty()) {
             gatedOut += "dense: the query has no terms to match on"
         }
         for ((contract, vector) in densable) {
@@ -267,11 +284,20 @@ object Pipeline {
      * gate, so withdrawn enrichment keeps broadening searches after the passage it
      * belongs to has been removed from every other route.
      */
-    private fun loadAliases(active: ActiveSet): List<Alias> = active.packs.flatMap { pack ->
-        pack.db.map("SELECT alias, canonical, chunk_id FROM entities") {
+    private fun loadAliases(active: ActiveSet, phrases: Set<String>): List<Alias> {
+        if (phrases.isEmpty()) return emptyList()
+        // Aliases are stored in `Tokenizer.indexForm`, which is what these phrases are, so
+        // the comparison is an equality on an indexed column rather than a scan. The
+        // phrases come from the query, so they are quoted -- a token cannot contain an
+        // apostrophe, since punctuation is a separator, but building SQL from user input
+        // without escaping it is not a thing to do on the strength of that.
+        val list = phrases.joinToString(",") { "'${it.replace("'", "''")}'" }
+        return active.packs.flatMap { pack ->
+        pack.db.map("SELECT alias, canonical, chunk_id FROM entities WHERE alias IN ($list)") {
             Alias(pack.packUid, it.string(0), it.string(1), it.longOrNull(2))
         }.filter { alias ->
             alias.chunkId == null || ChunkRef(pack.packUid, alias.chunkId) !in active.superseded
+        }
         }
     }
 

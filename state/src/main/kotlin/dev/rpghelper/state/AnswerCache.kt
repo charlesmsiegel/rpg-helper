@@ -151,8 +151,16 @@ class AnswerCache(
 
     fun size(): Int = db.query("SELECT count(*) FROM answer_cache") { it.int(0) }.single()
 
-    fun bytes(): Long =
-        db.query("SELECT COALESCE(sum(length(card)), 0) FROM answer_cache") { it.long(0) }.single()
+    /**
+     * Total stored size, in the units the limit is stated in.
+     *
+     * `length()` on TEXT counts *characters*, so a cache full of CJK or emoji cards would
+     * report a quarter of what it occupies and quietly run past a disk ceiling the user
+     * was promised. Cast to BLOB and the answer is octets.
+     */
+    fun bytes(): Long = db.query(
+        "SELECT COALESCE(sum(length(CAST(card AS BLOB))), 0) FROM answer_cache",
+    ) { it.long(0) }.single()
 
     /**
      * Drops least-recently-used entries until both bounds hold.

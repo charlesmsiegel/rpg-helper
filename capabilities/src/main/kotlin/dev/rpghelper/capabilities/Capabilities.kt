@@ -50,7 +50,14 @@ object Capabilities {
      */
     fun load(db: Db, superseded: Set<Long> = emptySet()): CapabilitySet {
         val tables = loadTables(db)
-        val rows = loadRows(db)
+        // Rows are fetched **per surviving table**, not all at once. The supported ceiling
+        // is a million of them, and a pack may carry many structured tables with few or no
+        // roll-table capabilities -- so materializing every row and its text before any
+        // manifest had been looked at made merely activating such a pack retain a very
+        // large object graph for data nothing would ever ask for.
+        val rows = mutableMapOf<Long, List<TableRow>>()
+        fun rowsOf(tableId: Long): List<TableRow> =
+            rows.getOrPut(tableId) { loadRowsOf(db, tableId) }
         val kinds = db.map("SELECT chunk_id, kind, origin FROM chunks") {
             it.long(0) to (it.string(1) to it.string(2))
         }.toMap()
@@ -81,8 +88,16 @@ object Capabilities {
 
             val parsed = runCatching {
                 val obj = json.parseToJsonElement(manifest).jsonObject
-                obj.getValue("table_id").jsonPrimitive.content.toLong() to
-                    obj.getValue("label").jsonPrimitive.content
+                // Typed, not coerced. `JsonPrimitive.content` turns `"1"` into a usable
+                // table id and the boolean `false` into the label a user would read on a
+                // roll control, so a manifest the schema forbids loads instead of being
+                // dropped and reported.
+                val id = obj.getValue("table_id").jsonPrimitive
+                require(!id.isString) { "table_id must be a JSON number, not \"${id.content}\"" }
+                val label = obj.getValue("label").jsonPrimitive
+                require(label.isString) { "label must be a JSON string, not ${label.content}" }
+                (id.content.toLongOrNull() ?: error("table_id '${id.content}' is not an integer")) to
+                    label.content
             }.getOrElse {
                 dropped += DroppedCapability(id, "manifest does not parse: ${it.message}")
                 return@forEach
@@ -137,7 +152,7 @@ object Capabilities {
                 tableId = tableId,
                 chunkId = chunkId,
                 expression = expression,
-                rows = rows[tableId].orEmpty().sortedBy { it.lo },
+                rows = rowsOf(tableId).sortedBy { it.lo },
                 label = label,
             )
         }
@@ -151,8 +166,9 @@ object Capabilities {
             it.long(0) to (it.long(1) to it.string(2))
         }.toMap()
 
-    private fun loadRows(db: Db): Map<Long, List<TableRow>> =
-        db.map("SELECT table_id, seq, lo, hi, text FROM table_rows") {
-            it.long(0) to TableRow(it.long(1), it.long(2), it.long(3), it.string(4))
-        }.groupBy({ it.first }, { it.second })
+    /** One table's rows. The id comes from the pack's own `tables` row, never from input. */
+    private fun loadRowsOf(db: Db, tableId: Long): List<TableRow> =
+        db.map(
+            "SELECT seq, lo, hi, text FROM table_rows WHERE table_id = $tableId ORDER BY seq",
+        ) { TableRow(it.long(0), it.long(1), it.long(2), it.string(3)) }
 }

@@ -51,7 +51,22 @@ class ModelDownloader(
     /** The final path a verified file occupies. */
     fun fileOf(name: String): Path = directory.resolve(name)
 
-    private fun partialOf(name: String): Path = directory.resolve("$name.partial")
+    /**
+     * Where a download accumulates before it is verified.
+     *
+     * **Dot-prefixed, which is what keeps it out of the final names' namespace.** Plain
+     * `<name>.partial` shares that namespace, and a manifest may legitimately hold both
+     * `weights.partial` and `weights` — after which the first file's verified bytes
+     * occupy the second file's partial path, so the second download appends to an
+     * already-complete file and fails its digest, or, if the two are identical, reports
+     * Complete with the first file gone. The names are the manifest's to choose and the
+     * collision is not its fault.
+     *
+     * The prefix is safe *because [ModelManifest] refuses a name beginning with a dot*,
+     * so no final name can ever be spelled like a partial. Two rules that hold each other
+     * up, and the reason the refusal there is not merely tidiness.
+     */
+    private fun partialOf(name: String): Path = directory.resolve(".$name.partial")
 
     /**
      * Downloads every file in [manifest] that is not already present and verified.

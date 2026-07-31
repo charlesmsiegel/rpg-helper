@@ -41,13 +41,17 @@ class CliTest {
     }
 
     private fun ask(question: String) = Library.open(listOf(pack)).use { library ->
-        val vectors = BUNDLED.embedPerContract(question, library.active.distinctContracts)
         Router(
             PackCitations(library.packs),
             PackDerivations(library.packs),
             LoadedRollables(library.rollableChunks),
         ).route(
-            Pipeline.retrieve(question, library.active, vectors, GATES),
+            Pipeline.retrieve(
+                question,
+                library.active,
+                gates = GATES,
+                embed = { rewritten, contracts -> BUNDLED.embedPerContract(rewritten, contracts) },
+            ),
             generator = null,
             activePacks = library.packs.map { it.packUid },
         )

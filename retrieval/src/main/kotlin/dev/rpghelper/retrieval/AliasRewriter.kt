@@ -44,11 +44,7 @@ data class RewrittenQuery(
  */
 class AliasRewriter(aliases: List<Alias>) {
 
-    /**
-     * Longest n-gram considered. Beyond this an "alias" is a sentence, and every extra
-     * length multiplies the match attempts across every position in the query.
-     */
-    private val maxPhrase = 5
+    private val maxPhrase = MAX_PHRASE
 
     private val byAlias: Map<String, List<Alias>> = aliases.groupBy { it.alias }
 
@@ -106,5 +102,34 @@ class AliasRewriter(aliases: List<Alias>) {
         // The user's own tokens are never dropped. An alias that fires wrongly costs some
         // precision; a rewrite that replaces the user's wording costs the query.
         return RewrittenQuery(tokens + canonicals, entityHits, matched, unusable, groups)
+    }
+
+    companion object {
+        /**
+         * Longest n-gram considered. Beyond this an "alias" is a sentence, and every extra
+         * length multiplies the match attempts across every position in the query.
+         */
+        const val MAX_PHRASE = 5
+
+        /**
+         * Every phrase in [query] that could possibly be an alias.
+         *
+         * Exposed so the caller can ask the database for *those* aliases rather than for
+         * all of them. A pack near the supported half-million-entity ceiling made every
+         * query read every alias and canonical string, allocate an object per row, and
+         * build a full `groupBy` map before looking at a word the user typed — per
+         * keystroke, on a phone. The set here is bounded by the query's length, which is
+         * the quantity the work should have scaled with all along.
+         */
+        fun candidatePhrases(query: String): Set<String> {
+            val tokens = Tokenizer.tokenize(query)
+            val phrases = mutableSetOf<String>()
+            for (start in tokens.indices) {
+                for (length in 1..minOf(MAX_PHRASE, tokens.size - start)) {
+                    phrases += tokens.subList(start, start + length).joinToString(" ")
+                }
+            }
+            return phrases
+        }
     }
 }

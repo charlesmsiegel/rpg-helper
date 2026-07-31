@@ -260,7 +260,9 @@ object ConstraintParser {
 
             "excludes" -> Constraint.Excludes(
                 chunkId, rulesetId, selector(obj, "subject"),
-                obj.getValue("excludes").jsonArray.map { Selector(it.jsonPrimitive.content) },
+                obj.getValue("excludes").jsonArray.map {
+                    Selector(stringOf("excludes", it.jsonPrimitive))
+                },
                 constraintId, packPriority,
             ).also(::requireDistinctExclusions)
 
@@ -339,7 +341,23 @@ object ConstraintParser {
     }
 
     private fun selector(obj: JsonObject, field: String) =
-        Selector(obj.getValue(field).jsonPrimitive.content)
+        Selector(stringOf(field, obj.getValue(field).jsonPrimitive))
+
+    /**
+     * A selector must be a JSON *string*, not merely something with a `content`.
+     *
+     * `JsonPrimitive.content` coerces: `null` becomes "null", `true` becomes "true", and
+     * `123` becomes "123" -- each of which satisfies the tracker-key grammar. So a
+     * malformed constraint parses cleanly and becomes a rule matching a tracker nobody
+     * will ever have: a silent no-op, absent from the dropped-constraint report, on a
+     * document that displays as validated.
+     */
+    private fun stringOf(field: String, primitive: JsonPrimitive): String {
+        if (!primitive.isString) {
+            error("'$field' must be a JSON string, not ${primitive.content}")
+        }
+        return primitive.content
+    }
 
     /**
      * A JSON number, or null when the field is absent.
@@ -379,7 +397,7 @@ object ConstraintParser {
         if (element is JsonPrimitive) return Bound.Literal(numberOf(field, element))
         val obj = element.jsonObject
         requireKnownKeys(obj, setOf("tracker"))
-        return Bound.TrackerRef(obj.getValue("tracker").jsonPrimitive.content)
+        return Bound.TrackerRef(stringOf("tracker", obj.getValue("tracker").jsonPrimitive))
     }
 }
 
