@@ -101,6 +101,30 @@ anyway.
 The redacted text is also what `04-retrieval-spec.md` §9.1 re-runs the query against for the
 lexical independence test, so the two uses agree by construction.
 
+### 2.2.1 What enters the context, and what happens when nothing does
+
+At most **five** route-3 chunks enter the generation context, in fused rank order, within
+a byte budget sized for the model's window with room for the prompt and the answer.
+
+**Chunks are dropped whole, never truncated.** A half-sent setting chunk is a passage
+whose ending — often the qualification that changes its meaning — is missing, and the
+model has no way to know it was cut. When the budget is reached the lowest-ranked
+remaining chunk is dropped entirely and the fact is recorded for the diagnostics view.
+
+**Redaction can empty the context, and that case is not a refusal.** Every route-3 chunk
+can be dropped by §2.2's fail-closed rule, or redact to nothing because its children cover
+it entirely. Route 3 still fired — retrieval genuinely matched — so:
+
+- **No generated card is produced.** A model asked to answer from an empty context answers
+  from pretraining, wearing the generated card's styling. That is the exact failure §2
+  exists to prevent, arriving through the last door left open.
+- If quote or derived cards exist, they are the answer and nothing marks the absence.
+- If they do not, the app shows the chunks it found **with their citations**, and says
+  their content is quoted rather than generated. Presentationally this is the *model
+  unavailable* card with a different sentence; it is not a sixth card kind, because the
+  user's action is the same — go read these — and it is emphatically not the refusal card,
+  which would claim nothing was found.
+
 ### 2.3 The query is split too
 
 Withholding the chunk is not enough, because the *question* still carries the rules
@@ -278,6 +302,8 @@ Off by default; a setting, not a gesture.
 | Redaction fail-closed | a child span outside its parent, or off a UTF-8 boundary, drops the parent from context rather than partially redacting |
 | Context exclusion | verbatim-class and derived chunks never enter the generation context by any path |
 | Residual intent | when both routes fire, generation receives only the residual; an empty residual produces no card |
+| Empty context | a route-3 result whose chunks all redact to nothing produces no generated card, and never a refusal card |
+| Context budget | chunks are dropped whole; no chunk is ever partially sent |
 | Citation integrity | every citation resolves to a chunk that was actually in context |
 | Claim support | every claim in a generated answer is entailed by the chunk it cites — see `02-test-infrastructure-spec.md` |
 | Empty | empty retrieval produces the refusal card and never a generated one |

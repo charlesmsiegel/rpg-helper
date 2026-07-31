@@ -150,7 +150,7 @@ interface Generator {
     fun residualIntent(query: String, covered: List<CardSummary>): String?
 
     /** Setting answers, over ('setting','source') chunks only. */
-    fun answer(residual: String, context: List<RedactedChunk>): String
+    fun answer(residual: String, context: List<RedactedChunk>): GeneratedAnswer
 
     /** Camera input. Produces a retrieval query and nothing else. */
     fun describeImage(image: ImageBuffer): String
@@ -165,6 +165,36 @@ reasoning that closes the capability and constraint vocabularies.
 
 `RedactedChunk` is the type carrying the redaction from `05-routing-and-cards-spec.md` §2.2.
 That generation cannot be handed a raw chunk is enforced by the type, not by a comment.
+
+### 4.1.1 `answer` returns attributions, not prose
+
+```kotlin
+data class GeneratedAnswer(
+    val text: String,
+    val attributions: List<Attribution>,
+)
+
+/** [start, end) in UTF-8 bytes of [GeneratedAnswer.text]; the same units as everything else. */
+data class Attribution(val start: Int, val end: Int, val chunk: ChunkRef)
+```
+
+A bare `String` would leave nothing mapping a claim to the chunk that supports it — and
+two downstream requirements need exactly that mapping. The generated card renders **inline
+citation chips** (`05-routing-and-cards-spec.md` §3.2), and the claim-support harness
+checks each claim **against the chunk it cites** (`02-test-infrastructure-spec.md` §3.2).
+Neither can be built by matching text after the fact; inferring which chunk a sentence
+came from is the same guessing the whole design refuses to do.
+
+Two rules keep it honest:
+
+- **Every attribution must name a chunk that was in the context.** One that does not is a
+  generation failure, and the card is not rendered — the same rule as an unresolvable
+  citation (§4 of the routing spec).
+- **A model that produces no usable attributions degrades to whole-answer
+  attribution**: the card shows footer citations for the whole context and no inline chips,
+  and the claim-support harness evaluates the answer against the context as a set. That is
+  weaker and it is *defined*, which is the difference between a degraded mode and an
+  undefined one.
 
 ### 4.2 None of the jobs is unconditional
 
@@ -265,6 +295,8 @@ explanation, not shown and then failing.
 | Follow-up detection | the cheap check fires on pronouns and ellipsis against non-empty history, and not otherwise |
 | Voice without generation | a transcript reaches retrieval and finds the rule with the generative model absent |
 | Job isolation | `answer` receives only redacted `('setting','source')` chunks — enforced by type and asserted at the boundary |
+| Attributions | every attribution names a context chunk and lies within the answer's bytes; one that does not suppresses the card |
+| Attribution fallback | an answer with no usable attributions renders with footer citations rather than failing |
 | Availability transitions | each state produces the right card; `Failed` offers retry and `NotDownloaded` offers download |
 | Download integrity | a truncated file, a wrong-hash file, and an HTML error page under the model's name are all rejected and deleted |
 | Resume | a download interrupted at an arbitrary byte resumes to a byte-identical, hash-verified file |
