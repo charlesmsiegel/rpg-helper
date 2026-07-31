@@ -290,6 +290,86 @@ class CorpusBuildTest {
     }
 
     @Test
+    fun `a malformed table drops its rows and its roll control, not the book`() {
+        // A random table is enrichment: the passage is quotable with or without it. An
+        // unparseable expression, a range that leaves a result uncovered, or an outcome
+        // that is not where it claims to be used to be emitted anyway and refused by the
+        // activation gate -- so one optional malformed table stopped a whole rulebook
+        // shipping, and the passage itself would have rendered perfectly.
+        val corpus = CorpusSpec.load(CorpusPack.directory)
+        val broken = withFirstTableExpression(corpus, "d8")
+        val target = Files.createTempDirectory("broken").resolve("x.rpgpack")
+        val outcome = PackBuilder(broken, CorpusPack.EMBEDDER).buildTo(target)
+
+        assertTrue(
+            outcome.notes.any { it.validation == "table-enrichment" && it.subjectKind == "table" },
+            "the drop is recorded: ${outcome.notes}",
+        )
+        assertTrue(
+            outcome.notes.any { it.validation == "table-enrichment" && it.subjectKind == "capability" },
+            "and the roll control goes with it: ${outcome.notes}",
+        )
+        assertTrue(
+            Packs.validateFile(target, setOf(CorpusPack.EMBEDDER.contract)).isValid,
+            "and the pack still activates",
+        )
+
+        JdbcDb.openReadOnly(target).use { database ->
+            val tables = database.map("SELECT dice_expr FROM tables") { it.string(0) }
+            assertEquals(listOf("d6"), tables, "only the sound table survives")
+            assertTrue(
+                database.map("SELECT count(*) FROM chunks WHERE stable_key = 'srd:core:seizing-mishaps'") {
+                    it.long(0)
+                }.single() == 1L,
+                "the passage itself is still in the pack and still quotable",
+            )
+        }
+    }
+
+    @Test
+    fun `a failed rebuild leaves the previous pack where it was`() {
+        // Building in place deleted the known-good artifact first, so any later failure --
+        // an anchor that no longer matches, an embedding that throws -- destroyed a
+        // working pack and left a half-written SQLite file wearing its name.
+        val target = Files.createTempDirectory("rebuild").resolve("x.rpgpack")
+        PackBuilder(CorpusSpec.load(CorpusPack.directory), CorpusPack.EMBEDDER).buildTo(target)
+        val before = Files.readAllBytes(target)
+
+        val failure = kotlin.runCatching {
+            PackBuilder(trimLastGap(CorpusSpec.load(CorpusPack.directory)), CorpusPack.EMBEDDER)
+                .buildTo(target)
+        }.exceptionOrNull()
+
+        assertTrue(failure != null, "the rebuild must fail for this to mean anything")
+        assertTrue(before.contentEquals(Files.readAllBytes(target)), "byte for byte, untouched")
+        assertEquals(
+            emptyList(),
+            Files.list(target.parent).use { stream ->
+                stream.filter { it.fileName.toString().endsWith(".building") }.toList()
+            },
+            "and no staging file is left behind",
+        )
+    }
+
+    @Test
+    fun `one builder can build twice`() {
+        // Carrying `nextChunkId` and the stable-key map into a second build numbers the
+        // second pack's chunks differently and marks every repeated key ambiguous, which
+        // fails on the first derived citation that resolves one.
+        val builder = PackBuilder(CorpusSpec.load(CorpusPack.directory), CorpusPack.EMBEDDER)
+        val directory = Files.createTempDirectory("twice")
+        val first = builder.buildTo(directory.resolve("a.rpgpack"))
+        val second = builder.buildTo(directory.resolve("b.rpgpack"))
+
+        assertEquals(first.notes, second.notes, "the same build produces the same notes")
+        assertTrue(
+            Files.readAllBytes(first.path).size == Files.readAllBytes(second.path).size,
+            "and the same pack",
+        )
+        assertTrue(Packs.validateFile(second.path, setOf(CorpusPack.EMBEDDER.contract)).isValid)
+    }
+
+    @Test
     fun `an anchor that is not unique fails the build rather than picking one`() {
         // "First match" is exactly how a fixture starts pointing somewhere plausible and
         // wrong, so ambiguity is refused instead of resolved.
@@ -332,4 +412,28 @@ private fun trimLastGap(corpus: CorpusSpec): CorpusSpec {
         },
     )
     return CorpusSpec(corpus.root, trimmed)
+}
+
+/** The corpus with the first table's dice expression replaced. */
+private fun withFirstTableExpression(corpus: CorpusSpec, expression: String): CorpusSpec {
+    val json = kotlinx.serialization.json.Json.parseToJsonElement(
+        java.nio.file.Files.readString(corpus.root.resolve("pack.json")),
+    ).jsonObject
+    val tables = json.getValue("tables") as kotlinx.serialization.json.JsonArray
+    val patched = kotlinx.serialization.json.JsonObject(
+        tables.first().jsonObject.toMutableMap().apply {
+            put("dice_expr", kotlinx.serialization.json.JsonPrimitive(expression))
+        },
+    )
+    return CorpusSpec(
+        corpus.root,
+        kotlinx.serialization.json.JsonObject(
+            json.toMutableMap().apply {
+                put(
+                    "tables",
+                    kotlinx.serialization.json.JsonArray(listOf(patched) + tables.drop(1)),
+                )
+            },
+        ),
+    )
 }

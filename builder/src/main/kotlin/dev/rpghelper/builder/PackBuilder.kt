@@ -2,12 +2,14 @@ package dev.rpghelper.builder
 
 import dev.rpghelper.model.Embedder
 import dev.rpghelper.pack.Float16
+import dev.rpghelper.pack.DiceExpression
 import dev.rpghelper.pack.PackSchema
 import dev.rpghelper.pack.ProbeVector
 import dev.rpghelper.pack.Tokenizer
 import dev.rpghelper.pack.Utf8
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 import java.sql.Connection
 import java.sql.DriverManager
@@ -79,25 +81,60 @@ class PackBuilder(
     /** Child chunk id to parent, for the expansion redaction. */
     private val chunkParents = mutableMapOf<Long, Long>()
 
+    /**
+     * Builds into a sibling temporary file and moves it over [path] once it commits.
+     *
+     * Writing in place meant deleting the last known-good pack *first*, so any later
+     * failure — an anchor that no longer matches, an embedding that throws, a claim the
+     * judge refuses — destroyed a working artifact and left a half-written SQLite file
+     * wearing its name. A rebuild that fails should leave you exactly where you were.
+     *
+     * Per-build state is reset here rather than in the constructor so a second `buildTo`
+     * on one instance is a second *build*: carrying `nextChunkId` and the stable-key map
+     * over would number the second pack's chunks differently and mark every repeated key
+     * ambiguous, failing on the first derived citation that resolved one.
+     */
     fun buildTo(path: Path): BuildOutcome {
-        Files.deleteIfExists(path)
-        DriverManager.getConnection("jdbc:sqlite:${path.toAbsolutePath()}").use { c ->
-            c.autoCommit = false
-            createSchema(c)
-            writeMeta(c)
-            writeSources(c)
-            writeDerived(c)
-            writeFts(c)
-            writeVectors(c)
-            writeEntities(c)
-            writeTables(c)
-            writeCapabilities(c)
-            writeConstraints(c)
-            writeSupersessions(c)
-            writeReport(c)
-            c.commit()
+        reset()
+        val target = path.toAbsolutePath()
+        Files.createDirectories(target.parent)
+        val staging = Files.createTempFile(target.parent, ".${target.fileName}", ".building")
+        // SQLite wants to create the file itself; the temp file reserved the name.
+        Files.deleteIfExists(staging)
+        try {
+            DriverManager.getConnection("jdbc:sqlite:$staging").use { c ->
+                c.autoCommit = false
+                createSchema(c)
+                writeMeta(c)
+                writeSources(c)
+                writeDerived(c)
+                writeFts(c)
+                writeVectors(c)
+                writeEntities(c)
+                val tables = writeTables(c)
+                writeCapabilities(c, tables)
+                writeConstraints(c)
+                writeSupersessions(c)
+                writeReport(c)
+                c.commit()
+            }
+            Files.move(staging, target, StandardCopyOption.REPLACE_EXISTING)
+        } catch (failure: Throwable) {
+            Files.deleteIfExists(staging)
+            throw failure
         }
         return BuildOutcome(path, notes.toList())
+    }
+
+    private fun reset() {
+        nextChunkId = 1L
+        notes.clear()
+        chunkIdByStableKey.clear()
+        ambiguousStableKeys.clear()
+        chunkTexts.clear()
+        chunkKinds.clear()
+        chunkSpans.clear()
+        chunkParents.clear()
     }
 
     // ------------------------------------------------------------------ schema and meta
@@ -579,17 +616,43 @@ class PackBuilder(
         }
     }
 
-    private fun writeTables(c: Connection) {
+    /**
+     * Structured table rows, for the tables whose enrichment holds up.
+     *
+     * A random table is **enrichment**: the source text is quotable with or without it,
+     * and the rows and roll control are an extra the builder derives. So an unparseable
+     * dice expression, a range that leaves a result uncovered, or an outcome whose text is
+     * not where it claims to be drops *that table's* rows and its roll control and records
+     * a note — it does not fail the book. Emitting it anyway meant the activation gate
+     * refused the whole pack, so one malformed optional table could stop a 300-page
+     * rulebook shipping, and the passage itself would have rendered perfectly.
+     *
+     * @return the ids of tables that were written, so capabilities naming a dropped one go
+     * with it rather than pointing at a table that is not there.
+     */
+    private fun writeTables(c: Connection): Set<Long> {
+        val written = mutableSetOf<Long>()
         spec.tables.forEachIndexed { index, table ->
             val tableId = (index + 1).toLong()
             val chunkId = chunkFor(table.chunk, "a table")
+            val text = chunkTexts.getValue(chunkId)
+
+            val problem = enrichmentFault(table, text)
+            if (problem != null) {
+                notes += BuildNote(
+                    "dropped", "table", table.chunk, "table-enrichment",
+                    "$problem; the passage is still quotable, but it carries no rows and no " +
+                        "roll control",
+                )
+                return@forEachIndexed
+            }
+
             c.prepare("INSERT INTO tables (table_id, chunk_id, dice_expr) VALUES (?, ?, ?)") {
                 it.setLong(1, tableId)
                 it.setLong(2, chunkId)
                 it.setString(3, table.diceExpr)
             }
 
-            val text = chunkTexts.getValue(chunkId)
             val base = chunkSpans.getValue(chunkId).start
             var cursor = 0
             table.rows.forEachIndexed { seq, row ->
@@ -613,10 +676,55 @@ class PackBuilder(
                     it.setString(7, row.text)
                 }
             }
+            written += tableId
         }
+        return written
     }
 
-    private fun writeCapabilities(c: Connection) {
+    /**
+     * Why this table's enrichment is unusable, or null.
+     *
+     * The same three properties the activation gate checks, checked here so the answer is
+     * a note rather than a refused book.
+     */
+    private fun enrichmentFault(table: CorpusSpec.TableSpec, text: String): String? {
+        val expression = DiceExpression.parse(table.diceExpr)
+            ?: return "'${table.diceExpr}' is not a dice expression this grammar version knows"
+        if (table.rows.isEmpty()) return "it declares no outcomes"
+
+        // Every result the expression can produce lands on exactly one row. Not "the rows
+        // look contiguous": a gap is a roll with no outcome and an overlap is a roll with
+        // two, and the roller fails closed on both -- so the control would appear and then
+        // refuse, which is worse than never appearing.
+        val covered = sortedMapOf<Long, Int>()
+        for (row in table.rows) {
+            if (row.lo > row.hi) return "row ${row.lo}-${row.hi} is inverted"
+            for (value in row.lo..row.hi) {
+                covered[value.toLong()] = (covered[value.toLong()] ?: 0) + 1
+            }
+        }
+        for (value in expression.min..expression.max) {
+            when (covered[value]) {
+                null -> return "'${table.diceExpr}' can roll $value, which no row covers"
+                1 -> Unit
+                else -> return "$value is covered by ${covered[value]} rows"
+            }
+        }
+        val extra = covered.keys.filter { it < expression.min || it > expression.max }
+        if (extra.isNotEmpty()) return "rows cover ${extra.first()}, which '${table.diceExpr}' cannot roll"
+
+        // And each outcome is where it says it is. A row whose text is not in the chunk is
+        // a row the app would render as a quotation of something the book does not say.
+        var cursor = 0
+        for (row in table.rows) {
+            val at = text.indexOf(row.text, cursor)
+            if (at < 0) return "the outcome '${row.text.take(40)}' is not in the passage, in order"
+            cursor = at + row.text.length
+        }
+        return null
+    }
+
+    private fun writeCapabilities(c: Connection, writtenTables: Set<Long>) {
         val tableIdByChunk = spec.tables.withIndex().associate { (index, table) ->
             table.chunk to (index + 1).toLong()
         }
@@ -626,6 +734,17 @@ class PackBuilder(
             // leaves a capability rooted elsewhere still offering to roll on it.
             val tableId = tableIdByChunk[capability.chunk]
                 ?: error("roll-table capability on '${capability.chunk}', which has no table")
+            // A capability naming a table whose enrichment was dropped goes with it. The
+            // alternative is a manifest pointing at a table that is not in the pack, which
+            // fails the reference check and refuses the book -- exactly the outcome
+            // dropping the table was meant to avoid.
+            if (tableId !in writtenTables) {
+                notes += BuildNote(
+                    "dropped", "capability", capability.chunk, "table-enrichment",
+                    "its table was dropped, so there is nothing to roll on",
+                )
+                return@forEachIndexed
+            }
             c.prepare(
                 "INSERT INTO capabilities (capability_id, kind, chunk_id, manifest) " +
                     "VALUES (?, ?, ?, ?)",

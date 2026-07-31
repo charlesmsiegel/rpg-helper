@@ -123,15 +123,30 @@ object Pipeline {
         // Whole concepts are taken until the term budget is spent, and the expression is
         // built from exactly those.
         val groups = mutableListOf<TermGroup>()
+        val trimmed = mutableListOf<String>()
         var budget = LexicalQuery.MAX_TERMS
         for (group in rewritten.groups) {
-            val cost = group.terms.size
-            if (cost > budget) break
-            groups += group
-            budget -= cost
+            if (group.terms.size <= budget) {
+                groups += group
+                budget -= group.terms.size
+                continue
+            }
+            // Too wide to take whole -- several packs defining the same alias with
+            // different multi-word canonicals is enough. **The user's own wording is kept
+            // and the expansions are dropped**, rather than the concept being dropped
+            // with them: an alias that fires wrongly costs some precision, and a rewrite
+            // that discards what the user actually typed costs the query. Breaking here
+            // was worse still, because a single oversized *first* group left the
+            // expression null and skipped lexical retrieval altogether.
+            val own = group.alternatives.first()
+            if (own.size > budget) break
+            groups += TermGroup(listOf(own))
+            budget -= own.size
+            trimmed += own.joinToString(" ")
         }
         val expression = LexicalQuery.build(groups.flatMap { it.terms })
         val gatedOut = mutableListOf<String>()
+        trimmed.forEach { gatedOut += "alias expansions dropped for '$it': term budget" }
         val lists = mutableListOf<RetrievalList>()
 
         // One lexical list per pack: BM25 comes from pack-local corpus statistics, so a
@@ -158,7 +173,18 @@ object Pipeline {
         // reason the scores could not be pooled to begin with.
         val windows = mutableMapOf<ChunkRef, IntRange?>()
         val roles = mutableMapOf<ChunkRef, String>()
-        for ((contract, vector) in queryVectors) {
+        // A query that tokenizes to nothing -- empty, or pure punctuation -- is not a
+        // question, and it must not reach dense search. An embedder returns a uniform
+        // vector rather than a zero one for text with no tokens, on the pack side for a
+        // good reason: a zero vector is undefined under cosine, not weak. But a
+        // punctuation-only *chunk* embeds to that same uniform vector, so a
+        // punctuation-only query would score cosine 1.0 against it, clear any gate, and
+        // answer `???` with whatever unrelated card that chunk belongs to.
+        val densable = if (groups.isEmpty()) emptyMap() else queryVectors
+        if (groups.isEmpty() && queryVectors.isNotEmpty()) {
+            gatedOut += "dense: the query has no terms to match on"
+        }
+        for ((contract, vector) in densable) {
             val inGroup = active.packs.filter { active.contracts[it.packUid] == contract }
             val hits = inGroup.flatMap { DenseSearch.search(it, vector, active.superseded) }
             val kept = Fusion.gate(hits, gates.denseFor(contract)) { it.score }

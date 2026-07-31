@@ -302,6 +302,19 @@ class PackLibrary(
         if (installId in pendingDeletion) return@withLock null
         val file = fileOf(installId)
         if (!Files.isRegularFile(file)) return@withLock null
+
+        // The open-time subset, every time. It is the cheap half of the bargain
+        // `01-app-state-spec.md` strikes: the full digest pass runs in the background,
+        // so between two of its runs a pack whose schema, probe vector, or embedder
+        // metadata has been damaged would otherwise be handed straight to retrieval and
+        // queried. Gross corruption is caught here and the pack is deactivated rather
+        // than read -- the same remedy a digest mismatch gets, for the same reason.
+        val fault = Packs.openCheck(file, supportedEmbedders)
+        if (fault != null) {
+            setActive(installId, false)
+            return@withLock null
+        }
+
         readers[installId] = (readers[installId] ?: 0) + 1
         PackLease(this, installId, file)
     }

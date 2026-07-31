@@ -2,6 +2,7 @@ package dev.rpghelper.cli
 
 import dev.rpghelper.routing.Answer
 import dev.rpghelper.routing.Card
+import dev.rpghelper.routing.Chip
 import dev.rpghelper.routing.Citation
 import dev.rpghelper.routing.render
 
@@ -26,14 +27,12 @@ fun renderAnswer(answer: Answer, diagnostics: Boolean): String = buildString {
 
             is Card.Derived -> {
                 appendLine("SUMMARY  (written by the pack's builder, not quoted)")
-                card.body.lineSequence().forEach { appendLine("  $it") }
-                appendChips(card.chips.map { it.citation }, card.footer)
+                appendAttributed(card.body, card.chips, card.footer)
             }
 
             is Card.Generated -> {
                 appendLine("GENERATED  (on-device model, from setting text only)")
-                card.body.lineSequence().forEach { appendLine("  $it") }
-                appendChips(card.chips.map { it.citation }, card.footer)
+                appendAttributed(card.body, card.chips, card.footer)
             }
 
             is Card.ModelUnavailable -> {
@@ -60,15 +59,45 @@ fun renderAnswer(answer: Answer, diagnostics: Boolean): String = buildString {
 }
 
 /**
- * Chips and footer citations, distinguished.
+ * Body, inline chips, and footer citations — each saying what it actually says.
  *
- * A chip says *this run of text came from here*; a footer says *this card as a whole drew
- * on these*. Printing them as one list would state the stronger claim for both.
+ * A chip's whole content is *which run of text this citation supports*, and the card
+ * renders it inline for that reason. Printing the citations as a flat list under the body
+ * throws the span away: a card drawing two claims from two books becomes two citations and
+ * no way to tell which supports which — the one distinction chips exist to carry. So each
+ * chipped run gets a numbered marker in the body and the numbers appear again below.
+ *
+ * A footer says something weaker — *this card as a whole drew on these* — and is kept
+ * separate so the stronger claim is not made on its behalf.
  */
-private fun StringBuilder.appendChips(chips: List<Citation>, footer: List<Citation>) {
-    chips.forEach { appendLine("    ▸ ${render(it)}") }
+private fun StringBuilder.appendAttributed(
+    body: String,
+    chips: List<Chip>,
+    footer: List<Citation>,
+) {
+    val bytes = body.toByteArray(Charsets.UTF_8)
+    val ordered = chips.sortedBy { it.start }
+    val marked = StringBuilder()
+    var cursor = 0
+    for ((index, chip) in ordered.withIndex()) {
+        // Spans have already been validated against these bytes -- attribution discards
+        // anything off a UTF-8 boundary or out of range -- so this needs no fail-closed
+        // branch. Clamping anyway, because a renderer that throws takes the card with it.
+        val start = chip.start.coerceIn(cursor, bytes.size)
+        val end = chip.end.coerceIn(start, bytes.size)
+        marked.append(String(bytes, cursor, start - cursor, Charsets.UTF_8))
+        marked.append(String(bytes, start, end - start, Charsets.UTF_8))
+        marked.append(" [${index + 1}]")
+        cursor = end
+    }
+    if (cursor < bytes.size) {
+        marked.append(String(bytes, cursor, bytes.size - cursor, Charsets.UTF_8))
+    }
+
+    marked.lineSequence().forEach { appendLine("  $it") }
+    ordered.forEachIndexed { index, chip -> appendLine("    [${index + 1}] ${render(chip.citation)}") }
     if (footer.isNotEmpty()) {
-        appendLine("    generated from ${footer.size} source${if (footer.size == 1) "" else "s"}:")
+        appendLine("    drawn as a whole from ${footer.size} source${if (footer.size == 1) "" else "s"}:")
         footer.forEach { appendLine("      — ${render(it)}") }
     }
 }

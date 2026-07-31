@@ -395,4 +395,33 @@ class PackLibraryTest {
             if (Files.exists(library.fileOf(it.installId))) it else null
         })
     }
+
+    // ------------------------------------------------------------------ open-time checks
+
+    @Test
+    fun `borrowing runs the open-time checks and deactivates a damaged pack`() {
+        // The cheap half of the bargain: the full digest pass runs in the background, so
+        // between two of its runs a pack whose schema, probe vector, or embedder metadata
+        // has been damaged would otherwise go straight to retrieval and be queried.
+        val pack = installed(library.install(forge()))
+        library.setActive(pack.installId, true)
+        assertTrue(library.borrow(pack.installId) != null, "intact, so it lends")
+
+        java.sql.DriverManager.getConnection("jdbc:sqlite:${library.fileOf(pack.installId)}")
+            .use { it.exec("UPDATE pack_meta SET probe_vector = x'00'") }
+
+        assertNull(library.borrow(pack.installId), "damaged, so it does not")
+        assertFalse(
+            library.installed().single { it.installId == pack.installId }.active,
+            "and it is deactivated rather than left to be lent again next query",
+        )
+    }
+
+    @Test
+    fun `a pack needing an embedder this build lacks is not lent`() {
+        val pack = installed(library.install(forge()))
+        java.sql.DriverManager.getConnection("jdbc:sqlite:${library.fileOf(pack.installId)}")
+            .use { it.exec("UPDATE pack_meta SET embedder_id = 'not-bundled'") }
+        assertNull(library.borrow(pack.installId))
+    }
 }

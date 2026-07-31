@@ -158,8 +158,25 @@ class ModelDownloader(
         }
         if (have == file.bytes) return null
 
+        // Cancellation has to reach a *blocked* read, not only the gap between two of
+        // them. The connectivity failure where a user most wants to cancel -- a server
+        // that accepted the connection and then stopped sending -- is exactly the one
+        // where `input.read` never returns, and a flag polled before the read is never
+        // reached again. So the stream is closed out from under it: the read throws,
+        // and the catch below tells cancellation apart from failure.
+        var watcher: Thread? = null
         return try {
             val (stream, servedFrom) = fetcher.open(file.url, have)
+            watcher = Thread {
+                try {
+                    while (!cancel.get()) Thread.sleep(WATCH_INTERVAL_MS)
+                    stream.close()
+                } catch (_: InterruptedException) {
+                    // The download finished first; nothing to interrupt.
+                } catch (_: java.io.IOException) {
+                    // Closing an already-closed stream is not a failure worth reporting.
+                }
+            }.apply { isDaemon = true; start() }
             stream.use { input ->
                 if (servedFrom != have) {
                     // A server that ignores Range answers with the whole file from zero.
@@ -200,9 +217,19 @@ class ModelDownloader(
                 null
             }
         } catch (e: Exception) {
-            // Kept on disk deliberately: a connection dropping mid-fetch is the ordinary
-            // case this whole mechanism is for, and the next attempt resumes from here.
-            "'${file.name}' could not be fetched: ${e.message ?: e::class.simpleName}"
+            // A read that threw *because the user cancelled* is a cancellation, not a
+            // network failure, and reporting it as one would put a scary message on a
+            // deliberate act.
+            if (cancel.get()) {
+                CANCELLED
+            } else {
+                // Kept on disk deliberately: a connection dropping mid-fetch is the
+                // ordinary case this whole mechanism is for, and the next attempt
+                // resumes from here.
+                "'${file.name}' could not be fetched: ${e.message ?: e::class.simpleName}"
+            }
+        } finally {
+            watcher?.interrupt()
         }
     }
 
@@ -227,15 +254,26 @@ class ModelDownloader(
     }
 }
 
+/** How often the cancellation watcher looks at the flag. */
+private const val WATCH_INTERVAL_MS = 100L
+
 /** [RangeFetcher] over `java.net.http`, which speaks HTTP/2 and follows redirects. */
 class HttpRangeFetcher(
     private val client: java.net.http.HttpClient = java.net.http.HttpClient.newBuilder()
         .followRedirects(java.net.http.HttpClient.Redirect.NORMAL)
+        // A connect with no timeout can hang for as long as the OS lets it, and the user
+        // sees a download that has neither started nor failed and cannot be cancelled
+        // because nothing is reading yet.
+        .connectTimeout(java.time.Duration.ofSeconds(30))
         .build(),
 ) : RangeFetcher {
 
     override fun open(url: String, from: Long): Pair<InputStream, Long> {
         val builder = java.net.http.HttpRequest.newBuilder(URI.create(url)).GET()
+            // Bounds the wait for *headers* only; the body may take as long as a few
+            // gigabytes take. Without it a server that accepts the connection and then
+            // says nothing blocks `send` with no way out.
+            .timeout(java.time.Duration.ofSeconds(60))
         if (from > 0) builder.header("Range", "bytes=$from-")
 
         val response = client.send(

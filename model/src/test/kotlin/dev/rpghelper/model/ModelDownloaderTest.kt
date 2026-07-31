@@ -225,6 +225,35 @@ class ModelDownloaderTest {
     }
 
     @Test
+    fun `cancelling reaches a read that has already blocked`() {
+        // The connectivity failure where a user most wants to cancel -- a server that
+        // accepted the connection and then stopped sending -- is exactly the one where
+        // `read` never returns, so a flag polled before each read is never looked at
+        // again. The stream is closed out from under it instead.
+        val cancel = AtomicBoolean(false)
+        val stalled = object : InputStream() {
+            private val gate = java.util.concurrent.CountDownLatch(1)
+
+            override fun read(): Int = read(ByteArray(1), 0, 1).let { if (it < 0) -1 else 1 }
+
+            override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
+                gate.await() // Until close() releases it, exactly as a stalled socket does.
+                throw IOException("stream closed")
+            }
+
+            override fun close() = gate.countDown()
+        }
+        val downloader = ModelDownloader(directory) { _, _ -> stalled to 0L }
+
+        val flipper = Thread { Thread.sleep(200); cancel.set(true) }.apply { start() }
+        val result = downloader.download(manifest(), cancel)
+        flipper.join()
+
+        assertEquals(DownloadResult.Cancelled, result)
+        assertEquals(0, Files.list(directory).use { it.count() }, "and nothing is left behind")
+    }
+
+    @Test
     fun `discardPartials clears an interrupted download on demand`() {
         ModelDownloader(directory, serving(failAfter = 100)).download(manifest())
         assertTrue(Files.exists(directory.resolve("weights.gguf.partial")))
