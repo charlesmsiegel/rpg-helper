@@ -10,18 +10,24 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.rpghelper.routing.Answer
 
 /**
@@ -50,34 +56,74 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-/** One exchange in the feed: what was asked, and what the app answered. */
-data class Turn(val query: String, val answer: Answer)
+/**
+ * One exchange in the feed.
+ *
+ * @param answer the live cards, or **null for a turn restored from storage**. A card is
+ * built from a pack that is active *now*; a turn from a previous session was built from
+ * whatever was active then, and rebuilding it against today's active set would silently
+ * re-answer a question the user already read. History is shown as the text that was stored,
+ * marked as history, rather than as cards that look current and are not.
+ */
+data class Turn(val query: String, val answer: Answer?, val rendered: String)
 
 @Composable
-fun AskScreen(turns: List<Turn> = emptyList()) {
+fun AskScreen(model: AskViewModel = viewModel()) {
     var question by remember { mutableStateOf("") }
+    val listState = rememberLazyListState()
+
+    // The newest turn is the one being read. Scrolling on answer rather than on every
+    // recomposition leaves the user's own scroll position alone while they read back.
+    LaunchedEffect(model.turns.size) {
+        if (model.turns.isNotEmpty()) listState.animateScrollToItem(model.turns.lastIndex)
+    }
 
     Scaffold { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
             LazyColumn(
+                state = listState,
                 modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                items(turns) { turn ->
+                items(model.turns) { turn ->
                     Column {
                         Text(
                             text = turn.query,
                             style = MaterialTheme.typography.titleMedium,
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
                         )
-                        turn.answer.cards.forEach { AnswerCard(it) }
+                        val answer = turn.answer
+                        if (answer != null) {
+                            answer.cards.forEach { AnswerCard(it) }
+                        } else {
+                            HistoryCard(turn.rendered)
+                        }
                     }
                 }
             }
+
+            model.failure?.let {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                )
+            }
+
             TextField(
                 value = question,
                 onValueChange = { question = it },
                 placeholder = { Text("Ask about your books") },
+                enabled = !model.asking,
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                keyboardActions = KeyboardActions(
+                    onSend = {
+                        model.ask(question)
+                        question = ""
+                    },
+                ),
                 // Width, not size. `fillMaxSize` on a non-weighted child is measured
                 // first and takes the whole column, leaving the weighted feed above it
                 // zero height -- so every answer was rendered behind a full-screen input.

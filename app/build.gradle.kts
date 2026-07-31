@@ -63,6 +63,11 @@ dependencies {
     implementation(project(":routing"))
     implementation(project(":model"))
     implementation(project(":capabilities"))
+    // The one place a question becomes cards. Without this the Ask surface had no way to
+    // ask anything: it took a feed as a parameter and nothing ever supplied one, so the
+    // APK assembled, installed, and answered nothing -- and every test passed, because
+    // every test exercises a layer below the one that was missing.
+    implementation(project(":session"))
 
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)

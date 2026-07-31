@@ -228,3 +228,43 @@ private fun CitationLine(citation: Citation, marker: String? = null) {
         modifier = Modifier.background(Color.Transparent),
     )
 }
+
+/**
+ * A turn restored from a previous session, shown as **history and not as an answer**.
+ *
+ * The stored text is what a past active set produced. Rendering it through [AnswerCard]
+ * would put a previous session's words inside this session's quotation styling — the exact
+ * confusion between "what the book says" and "what was said about the book" that the rest
+ * of this file exists to prevent, arriving through the back door of the scrollback.
+ *
+ * So it is deliberately plain: proportional, dimmed, labelled, and never in the monospaced
+ * preformatted style a quotation gets. To see the quotation again, ask again; the packs
+ * that would answer are the ones active now.
+ */
+@Composable
+fun HistoryCard(rendered: String, modifier: Modifier = Modifier) {
+    Surface(
+        modifier = modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+    ) {
+        Column(
+            Modifier.padding(12.dp).semantics(mergeDescendants = true) {
+                contentDescription = "Earlier answer, from a previous session. $rendered"
+            },
+        ) {
+            Text(
+                text = "Earlier answer — from a previous session, not re-checked against " +
+                    "the books active now",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = rendered,
+                style = MaterialTheme.typography.bodyMedium,
+                fontStyle = FontStyle.Italic,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}

@@ -106,19 +106,37 @@ relation before it reaches a loop.*
 
 Ranked by how much is at stake, not by effort.
 
-### 4.1 The app is not connected to the app
+### 4.1 The app was not connected to the app — *fixed*
 
-`MainActivity.AskScreen(turns: List<Turn> = emptyList())` takes a feed as a parameter and
-nothing ever supplies one. `:app` depends on `:pack`, `:state`, `:retrieval`, `:routing`,
+`MainActivity.AskScreen(turns: List<Turn> = emptyList())` took a feed as a parameter and
+nothing ever supplied one. `:app` depended on `:pack`, `:state`, `:retrieval`, `:routing`,
 `:model` and `:capabilities` — and **not on `:session`**, which is where `AskService` lives:
 the one place that owns how a question becomes cards, with the follow-up rewrite, the cache
-lookup, and the feed recording in the one order that is correct. The APK assembles, installs,
-shows a text field, and answers nothing.
+lookup, and the feed recording in the one order that is correct. The APK assembled,
+installed, showed a text field, and answered nothing.
 
-This is the clearest possible instance of the failure this document is about: the layering
-is so clean that the top of the stack was never attached, and every test passes because
-every test exercises the layers below it. **Fix: `:app` depends on `:session`; an
-`AskViewModel` holds a `Store`, a `Library`, and an `AskService`; the feed is its state.**
+This was the clearest possible instance of the failure this document is about: the layering
+was so clean that the top of the stack was never attached, and every test passed because
+every test exercises the layers below it.
+
+`AskViewModel` now holds the `Store` and the `AskService`, and opens the active set for the
+length of one question — per question rather than for the app's lifetime, because a query
+is specified to capture the active set once at its start, and a held-open library would mean
+a pack activated in Settings does not take effect until relaunch.
+
+Two things that fell out of wiring it, both worth knowing:
+
+- **A restored turn is history, not an answer.** The feed survives process death, and the
+  stored text was produced by whatever was active *then*. Re-rendering it through
+  `AnswerCard` would put a previous session's words inside this session's quotation styling
+  — the confusion this whole product exists to prevent, arriving through the scrollback.
+  `HistoryCard` is deliberately plain, dimmed, and labelled.
+- **The answer cache is unreachable until weights ship.** No generator means route 3 never
+  fires, so `couldGenerate` is false and no key is built. When a model does arrive, the
+  cache returns a *stored render* and `Asked.answer` is null — so the app will need a
+  structured serialization to store, not a display string, or a cache hit will render
+  without the quote/paraphrase distinction. That is §4.2's problem, and it is the reason
+  §4.2 is not merely tidiness.
 
 ### 4.2 One invariant, implemented twice, compared never
 
@@ -191,7 +209,7 @@ Assumes:     The bundled SQLite behaves on-device as it does on the JVM; gate th
 Cost:        One full scan per relation at preflight; one staged copy per direct-file CLI
              invocation; one indexed subquery plus one sqlite_temp_master lookup per
              gated query.
-Watch:       §4.1 — the Ask surface is not wired to AskService, so the shipped APK cannot
-             answer a question. Everything below it is tested and the top is absent, which
-             is why 575 passing tests did not notice.
+Watch:       §4.2 — one invariant, two renderers, no comparison. It is also what blocks
+             the answer cache from ever being displayable on Android (§4.1), because a
+             cache hit returns a stored render rather than cards.
 ```
