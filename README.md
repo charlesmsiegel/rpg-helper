@@ -46,6 +46,12 @@ yet.
 ./gradlew :pack:test
 ```
 
+CI (`.github/workflows/ci.yml`) runs the same command, but is currently
+`workflow_dispatch`-only: this repository is private and Actions is not provisioned
+with runner minutes, so an automatic trigger would post a check that fails in seconds
+on every pull request. Restoring the `push`/`pull_request` triggers is a one-line
+change once Actions is available.
+
 The suite covers the float16 codec exhaustively (all 65 536 bit patterns, against the
 JDK), the probe vector's own properties, and one deliberately-corrupted pack per
 rejection case the app promises to make. Test packs are forged in-process by

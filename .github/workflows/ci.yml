@@ -1,9 +1,20 @@
 name: CI
 
+# Manual-only for now. This repository is private, and Actions here is not currently
+# provisioned with runner minutes -- the first run was assigned no runner and consumed
+# zero billable time, so an automatic trigger produces a check that fails in four
+# seconds on every pull request. A permanently-red check is worse than no check: it
+# trains reviewers to ignore CI and would block branch protection later.
+#
+# To turn it back on once Actions is available, replace this block with:
+#
+#   push:
+#     branches: [main]
+#   pull_request:
+#
+# The job below is unchanged and known-good; only the trigger is holding it back.
 on:
-  push:
-    branches: [main]
-  pull_request:
+  workflow_dispatch:
 
 jobs:
   test:
