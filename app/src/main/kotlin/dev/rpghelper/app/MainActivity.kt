@@ -66,6 +66,7 @@ enum class Destination(val label: String) {
     ASK("Ask"),
     DOCUMENTS("Documents"),
     PACKS("Packs"),
+    MODELS("Models"),
 }
 
 /**
@@ -100,6 +101,7 @@ fun RootScreen() {
             Destination.ASK -> AskScreen()
             Destination.DOCUMENTS -> DocumentsScreen()
             Destination.PACKS -> PacksScreen()
+            Destination.MODELS -> ModelsScreen()
         }
     }
 }
