@@ -8,6 +8,7 @@ import dev.rpghelper.model.DownloadResult
 import dev.rpghelper.model.ModelDownloader
 import dev.rpghelper.model.ModelManifest
 import dev.rpghelper.pack.Packs
+import dev.rpghelper.state.ActivationResult
 import dev.rpghelper.state.InstallResult
 import dev.rpghelper.retrieval.Pipeline
 import dev.rpghelper.routing.LoadedRollables
@@ -29,7 +30,7 @@ rpg-helper — build packs, and answer questions out of them.
 
   install <dir> <pack.rpgpack> [--replace]   install into a library
   packs <dir>                                list what is installed
-  activate <dir> <install-id>                make a pack live
+  activate <dir> <install-id> [--accept]     make a pack live
   deactivate <dir> <install-id>              take it out of the active set
   uninstall <dir> <install-id>               forget it, and unlink when unread
   roll <pack.rpgpack> <table-id>     roll on a validated table
@@ -262,15 +263,44 @@ private fun listPacks(arguments: List<String>): Int {
 }
 
 private fun setActive(arguments: List<String>, active: Boolean): Int {
-    require(arguments.size == 2) { "usage: ${if (active) "activate" else "deactivate"} <dir> <install-id>" }
-    val installId = arguments[1].toLongOrNull() ?: error("'${arguments[1]}' is not an install id")
-    Store(Path.of(arguments[0])).use { store ->
-        require(store.library.installed().any { it.installId == installId }) {
-            "no pack #$installId is installed"
+    val accept = active && arguments.lastOrNull() == "--accept"
+    val head = if (accept) arguments.dropLast(1) else arguments
+    require(head.size == 2) {
+        "usage: ${if (active) "activate <dir> <install-id> [--accept]" else "deactivate <dir> <install-id>"}"
+    }
+    val installId = head[1].toLongOrNull() ?: error("'${head[1]}' is not an install id")
+
+    Store(Path.of(head[0])).use { store ->
+        return when (val result = store.library.setActive(installId, active, accept)) {
+            is ActivationResult.Changed -> {
+                println("#$installId is now ${if (active) "active" else "inactive"}")
+                0
+            }
+            is ActivationResult.NotInstalled -> {
+                System.err.println("no pack #$installId is installed")
+                1
+            }
+            // Supersession is unbounded: any active pack may withdraw any chunk of any
+            // other. What the app can do is refuse to let it happen quietly, so the share
+            // is named per book before it is accepted.
+            is ActivationResult.NeedsAcknowledgement -> {
+                System.err.println(
+                    "#$installId would withdraw a large part of a book that is already active:",
+                )
+                result.impacts.forEach {
+                    System.err.println(
+                        "  %s: %d of %d passages (%.0f%%)".format(
+                            it.targetTitle, it.withdrawnChunks, it.totalChunks, it.fraction * 100,
+                        ),
+                    )
+                }
+                System.err.println(
+                    "At that size it is a replacement edition. Deactivating the old pack is " +
+                        "usually the honest action; pass --accept to activate anyway.",
+                )
+                1
+            }
         }
-        store.library.setActive(installId, active)
-        println("#$installId is now ${if (active) "active" else "inactive"}")
-        return 0
     }
 }
 

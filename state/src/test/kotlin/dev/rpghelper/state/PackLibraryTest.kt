@@ -473,4 +473,127 @@ class PackLibraryTest {
         val result = small.install(pack)
         assertTrue(result is InstallResult.TooLarge, "expected a size refusal, got $result")
     }
+
+    // ------------------------------------------------------------------ broad supersession
+
+    /** A pack that withdraws [keys] from the core book, under its own uid. */
+    private fun errata(uid: String, vararg keys: String): Path = forge { c ->
+        c.exec("UPDATE pack_meta SET pack_uid = '$uid'")
+        c.exec("UPDATE sources SET source_uid = 'errata:' || source_uid")
+        c.exec("DELETE FROM supersessions")
+        keys.forEachIndexed { index, key ->
+            c.exec(
+                "INSERT INTO supersessions (supersession_id, target_source_uid, " +
+                    "target_stable_key, superseding_chunk_id, target_title) " +
+                    "VALUES (${index + 1}, '${PackForge.CORE_SOURCE_UID}', '$key', 1, " +
+                    "'Test Core Rulebook')",
+            )
+        }
+    }
+
+    @Test
+    fun `a narrow errata pack activates without asking`() {
+        // The ordinary case, and it must stay ordinary: a user trained to click through
+        // this prompt is a user for whom the prompt that matters does nothing.
+        val core = installed(library.install(forge()))
+        library.setActive(core.installId, true)
+
+        val patch = installed(library.install(errata("errata:narrow", "core:grapple")))
+        assertEquals(
+            ActivationResult.Changed,
+            library.setActive(patch.installId, true),
+        )
+        assertTrue(library.installed().single { it.installId == patch.installId }.active)
+    }
+
+    @Test
+    fun `a pack withdrawing most of an active book asks first`() {
+        // At that size it is a replacement edition, and activating it silently leaves the
+        // old book installed, active, and mostly unreachable -- with nothing on screen
+        // saying so. Supersession is unbounded; what the app can do is refuse to let it
+        // happen quietly.
+        val core = installed(library.install(forge()))
+        library.setActive(core.installId, true)
+
+        val replacement = installed(
+            library.install(
+                errata("errata:broad", "core:grapple", "core:underdark", "core:ogre"),
+            ),
+        )
+        val result = library.setActive(replacement.installId, true)
+
+        assertTrue(result is ActivationResult.NeedsAcknowledgement, "got $result")
+        val impact = result.impacts.single()
+        assertEquals(PackForge.CORE_SOURCE_UID, impact.targetSourceUid)
+        assertEquals(3, impact.withdrawnChunks)
+        assertTrue(impact.fraction > 0.25, "got ${impact.fraction}")
+        assertFalse(
+            library.installed().single { it.installId == replacement.installId }.active,
+            "and nothing changed while the question was unanswered",
+        )
+    }
+
+    @Test
+    fun `the same pack activates once the impact is accepted`() {
+        val core = installed(library.install(forge()))
+        library.setActive(core.installId, true)
+        val replacement = installed(
+            library.install(
+                errata("errata:broad", "core:grapple", "core:underdark", "core:ogre"),
+            ),
+        )
+
+        assertEquals(
+            ActivationResult.Changed,
+            library.setActive(replacement.installId, true, acknowledgeBroadSupersession = true),
+        )
+        assertTrue(library.installed().single { it.installId == replacement.installId }.active)
+    }
+
+    @Test
+    fun `a supersession naming a book that is switched off withdraws nothing today`() {
+        // Measured against the active set, not against everything installed. Warning about
+        // a book the user already deactivated is how a prompt becomes noise.
+        installed(library.install(forge())) // installed, never activated
+        val replacement = installed(
+            library.install(
+                errata("errata:broad", "core:grapple", "core:underdark", "core:ogre"),
+            ),
+        )
+        assertEquals(ActivationResult.Changed, library.setActive(replacement.installId, true))
+    }
+
+    @Test
+    fun `a key the errata invented does not inflate the figure`() {
+        // What the user is asked to accept has to be what actually goes dark, so the count
+        // is the intersection with the target's own keys rather than the row count.
+        val core = installed(library.install(forge()))
+        library.setActive(core.installId, true)
+        val patch = installed(
+            library.install(errata("errata:typo", "core:grapple", "core:not-a-real-key")),
+        )
+        val impact = library.supersessionImpact(
+            library.installed().single { it.installId == patch.installId },
+        ).single()
+        assertEquals(1, impact.withdrawnChunks)
+    }
+
+    @Test
+    fun `deactivating never asks`() {
+        // Switching a pack off can only ever restore reachability.
+        val core = installed(library.install(forge()))
+        library.setActive(core.installId, true)
+        val replacement = installed(
+            library.install(
+                errata("errata:broad", "core:grapple", "core:underdark", "core:ogre"),
+            ),
+        )
+        library.setActive(replacement.installId, true, acknowledgeBroadSupersession = true)
+        assertEquals(ActivationResult.Changed, library.setActive(replacement.installId, false))
+    }
+
+    @Test
+    fun `activating a pack that is not installed reports so rather than silently doing nothing`() {
+        assertEquals(ActivationResult.NotInstalled, library.setActive(999, true))
+    }
 }

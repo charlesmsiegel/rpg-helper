@@ -1,6 +1,8 @@
 package dev.rpghelper.state
 
 import dev.rpghelper.pack.EmbedderContract
+import dev.rpghelper.pack.JdbcDb
+import dev.rpghelper.pack.map
 import dev.rpghelper.pack.PackMeta
 import dev.rpghelper.pack.Packs
 import dev.rpghelper.pack.ValidationReport
@@ -24,6 +26,40 @@ data class InstalledPack(
     val active: Boolean,
     val priority: Int,
 )
+
+/**
+ * How much of one book an activation would withdraw.
+ *
+ * Reported per target source, because "a third of your core rulebook" and "a third of
+ * everything installed" are different sentences and only the first is the one to show.
+ */
+data class SupersessionImpact(
+    val targetSourceUid: String,
+    val targetTitle: String,
+    val withdrawnChunks: Int,
+    val totalChunks: Int,
+) {
+    val fraction: Double get() = if (totalChunks == 0) 0.0 else withdrawnChunks.toDouble() / totalChunks
+}
+
+/** What activating a pack produced. */
+sealed interface ActivationResult {
+    object Changed : ActivationResult
+
+    /** No such installed pack, so nothing happened. */
+    object NotInstalled : ActivationResult
+
+    /**
+     * The pack would withdraw a large share of a book that is already active.
+     *
+     * At that size it is a **replacement edition**, and the honest action is to deactivate
+     * the old pack rather than let a second one hollow it out from inside — leaving a book
+     * that is installed, active, and mostly unreachable, with nothing on screen saying so.
+     * `04-retrieval-spec.md` §5.3.1: supersession is unbounded, so what the app can do is
+     * refuse to let it happen quietly.
+     */
+    data class NeedsAcknowledgement(val impacts: List<SupersessionImpact>) : ActivationResult
+}
 
 /** Why an install did not happen. */
 sealed interface InstallResult {
@@ -57,6 +93,18 @@ class PackLibrary(
 ) {
 
     private val packsDir: Path = root.resolve("packs")
+
+    private companion object {
+        /**
+         * Above this share of a target book, a supersession set needs acknowledgement.
+         *
+         * A quarter is a judgement, not a measurement, and it is placed where a wrong
+         * answer is cheap in one direction and expensive in the other: too low and the
+         * user confirms an ordinary errata pack once, too high and a replacement edition
+         * hollows out a book with nothing on screen saying so.
+         */
+        const val BROAD_SUPERSESSION = 0.25
+    }
 
     /** Open lease counts, and the files whose deletion is waiting on them. */
     private val leaseLock = ReentrantLock()
@@ -242,11 +290,92 @@ class PackLibrary(
 
     fun active(): List<InstalledPack> = installed().filter { it.active }
 
-    fun setActive(installId: Long, active: Boolean) {
+    /**
+     * Activates or deactivates a pack.
+     *
+     * **Activation is not an ordinary boolean update**, because supersession is unbounded:
+     * any active pack may withdraw any chunk of any other, and nothing in the format
+     * restricts what a pack may claim to correct. A pack whose supersessions cover more
+     * than [BROAD_SUPERSESSION] of another active book is a replacement edition wearing an
+     * errata pack's clothes, and activating it silently leaves that book installed, active,
+     * and mostly unreachable.
+     *
+     * Deactivation never asks: switching a pack off can only ever restore reachability.
+     *
+     * @param acknowledgeBroadSupersession the user's answer to exactly the impact this
+     * returned, having seen it. Passing it blind reintroduces the failure.
+     */
+    fun setActive(
+        installId: Long,
+        active: Boolean,
+        acknowledgeBroadSupersession: Boolean = false,
+    ): ActivationResult {
+        val row = byId(installId) ?: return ActivationResult.NotInstalled
+
+        if (active && !acknowledgeBroadSupersession) {
+            val broad = supersessionImpact(row).filter { it.fraction > BROAD_SUPERSESSION }
+            if (broad.isNotEmpty()) return ActivationResult.NeedsAcknowledgement(broad)
+        }
+
         db.execute(
             "UPDATE installed_packs SET active = ? WHERE install_id = ? AND state = ?",
             active, installId, StateSchema.STATE_READY,
         )
+        return ActivationResult.Changed
+    }
+
+    /**
+     * What activating [candidate] would withdraw from each **currently active** book.
+     *
+     * Measured against the active set rather than against everything installed: a
+     * supersession naming a book the user has switched off withdraws nothing today, and
+     * warning about it would train people to click through the warning that matters.
+     *
+     * Counted in chunks rather than in supersession rows, because a pack may name the same
+     * `stable_key` twice and because what the user cares about is how much of the book
+     * goes dark — a number the target's own contents decide, not the errata's.
+     */
+    fun supersessionImpact(candidate: InstalledPack): List<SupersessionImpact> {
+        val targets = runCatching {
+            JdbcDb.openReadOnly(fileOf(candidate.installId)).use { db ->
+                db.map("SELECT target_source_uid, target_stable_key FROM supersessions") {
+                    it.string(0) to it.string(1)
+                }
+            }
+        }.getOrElse { return emptyList() }
+        if (targets.isEmpty()) return emptyList()
+
+        val bySource = targets.groupBy({ it.first }, { it.second })
+        val impacts = mutableListOf<SupersessionImpact>()
+
+        for (other in active()) {
+            if (other.installId == candidate.installId) continue
+            runCatching {
+                JdbcDb.openReadOnly(fileOf(other.installId)).use { db ->
+                    val sources = db.map("SELECT source_id, source_uid, title FROM sources") {
+                        Triple(it.long(0), it.string(1), it.string(2))
+                    }
+                    for ((sourceId, sourceUid, title) in sources) {
+                        val keys = bySource[sourceUid] ?: continue
+                        val total = db.map(
+                            "SELECT count(*) FROM chunks WHERE source_id = $sourceId",
+                        ) { it.int(0) }.single()
+                        // The target's own stable keys, intersected with the ones named.
+                        // A key the errata invents withdraws nothing and must not inflate
+                        // the figure the user is asked to accept.
+                        val present = db.map(
+                            "SELECT stable_key FROM chunks " +
+                                "WHERE source_id = $sourceId AND stable_key IS NOT NULL",
+                        ) { it.string(0) }.toSet()
+                        val withdrawn = keys.toSet().count { it in present }
+                        if (withdrawn > 0) {
+                            impacts += SupersessionImpact(sourceUid, title, withdrawn, total)
+                        }
+                    }
+                }
+            }
+        }
+        return impacts
     }
 
     /**
