@@ -199,8 +199,23 @@ class Library private constructor(
          * argument list implies, and the deactivated packs are absent because the user
          * said so rather than because they were not typed.
          */
-        fun openActive(library: PackLibrary): Library {
-            val active = library.active()
+        fun openActive(library: PackLibrary): Library = openInstalled(library, activeOnly = true)
+
+        /**
+         * Every installed pack, active or not — for the one question a user explicitly asks
+         * that way.
+         *
+         * The refusal card offers this: *you have installed packs that are not active; they
+         * were not searched*. Making that offer takeable is the whole point of naming it,
+         * and an offer the surface prints and cannot honour is worse than one it never
+         * makes. It is **not** a fallback the app takes by itself — a deactivated pack is
+         * deactivated because the user said so, and quietly searching it anyway would make
+         * the toggle a suggestion.
+         */
+        fun openAll(library: PackLibrary): Library = openInstalled(library, activeOnly = false)
+
+        private fun openInstalled(library: PackLibrary, activeOnly: Boolean): Library {
+            val active = if (activeOnly) library.active() else library.installed()
             // The digests the library already recorded at install, rather than a fresh
             // hash of every pack on every query: the rows are the app's own and the
             // background verification pass is what keeps them true.

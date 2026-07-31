@@ -217,7 +217,14 @@ fun AskScreen(model: AskViewModel = viewModel()) {
                                 onRoll = { ref, table -> model.roll(turn.id, ref, table) },
                             )
                             answer.cards.forEach { card ->
-                                AnswerCard(card = card, rolls = controls)
+                                AnswerCard(
+                                    card = card,
+                                    rolls = controls,
+                                    // The refusal card names the packs it did not search
+                                    // and offers to search them. Passing this is what
+                                    // makes the offer takeable rather than a sentence.
+                                    onSearchInactive = { model.ask(turn.query, includeInactive = true) },
+                                )
                             }
                         } else {
                             StoredCard(turn.rendered, turn.origin)

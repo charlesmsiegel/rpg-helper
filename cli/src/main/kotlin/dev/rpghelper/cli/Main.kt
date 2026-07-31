@@ -16,6 +16,8 @@ import dev.rpghelper.model.ModelDownloader
 import dev.rpghelper.model.ModelManifest
 import dev.rpghelper.pack.Packs
 import dev.rpghelper.state.ActivationResult
+import dev.rpghelper.state.AnswerCache
+import dev.rpghelper.state.Conversation
 import dev.rpghelper.state.DocumentStore
 import dev.rpghelper.state.InstallResult
 import dev.rpghelper.state.SupersessionImpact
@@ -35,8 +37,9 @@ rpg-helper — build packs, and answer questions out of them.
   build <corpus-dir> <out.rpgpack>   assemble a pack and put it through the activation gate
   verify <pack.rpgpack>...           run the activation gate and report
   ask [--why] <pack.rpgpack>... -- <question>
-  ask [--why] --library <dir> -- <question>
+  ask [--why] [--inactive] --library <dir> -- <question>
                                      retrieve, route, and print the cards
+                                     --inactive searches packs you switched off
 
   install <dir> <pack.rpgpack> [--replace]   install into a library
   packs <dir>                                list what is installed
@@ -153,61 +156,100 @@ private fun verify(arguments: List<String>): Int {
 // ---------------------------------------------------------------------- ask
 
 private fun ask(arguments: List<String>): Int {
-    val why = arguments.firstOrNull() == "--why"
-    val tail = if (why) arguments.drop(1) else arguments
+    var tail = arguments
+    val why = tail.firstOrNull() == "--why"
+    if (why) tail = tail.drop(1)
+    // The refusal card's offer, on the command line. Explicit, never a fallback: a
+    // deactivated pack is deactivated because the user said so.
+    val includeInactive = tail.firstOrNull() == "--inactive"
+    if (includeInactive) tail = tail.drop(1)
+
     val separator = tail.indexOf("--")
     require(separator > 0 && separator < tail.size - 1) {
-        "usage: ask [--why] <pack.rpgpack>... -- <question>"
+        "usage: ask [--why] [--inactive] <pack.rpgpack>... -- <question>"
     }
     val head = tail.take(separator)
     val question = tail.drop(separator + 1).joinToString(" ")
 
-    // Either an explicit list of files or a library's active set. The second is the app's
-    // own path -- priority as `installed_packs` records it, deactivated packs absent
-    // because the user said so rather than because they were not typed.
+    // Either an explicit list of files or a library. The second is the app's own path --
+    // priority as `installed_packs` records it, deactivated packs absent because the user
+    // said so rather than because they were not typed.
     val store = if (head.firstOrNull() == "--library") {
-        require(head.size == 2) { "usage: ask [--why] --library <dir> -- <question>" }
+        require(head.size == 2) { "usage: ask [--why] [--inactive] --library <dir> -- <question>" }
         Store(Path.of(head[1]))
     } else {
+        require(!includeInactive) { "--inactive applies to --library, which is what has a shelf" }
         null
     }
 
-    val opened = store?.let { Library.openActive(it.library) }
-        ?: Library.open(head.map { Path.of(it) })
+    val opened = when {
+        store == null -> Library.open(head.map { Path.of(it) })
+        includeInactive -> Library.openAll(store.library)
+        else -> Library.openActive(store.library)
+    }
 
-    opened.use { library ->
-        library.dropped.forEach { System.err.println("note: $it") }
+    try {
+        opened.use { library ->
+            library.dropped.forEach { System.err.println("note: $it") }
 
-        // One embedding per distinct contract, because a pack built two years ago and one
-        // built today can name different embedders and both must keep working -- and it
-        // happens *inside* retrieval, after the alias rewrite. Embedding what the user
-        // typed would give the phrasing bridge to lexical search alone.
-        val retrieved = Pipeline.retrieve(
-            question,
-            library.active,
-            gates = GATES,
-            embed = { rewritten, contracts -> BUNDLED.embedPerContract(rewritten, contracts) },
-        )
+            // **`AskService`, not a second copy of the sequence.** This function used to
+            // rebuild retrieval and routing by hand, which meant the command line had no
+            // answer cache, no follow-up resolution, and no feed -- three behaviours the
+            // app has and the tool silently did not, in the one place they were supposed to
+            // be shared. The file-list path below keeps the hand-built call because it has
+            // no state database to hold a cache or a window, which is a real difference
+            // rather than a second implementation.
+            if (store != null) {
+                val service = AskService(
+                    cache = AnswerCache(store.db),
+                    conversation = Conversation(store.db),
+                )
+                val asked = service.ask(
+                    question = question,
+                    library = library,
+                    // No weights are bundled, so route 3 never fires and the cache is
+                    // never consulted. That is the app's honest state before a download.
+                    generator = null,
+                    render = { renderAnswer(it, diagnostics = false) },
+                    hasInactivePacks = !includeInactive &&
+                        store.library.installed().any { !it.active },
+                )
+                val answer = asked.answer
+                if (answer == null) {
+                    // A cache hit: the stored render is the answer, and re-assembling
+                    // cards from it would be a second rendering under different code.
+                    print(asked.rendered)
+                    return 0
+                }
+                print(renderAnswer(answer, diagnostics = why))
+                return if (answer.refused) 1 else 0
+            }
 
-        val router = Router(
-            PackCitations(library.packs),
-            PackDerivations(library.packs),
-            LoadedRollables(library.rollableChunks),
-        )
-        // No generator: this tool ships no weights, and passing null is how the app says
-        // "not downloaded" rather than a special command-line path.
-        val answer = router.route(
-            retrieved,
-            generator = null,
-            activePacks = library.packs.map { it.packUid },
-            // A refusal card offers to search inactive packs -- but only if it is told
-            // there are any. Left at its default the remedy disappears exactly when it
-            // would help: a library holding the answer in a book the user switched off.
-            hasInactivePacks = store?.library?.installed()?.any { !it.active } ?: false,
-        )
-        print(renderAnswer(answer, diagnostics = why))
+            // One embedding per distinct contract, because a pack built two years ago and
+            // one built today can name different embedders and both must keep working --
+            // and it happens *inside* retrieval, after the alias rewrite. Embedding what
+            // the user typed would give the phrasing bridge to lexical search alone.
+            val retrieved = Pipeline.retrieve(
+                question,
+                library.active,
+                gates = GATES,
+                embed = { rewritten, contracts -> BUNDLED.embedPerContract(rewritten, contracts) },
+            )
+            val router = Router(
+                PackCitations(library.packs),
+                PackDerivations(library.packs),
+                LoadedRollables(library.rollableChunks),
+            )
+            val answer = router.route(
+                retrieved,
+                generator = null,
+                activePacks = library.packs.map { it.packUid },
+            )
+            print(renderAnswer(answer, diagnostics = why))
+            return if (answer.refused) 1 else 0
+        }
+    } finally {
         store?.close()
-        return if (answer.refused) 1 else 0
     }
 }
 

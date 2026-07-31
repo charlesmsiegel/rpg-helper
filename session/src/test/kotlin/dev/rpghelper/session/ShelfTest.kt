@@ -108,6 +108,27 @@ class ShelfTest {
     }
 
     @Test
+    fun `the inactive-pack offer can actually be taken`() {
+        // The refusal card says "you have installed packs that are not active; they were not
+        // searched". An offer a surface prints and cannot honour is worse than one it never
+        // makes -- and this is the path that honours it.
+        val installId = install()
+        assertTrue(
+            Library.openActive(store.library).use { it.packs }.isEmpty(),
+            "nothing is active, so the ordinary path has nothing to search",
+        )
+        Library.openAll(store.library).use { library ->
+            assertEquals(
+                listOf("srd:emberlight"),
+                library.packs.map { it.packUid },
+                "and the explicit path opens the pack the user was told about",
+            )
+        }
+        // Not a fallback the app takes by itself: the pack is still inactive afterwards.
+        assertFalse(store.library.installed().single { it.installId == installId }.active)
+    }
+
+    @Test
     fun `a correction over a book no active pack supplies is not reported as in effect`() {
         // An erratum active over a book the user never installed withdraws nothing, and
         // saying otherwise would tell them a rule was removed when it is the only text they

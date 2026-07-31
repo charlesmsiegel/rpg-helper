@@ -140,7 +140,16 @@ class AskViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun ask(question: String) {
+    /**
+     * Asks over the active set — the ordinary path.
+     *
+     * @param includeInactive **only ever true because the user tapped the offer** on a
+     * refusal card. A deactivated pack is deactivated because they said so, and an app that
+     * quietly searched it after failing to find an answer would make the toggle a
+     * suggestion. Wired because the card prints the offer, and an offer a surface makes and
+     * cannot honour is worse than one it never makes.
+     */
+    fun ask(question: String, includeInactive: Boolean = false) {
         if (question.isBlank() || asking) return
         asking = true
         failure = null
@@ -148,7 +157,10 @@ class AskViewModel(application: Application) : AndroidViewModel(application) {
             val outcome = withContext(Dispatchers.IO) {
                 runCatching {
                     // Reconciled and reopened per question; closed before the next one.
-                    Library.openActive(store.library).use { library ->
+                    val opened =
+                        if (includeInactive) Library.openAll(store.library)
+                        else Library.openActive(store.library)
+                    opened.use { library ->
                         // Grouped, not mapped. Nothing in the schema makes `tables.chunk_id`
                         // unique, so a pack may attach several roll tables to one chunk --
                         // and `toMap` silently kept whichever the database returned last,
@@ -176,7 +188,12 @@ class AskViewModel(application: Application) : AndroidViewModel(application) {
                             // keeps the quote gutter, which is what makes a stored answer
                             // still say which lines were the book's own words.
                             render = { it.asPlainText() },
-                            hasInactivePacks = store.library.installed().any { !it.active },
+                            // No second offer once every installed pack has been searched:
+                            // a refusal that still says "and there are packs I did not
+                            // search" would be false, and the button would search the same
+                            // set again.
+                            hasInactivePacks = !includeInactive &&
+                                store.library.installed().any { !it.active },
                         )
                         // **Only the tables this answer's own cards can offer.** The turn
                         // keeps its tables for as long as it is on screen, and the feed is
