@@ -109,6 +109,30 @@ class RecallTest {
     }
 
     @Test
+    fun `a run with no positive queries measures nothing and cannot pass`() {
+        // The vacuity family again -- the same shape as a claim report over zero claims and
+        // a judge scored against an empty gold set. A set that lost its positives to an
+        // edit has a mean over nothing, and a mean over nothing scored 1.0: the run would
+        // clear a retrieval gate having established only that unrelated questions were
+        // refused, which is the loudest possible pass for the emptiest possible run.
+        val onlyNegatives = querySet.negatives.map { QueryOutcome(it, emptyList(), refused = true) }
+        val report = RecallReport(onlyNegatives, threshold = 0.5)
+
+        assertTrue(report.uncalibrated, "no positives were scored")
+        assertEquals(0.0, report.meanRecall, "a mean over nothing is not a perfect mean")
+        assertTrue(report.negativesHeld.all { it.refused }, "every refusal did hold")
+        assertTrue(!report.passed, "and the run still fails, because it measured nothing")
+        assertTrue("measured nothing" in report.toString(), "and it says so")
+    }
+
+    @Test
+    fun `a run with positives scored is not reported as uncalibrated`() {
+        // The other half: the guard must not turn every real run into a failure.
+        val report = score()
+        assertTrue(!report.uncalibrated, "the labelled set has positives")
+    }
+
+    @Test
     fun `the semantic threshold is stricter than the structural one`() {
         // Otherwise the split is decoration: the point is that bundling real weights has
         // to be measured against a bar the stand-in cannot clear.

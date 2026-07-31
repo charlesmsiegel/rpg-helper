@@ -201,6 +201,13 @@ class ModelDownloader(
         }
         if (have == file.bytes) return null
 
+        // **Before the request is opened, not only after.** The watcher below can only
+        // close a stream that exists, so a cancel already set when this file started -- or
+        // arriving while `HttpRangeFetcher` waits up to sixty seconds for response headers
+        // -- still opened a connection and then left the caller waiting out the timeout.
+        // Cancelling should cost a user nothing, least of all their data.
+        if (cancel.get()) return CANCELLED
+
         // Cancellation has to reach a *blocked* read, not only the gap between two of
         // them. The connectivity failure where a user most wants to cancel -- a server
         // that accepted the connection and then stopped sending -- is exactly the one

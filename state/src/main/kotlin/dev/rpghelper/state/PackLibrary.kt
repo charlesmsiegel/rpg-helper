@@ -618,6 +618,38 @@ class PackLibrary(
         return true
     }
 
+    /**
+     * Re-digests every active pack whose last verification is missing or older than
+     * [maxAge], and returns the ones that failed — which [verify] has already deactivated.
+     *
+     * This is the background pass `01-app-state-spec.md` §5 describes, and it exists as a
+     * named entry point because [verify] alone was one: complete, tested, and called by
+     * nothing but `:cli`'s `packs` command. A pack is digested once at install and then
+     * quoted byte-for-byte forever, so without a periodic pass the guarantee this app is
+     * built around — that a quotation is the book's bytes — decayed to *were* the book's
+     * bytes, at install time, on storage the app does not control. Bit rot on cheap flash
+     * and a file edited by a rooted device both look exactly like this.
+     *
+     * **Time is compared as a string**, which is correct only because `verified_at` is
+     * written by [clock] as an ISO-8601 instant in UTC — those sort lexicographically in
+     * the same order they sort chronologically. A row whose stamp does not parse is
+     * verified rather than skipped: an unreadable timestamp is not evidence of freshness.
+     *
+     * Not called on the query path. Digesting a 300 MB pack per question would make every
+     * question wait on the whole file; the point of a background pass is that it is one.
+     */
+    fun verifyStale(maxAge: java.time.Duration): List<InstalledPack> {
+        val cutoff = runCatching { java.time.Instant.parse(clock()).minus(maxAge) }.getOrNull()
+        return active().filter { pack ->
+            val last = db.query(
+                "SELECT verified_at FROM installed_packs WHERE install_id = ?", pack.installId,
+            ) { it.stringOrNull(0) }.firstOrNull()
+            val fresh = cutoff != null && last != null &&
+                runCatching { java.time.Instant.parse(last).isAfter(cutoff) }.getOrDefault(false)
+            !fresh && !verify(pack.installId)
+        }
+    }
+
     // ---------------------------------------------------------------- internals
 
     private fun abandon(installId: Long, staged: Path) {

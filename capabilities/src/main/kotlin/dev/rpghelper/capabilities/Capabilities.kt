@@ -49,7 +49,17 @@ object Capabilities {
      * correction cannot leave a roller offering outcomes from text retrieval has removed.
      */
     fun load(db: Db, superseded: Set<Long> = emptySet()): CapabilitySet {
-        val tables = loadTables(db)
+        // Table definitions are fetched **per table a manifest names**, like the rows and
+        // the classifications below. The supported ceiling is a million structured tables,
+        // and a pack may carry every one of them with no roll-table capability at all, so
+        // reading the whole `tables` relation before any manifest had been looked at was
+        // the third eager load in this function and the largest: a `Map` entry and a
+        // boxed pair per table, held for the lifetime of the call, to answer lookups that
+        // in the common case never happen.
+        val tables = mutableMapOf<Long, Pair<Long, String>?>()
+        fun tableOf(tableId: Long): Pair<Long, String>? = tables.getOrPut(tableId) {
+            loadTable(db, tableId)
+        }
         // Rows are fetched **per surviving table**, not all at once. The supported ceiling
         // is a million of them, and a pack may carry many structured tables with few or no
         // roll-table capabilities -- so materializing every row and its text before any
@@ -111,7 +121,7 @@ object Capabilities {
             }
             val (tableId, label) = parsed
 
-            val table = tables[tableId]
+            val table = tableOf(tableId)
             if (table == null) {
                 dropped += DroppedCapability(id, "names table $tableId, which is not in this pack")
                 return@forEach
@@ -167,11 +177,17 @@ object Capabilities {
         return CapabilitySet(loaded, dropped)
     }
 
-    /** `table_id` to its `(chunk_id, dice_expr)`. */
-    private fun loadTables(db: Db): Map<Long, Pair<Long, String>> =
-        db.map("SELECT table_id, chunk_id, dice_expr FROM tables") {
-            it.long(0) to (it.long(1) to it.string(2))
-        }.toMap()
+    /**
+     * One table's `(chunk_id, dice_expr)`, or null when the pack has no such table.
+     *
+     * The id is interpolated, not bound, and that is safe for the same reason the row
+     * query below is: it arrived as a `Long` from [DiceExpression]-adjacent parsing of a
+     * manifest number, and a `Long` has no syntax to inject.
+     */
+    private fun loadTable(db: Db, tableId: Long): Pair<Long, String>? =
+        db.map(
+            "SELECT chunk_id, dice_expr FROM tables WHERE table_id = $tableId",
+        ) { it.long(0) to it.string(1) }.firstOrNull()
 
     /** One table's rows. The id comes from the pack's own `tables` row, never from input. */
     private fun loadRowsOf(db: Db, tableId: Long): List<TableRow> =

@@ -97,8 +97,23 @@ data class QueryOutcome(
 /** A run of the whole set. */
 data class RecallReport(val outcomes: List<QueryOutcome>, val threshold: Double) {
 
+    /** The positive queries — the ones that measure whether retrieval finds anything. */
+    val positives: List<QueryOutcome> get() = outcomes.filterNot { it.query.isNegative }
+
     /**
-     * Mean over the **positive** queries only.
+     * True when the run scored no positive queries at all, and therefore measured nothing.
+     *
+     * The same vacuity the zero-claim and empty-gold-set checks guard against, arriving
+     * here: a set that is all negatives (or empty) has a mean over nothing, and a mean
+     * over nothing is not evidence that retrieval works. Reporting it as 1.0 would let a
+     * fixture that lost its positives during an edit clear a recall gate by proving only
+     * that unrelated questions were refused — the loudest possible pass for the emptiest
+     * possible run.
+     */
+    val uncalibrated: Boolean get() = positives.isEmpty()
+
+    /**
+     * Mean over the **positive** queries only, or 0.0 when there are none.
      *
      * A correctly refused negative scores 1.0, and including those in the mean lets
      * refusals pay for missed answers: nine held refusals and one wholly missed positive
@@ -107,19 +122,21 @@ data class RecallReport(val outcomes: List<QueryOutcome>, val threshold: Double)
      * right instrument for them — a refusal is pass or fail, not a fraction.
      */
     val meanRecall: Double
-        get() = outcomes.filterNot { it.query.isNegative }
-            .map { it.recall }
-            .let { if (it.isEmpty()) 1.0 else it.average() }
+        get() = positives.map { it.recall }.let { if (it.isEmpty()) 0.0 else it.average() }
 
     /** Negatives are reported separately: a refusal is pass/fail, not a fraction. */
     val negativesHeld: List<QueryOutcome> get() = outcomes.filter { it.query.isNegative }
 
-    val passed: Boolean get() = meanRecall >= threshold && negativesHeld.all { it.refused }
+    val passed: Boolean
+        get() = !uncalibrated && meanRecall >= threshold && negativesHeld.all { it.refused }
 
     /** Every negative that answered when it should have refused. */
     val negativesBroken: List<QueryOutcome> get() = negativesHeld.filterNot { it.refused }
 
     override fun toString(): String = buildString {
+        if (uncalibrated) {
+            appendLine("no positive queries: this run measured nothing and cannot pass")
+        }
         appendLine("mean recall %.3f (threshold %.3f)".format(meanRecall, threshold))
         for (outcome in outcomes.sortedBy { it.recall }) {
             val mark = if (outcome.recall >= 1.0) "  " else "!!"

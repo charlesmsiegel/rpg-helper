@@ -11,6 +11,7 @@ import dev.rpghelper.capabilities.RollableTable
 import dev.rpghelper.capabilities.Roller
 import dev.rpghelper.capabilities.SecureDiceSource
 import dev.rpghelper.pack.ChunkRef
+import dev.rpghelper.routing.Card
 import dev.rpghelper.routing.asPlainText
 import dev.rpghelper.session.AskService
 import dev.rpghelper.session.Library
@@ -84,6 +85,9 @@ class AskViewModel(application: Application) : AndroidViewModel(application) {
     /** Monotonic, so a turn's identity never depends on its position in the feed. */
     private var nextTurnId = 0L
 
+    /** Set by [newTopic]; makes an in-flight history restore land nowhere. */
+    private var discarded = false
+
     private val roller = Roller(SecureDiceSource())
 
     init {
@@ -91,8 +95,48 @@ class AskViewModel(application: Application) : AndroidViewModel(application) {
         // an hour ago is the thing they scrolled back to. Restored as history: the stored
         // render, not live cards -- a card is only ever built from a pack that is active
         // now, and these were built from whatever was active then.
-        turns = conversation.feed().map {
-            Turn(nextTurnId++, it.query, answer = null, rendered = it.cards, origin = Origin.RESTORED)
+        //
+        // Off the main thread. A ViewModel is constructed during `setContent`, and this
+        // reads a SQLite file whose rows hold whole rendered answers -- so on a cold start
+        // with a long window, on the storage a cheap device actually has, the first frame
+        // waited on disk I/O. The feed arrives a frame or two later into an empty list,
+        // which is the state the surface already has to render.
+        viewModelScope.launch {
+            val restored = withContext(Dispatchers.IO) { conversation.feed() }
+            // **New topic** during the read wins: it already cleared the stored window, and
+            // putting these back on screen would show turns the user was told are gone --
+            // and, worse, turns a follow-up no longer resolves against.
+            if (discarded) return@launch
+            // Prepended, not assigned: `ask` is not blocked while this runs, so a question
+            // asked before history arrives must not be dropped by the restore landing on
+            // top of it. `nextTurnId` is only ever advanced on this thread.
+            turns = restored.map {
+                Turn(
+                    id = nextTurnId++,
+                    query = it.query,
+                    answer = null,
+                    rendered = it.cards,
+                    origin = Origin.RESTORED,
+                )
+            } + turns
+        }
+
+        // The background digest pass, on the one schedule this app can honestly keep: once
+        // per process, after the feed, off the main thread. `PackLibrary.verify` existed and
+        // nothing outside `:cli` called it, so an installed pack's bytes were checked once
+        // — at install — and quoted as the book's own for the rest of the pack's life.
+        //
+        // A pack that fails is already deactivated by the time this returns; it is surfaced
+        // rather than swallowed, because a book vanishing from the active set with no
+        // explanation is the failure this whole path exists to avoid.
+        viewModelScope.launch {
+            val failed = withContext(Dispatchers.IO) {
+                runCatching { store.library.verifyStale(VERIFY_INTERVAL) }.getOrDefault(emptyList())
+            }
+            if (failed.isNotEmpty()) {
+                failure = "deactivated ${failed.joinToString { it.title }}: the installed " +
+                    "bytes no longer match what was installed, so they cannot be quoted"
+            }
         }
     }
 
@@ -113,7 +157,7 @@ class AskViewModel(application: Application) : AndroidViewModel(application) {
                         val loadable = library.rollables.flatMap { (uid, tables) ->
                             tables.map { ChunkRef(uid, it.chunkId) to it }
                         }.groupBy({ it.first }, { it.second })
-                        service.ask(
+                        val asked = service.ask(
                             question = question,
                             library = library,
                             // No weights are bundled yet, so no generator is offered and
@@ -133,7 +177,20 @@ class AskViewModel(application: Application) : AndroidViewModel(application) {
                             // still say which lines were the book's own words.
                             render = { it.asPlainText() },
                             hasInactivePacks = store.library.installed().any { !it.active },
-                        ) to loadable
+                        )
+                        // **Only the tables this answer's own cards can offer.** The turn
+                        // keeps its tables for as long as it is on screen, and the feed is
+                        // unbounded, so retaining the whole active set's rollables per turn
+                        // meant every question re-retained every table in every active pack
+                        // -- rows and outcome text included -- N times over for a feed of
+                        // N. `Cards.kt` asks `tablesFor` only for refs a card carries, so
+                        // everything outside this filter was retained to answer a lookup
+                        // that cannot occur.
+                        val addressed = asked.answer?.cards.orEmpty()
+                            .filterIsInstance<Card.Verbatim>()
+                            .flatMap { it.rollableRefs }
+                            .toSet()
+                        asked to loadable.filterKeys { it in addressed }
                     }
                 }
             }
@@ -178,6 +235,7 @@ class AskViewModel(application: Application) : AndroidViewModel(application) {
      * *"what about at level 5?"* resolving against passages the user believes are gone.
      */
     fun newTopic() {
+        discarded = true
         conversation.newTopic()
         turns = emptyList()
         rolls = emptyMap()
@@ -186,5 +244,17 @@ class AskViewModel(application: Application) : AndroidViewModel(application) {
 
     override fun onCleared() {
         store.close()
+    }
+
+    private companion object {
+        /**
+         * How stale a pack's last digest may be before this process re-checks it.
+         *
+         * A day, because the cost is one full read of every active pack and the thing it
+         * detects — bytes changing under a file the app never writes — is rare rather than
+         * urgent. Shorter would make a cold start on a large library expensive for no
+         * additional guarantee.
+         */
+        val VERIFY_INTERVAL: java.time.Duration = java.time.Duration.ofDays(1)
     }
 }

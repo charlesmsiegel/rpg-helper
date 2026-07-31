@@ -339,6 +339,29 @@ class PackValidatorHardeningTest {
     }
 
     @Test
+    fun `rejects an index built with columnsize=0, which hides its own coverage`() {
+        // The completeness check reads `chunks_fts_docsize`, and FTS5 omits that shadow
+        // table entirely under `columnsize=0`. Catching the resulting read error and
+        // skipping made the strongest check in the validator switchable off by a pack: this
+        // index carries chunk 1 and nothing else -- the exact under-population the check
+        // exists for -- and before the shape check it activated with a clean report,
+        // because the canary is drawn from a chunk that happens to be indexed.
+        assertRejects(ViolationCode.FTS_INDEX_UNUSABLE) {
+            it.exec("DROP TABLE chunks_fts")
+            it.exec(
+                "CREATE VIRTUAL TABLE chunks_fts USING fts5(text, heading_path, " +
+                    "content='chunks', content_rowid='chunk_id', " +
+                    "tokenize='${PackSchema.TOKENIZER}', columnsize=0)",
+            )
+            it.exec(
+                "INSERT INTO chunks_fts (rowid, text, heading_path) " +
+                    "SELECT chunk_id, text, COALESCE(heading_path, '') FROM chunks " +
+                    "WHERE chunk_id = 1",
+            )
+        }
+    }
+
+    @Test
     fun `rejects an index holding documents no chunk owns`() {
         // An orphan can win a search, consume the depth budget, and resolve to nothing --
         // so a query refuses with usable chunks sitting just below the limit.

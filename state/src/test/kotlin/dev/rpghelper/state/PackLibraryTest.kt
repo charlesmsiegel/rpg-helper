@@ -450,6 +450,54 @@ class PackLibraryTest {
         assertFalse(library.installed().single().active, "a corrupt pack is deactivated")
     }
 
+    @Test
+    fun `the background pass re-digests a stale pack and deactivates it if it changed`() {
+        // `verify` was complete, tested, and called by nothing but the CLI, so an installed
+        // pack's bytes were checked once -- at install -- and quoted as the book's own for
+        // the rest of its life. `verifyStale` is the entry point the app's startup pass
+        // calls; the interval is zero here so "stale" means "every active pack".
+        val pack = installed(library.install(forge()))
+        library.setActive(pack.installId, true)
+
+        val file = library.fileOf(pack.installId)
+        val bytes = Files.readAllBytes(file)
+        bytes[bytes.size / 2] = (bytes[bytes.size / 2] + 1).toByte()
+        Files.write(file, bytes)
+
+        val failed = library.verifyStale(java.time.Duration.ZERO)
+        assertEquals(listOf(pack.installId), failed.map { it.installId })
+        assertFalse(library.installed().single().active, "and it is deactivated, not merely reported")
+    }
+
+    @Test
+    fun `the background pass reports nothing for an intact pack`() {
+        val pack = installed(library.install(forge()))
+        library.setActive(pack.installId, true)
+        assertTrue(library.verifyStale(java.time.Duration.ZERO).isEmpty())
+        assertTrue(library.installed().single().active)
+    }
+
+    @Test
+    fun `the background pass skips a pack verified inside the interval`() {
+        // The half that makes it a background pass rather than a full read per launch: a
+        // pack digested a moment ago is not digested again. Checked by corrupting the file
+        // *after* a successful verify -- if the interval were ignored, this would fail.
+        val pack = installed(library.install(forge()))
+        library.setActive(pack.installId, true)
+        assertTrue(library.verify(pack.installId), "verified, and stamped")
+
+        val file = library.fileOf(pack.installId)
+        val bytes = Files.readAllBytes(file)
+        bytes[bytes.size / 2] = (bytes[bytes.size / 2] + 1).toByte()
+        Files.write(file, bytes)
+
+        assertTrue(
+            library.verifyStale(java.time.Duration.ofDays(1)).isEmpty(),
+            "a pack stamped seconds ago is not re-read",
+        )
+        assertTrue(library.installed().single().active)
+    }
+
     // ------------------------------------------------------------------ uninstall
 
     @Test

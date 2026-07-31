@@ -217,14 +217,24 @@ object ClaimSupport {
         val agreement = agreement(judge, gold)
 
         val verdicts = claims.map { claim ->
-            val evidence = claim.cited.mapNotNull(evidenceFor)
-            if (evidence.isEmpty()) {
-                // A claim with nothing behind it is not a claim the judge should be asked
-                // about; it is a plumbing failure, and reporting it as unsupported keeps
-                // it visible instead of silently excluding it from the denominator.
-                claim to Verdict(false, "cites ${claim.cited}, none of which resolved to text")
+            // **Every** cited chunk must resolve, not merely one of them. A sentence
+            // straddling two regions cites both; dropping the one that failed and asking
+            // the judge about the survivor lets a green verdict cover a membership failure
+            // -- the plumbing check reporting success because the half that worked was
+            // enough to support the sentence. Reporting it as unsupported keeps it visible
+            // instead of excluding it from the denominator.
+            val unresolved = claim.cited.filter { evidenceFor(it) == null }
+            if (unresolved.isNotEmpty()) {
+                claim to Verdict(
+                    false,
+                    if (unresolved.size == claim.cited.size) {
+                        "cites ${claim.cited}, none of which resolved to text"
+                    } else {
+                        "cites ${claim.cited}; $unresolved did not resolve to text"
+                    },
+                )
             } else {
-                claim to judge.judge(claim.text, evidence)
+                claim to judge.judge(claim.text, claim.cited.mapNotNull(evidenceFor))
             }
         }
 

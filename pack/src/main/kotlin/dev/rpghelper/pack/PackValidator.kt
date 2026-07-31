@@ -346,26 +346,51 @@ class PackValidator(private val supportedEmbedders: Set<EmbedderContract>) {
             return
         }
 
+        // The completeness check below reads `chunks_fts_docsize`, and FTS5 omits that
+        // shadow table entirely when the index is declared `columnsize=0`. Treating its
+        // absence as "skip" -- which is what catching the read error amounted to -- let a
+        // pack turn the strongest check in this function off by adding one option to a
+        // `CREATE VIRTUAL TABLE` statement: index the canary chunk, set `columnsize=0`,
+        // and a pack whose other 40,000 chunks are invisible to lexical search activates
+        // with a clean report. So the shadow table's presence is itself part of the
+        // format's shape, checked here rather than inferred from a query failing.
+        if (db.declarationOf("chunks_fts_docsize") == null) {
+            out += Violation(
+                FTS_INDEX_UNUSABLE,
+                "chunks_fts carries no docsize shadow table (columnsize=0); the format " +
+                    "requires it, because it is the only way to establish that the index " +
+                    "covers every chunk rather than one",
+            )
+            return
+        }
+
         // Row count first: it catches wholesale under-population, which one canary term
         // cannot. An index populated for chunk 1 and nothing else satisfies any single
         // probe while leaving every other chunk invisible to lexical search forever.
         //
         // `count(*)` on an external-content table reads the content table and would
-        // always agree, so this counts the index's own per-document rows. The shadow
-        // table is part of FTS5's documented on-disk structure, but if a future build
-        // omits it the check is skipped rather than turned into a false rejection.
+        // always agree, so this counts the index's own per-document rows.
         // Compare the indexed *identifiers*, not how many there are. Equal counts do not
         // establish equal sets: an index missing chunk 5 while carrying a stray document
         // 999 has exactly the right cardinality, and a canary drawn from another chunk
         // still passes -- leaving chunk 5 permanently invisible to lexical search under
         // an activation that claimed complete coverage.
+        //
+        // A read failure here is a violation, not a skip: the shadow table was just
+        // established to exist, so a query against it that throws describes a pack whose
+        // index cannot be inspected, and an index that cannot be inspected cannot be
+        // vouched for.
         val unindexed = try {
             db.map(
                 "SELECT c.chunk_id FROM chunks c " +
                     "LEFT JOIN chunks_fts_docsize d ON d.id = c.chunk_id WHERE d.id IS NULL",
             ) { it.long(0) }
         } catch (e: PackReadException) {
-            null // a build without the shadow table skips this rather than false-rejecting
+            out += Violation(
+                FTS_INDEX_UNUSABLE,
+                "chunks_fts coverage cannot be read: ${e.message}",
+            )
+            return
         }
         // And the other direction. A pack carrying every legitimate id *plus* orphan index
         // documents activates on the check above alone, and a matching orphan consumes the
@@ -377,9 +402,13 @@ class PackValidator(private val supportedEmbedders: Set<EmbedderContract>) {
                     "LEFT JOIN chunks c ON c.chunk_id = d.id WHERE c.chunk_id IS NULL",
             ) { it.long(0) }
         } catch (e: PackReadException) {
-            null
+            out += Violation(
+                FTS_INDEX_UNUSABLE,
+                "chunks_fts orphan documents cannot be read: ${e.message}",
+            )
+            return
         }
-        if (orphans != null && orphans.isNotEmpty()) {
+        if (orphans.isNotEmpty()) {
             out += Violation(
                 FTS_INDEX_UNUSABLE,
                 "chunks_fts holds ${orphans.size} documents with no chunk " +
@@ -387,7 +416,7 @@ class PackValidator(private val supportedEmbedders: Set<EmbedderContract>) {
             )
         }
 
-        if (unindexed != null && unindexed.isNotEmpty()) {
+        if (unindexed.isNotEmpty()) {
             out += Violation(
                 FTS_INDEX_UNUSABLE,
                 "chunks_fts does not index ${unindexed.size} of $chunkCount chunks " +
