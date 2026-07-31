@@ -318,18 +318,42 @@ SQLite's `bm25()` returns a negative number where more negative is a better matc
 app negates it so higher is better, and every threshold in this document is stated on the
 negated value.
 
-> **This is the least settled part of retrieval, and it is stated as such rather than
-> given a false precision.** A single global threshold on the negated BM25 score is the
-> specified mechanism, calibrated on the SRD corpus. Its weakness is known: BM25's IDF
-> term varies with corpus size, so one constant is only approximately comparable across a
-> slim pamphlet and a 300-page core book.
->
-> If measurement against the labelled sets shows size sensitivity, the fallback is
-> normalizing each score by the summed IDF of the query's matched terms in that pack —
-> turning the gate into "how much of the query's information content did this match",
-> which is comparable by construction. It is not the default because it costs one
-> document-frequency query per term per pack, and paying that on every query to fix a
-> problem that may not appear is the wrong order to do things in.
+A raw threshold on the negated BM25 score was the original mechanism. **Measurement
+against the labelled set replaced it**, and the fallback it named is now the rule.
+
+> The weakness was known in advance: BM25's IDF term varies with corpus size, so one
+> constant is only approximately comparable across a slim pamphlet and a 300-page core
+> book. On the corpus, the negative queries — *how much does a warhorse cost*, *how does
+> spellcasting work* — scored **inside** the positive queries' range. Not near it: inside.
+> A constant that refused them refused real questions too, because on a small corpus the
+> IDF of an ordinary English word is not small.
+
+So the gate is **the share of the query's information content a chunk holds**. A query's
+information is the summed IDF of its term groups; a chunk's score is the fraction of that
+it actually contains. Comparable across packs *by construction*, because it is a fraction
+of the query rather than a quantity in the pack's units — the property the raw threshold
+only approximated.
+
+- **Alias-expanded wordings are one group.** Scored as independent terms, the rewrite
+  makes a query score *worse*: the rare word the user typed goes unmatched and dominates
+  the denominator while the canonical that did match is common enough to contribute
+  nothing. A group counts as matched when any of its wordings appears, valued at the
+  rarest, since that is what the concept is worth to the query regardless of the spelling
+  the book happened to use.
+- **BM25 still ranks.** It is the better ordering and rank is all fusion consumes. The
+  ratio decides only who is *in*, which is the one judgment a raw score could not make
+  comparably.
+- The cost is one document-frequency query per term per pack. That is why it was not the
+  default — paying it to fix a problem that might not appear is the wrong order to do
+  things in. It appeared.
+
+**What it still cannot separate is recorded rather than tuned around.** On the corpus the
+positive *what does held mean* scores 0.278 against the negative *how much does a warhorse
+cost* at 0.283. Across twenty chunks the word *mean* occurs nowhere, so it carries maximum
+IDF and counts as unmatched information exactly as *warhorse* does; telling the two apart
+needs a function-word list or a model, and on a 300-page book the problem does not arise.
+The threshold sits **above both**, losing that question and holding every refusal — the
+conservative direction on purpose.
 
 ### 7.4 The refusal condition is the gates — there is no separate relevance floor
 

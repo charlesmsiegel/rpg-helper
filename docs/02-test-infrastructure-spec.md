@@ -95,6 +95,19 @@ Metric is **recall@k**, gated in CI. Retrieval quality has no symptom until some
 the app has been quietly failing to find a rule for three releases, which is why this is a
 gate and not a report.
 
+**Two thresholds, because there are two tiers.** `structural_threshold` is what the
+deterministic stand-in embedder must meet on every PR; `threshold` is the semantic tier's
+gate, run when a real contract is bundled. Queries needing genuine semantic bridging — a
+GM-facing phrasing sharing almost no vocabulary with the passage it asks about — are
+marked in the set and are expected to miss structurally and pass semantically. One number
+for both would either make the per-PR gate untrue, by asserting recall a weightless
+embedder cannot reach, or make the semantic gate meaningless by setting it where a
+stand-in can clear it.
+
+**Negatives are asserted absolutely, not folded into the mean.** A refusal that quietly
+becomes an answer is the regression this set exists to catch, and an average is the wrong
+instrument for catching it.
+
 ---
 
 ## 3. Claim support
@@ -235,6 +248,14 @@ The measurements that matter:
 
 - **Which SRD.** Constrained by licence and by having enough rules, lore, tables, and
   statblocks to exercise every route. Picking one is a task, not a design question.
+
+  In the meantime `corpus/srd/` holds **Emberlight**, an original miniature RPG written
+  for this repository and released CC BY 4.0. It satisfies the coverage half completely —
+  two books, a rollable table nested in a rule and another nested in lore, statblocks,
+  read-aloud, glossary entries, a derived summary with a claim-scoped citation, four
+  constraint forms, aliases appearing nowhere in the text, and an inert erratum — and the
+  licence half by construction, since the project owns it. Swapping in a real SRD is a
+  change to that directory and nothing else; the builder has no knowledge of Emberlight.
 - **Gold set size.** Needs a first pass to know what threshold is meaningful; too small and
   the score is noise, too large and the judge is unaffordable.
 - **A second test pack.** Cross-pack behaviour — federation, gating, supersession, multiple
