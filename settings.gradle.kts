@@ -3,3 +3,4 @@ rootProject.name = "rpg-helper"
 include(":pack")
 include(":state")
 include(":retrieval")
+include(":model")

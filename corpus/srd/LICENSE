@@ -1,0 +1,42 @@
+Emberlight, and the adventure "The Door in the Ember", are original works written
+for the rpg-helper project as a test corpus and as the app's bundled starter pack.
+
+Copyright (c) 2026 the rpg-helper project.
+
+Licensed under the Creative Commons Attribution 4.0 International licence
+(CC BY 4.0). You are free to share and adapt this material for any purpose,
+including commercially, provided you give appropriate credit, link to the
+licence, and indicate if changes were made.
+
+    https://creativecommons.org/licenses/by/4.0/
+
+Required attribution:
+
+    Emberlight, by the rpg-helper project, licensed CC BY 4.0.
+
+
+WHY THIS EXISTS RATHER THAN A REAL SRD
+--------------------------------------
+
+The test-infrastructure spec calls for an open-licensed SRD, and defers which
+one: the constraint is licence plus enough rules, lore, tables, and statblocks to
+exercise every route. Emberlight is a stand-in that satisfies the second half
+completely and the first half by construction, since the project owns it.
+
+It is deliberately small and deliberately complete. Every shape the pack format
+distinguishes appears at least once:
+
+  - verbatim-class rules, with a rollable table nested inside one of them
+  - a non-verbatim setting chunk with a rollable table nested inside it, which is
+    the case redaction exists for
+  - statblocks, read-aloud text, and glossary entries
+  - a second book, so cross-source behaviour is exercised rather than assumed
+  - a builder-written derived summary carrying claim-scoped citations
+  - an erratum targeting a book the pack does not contain, so the inert case is
+    covered
+  - constraints in four of the five predicate forms
+  - aliases that do not appear in the text at all, so the query rewrite has
+    something real to do
+
+Swapping in a genuine SRD is a change to this directory and nothing else. The
+builder reads the JSON beside this file; it has no knowledge of Emberlight.
