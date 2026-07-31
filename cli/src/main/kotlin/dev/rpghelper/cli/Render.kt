@@ -1,5 +1,11 @@
 package dev.rpghelper.cli
 
+import dev.rpghelper.session.BUNDLED
+import dev.rpghelper.session.EMBEDDER
+import dev.rpghelper.session.GATES
+import dev.rpghelper.session.Library
+import dev.rpghelper.session.Store
+
 import dev.rpghelper.routing.Answer
 import dev.rpghelper.routing.Card
 import dev.rpghelper.routing.Chip

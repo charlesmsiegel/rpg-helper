@@ -22,6 +22,7 @@ include(":builder")
 include(":capabilities")
 include(":routing")
 
+include(":session")
 include(":cli")
 
 include(":app")

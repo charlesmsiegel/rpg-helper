@@ -1,4 +1,4 @@
-package dev.rpghelper.cli
+package dev.rpghelper.session
 
 import dev.rpghelper.capabilities.Capabilities
 import dev.rpghelper.capabilities.RollableTable
@@ -11,6 +11,7 @@ import dev.rpghelper.retrieval.ActivePack
 import dev.rpghelper.retrieval.ActiveSet
 import dev.rpghelper.retrieval.Gates
 import dev.rpghelper.retrieval.Supersession
+import dev.rpghelper.state.CachedPack
 import dev.rpghelper.state.PackLibrary
 import dev.rpghelper.state.StateDb
 import java.nio.file.Files
@@ -57,6 +58,15 @@ class Library private constructor(
     val rollables: Map<String, List<RollableTable>>,
     val dropped: List<String>,
     /**
+     * The active set as a cache key sees it: `(pack_uid, file_sha256)` in priority order.
+     *
+     * By **content**, not by declared version. Installing a pack whose uid already exists
+     * replaces it, and nothing requires a corrected rebuild to declare a new
+     * `pack_version` — so a cache keyed on the version would keep serving answers built
+     * from the bytes that were corrected.
+     */
+    val fingerprint: List<CachedPack>,
+    /**
      * Held for the life of this set, released on close.
      *
      * A query captures the active set once, at its start, and completes against that
@@ -87,6 +97,20 @@ class Library private constructor(
          */
         fun open(paths: List<Path>): Library = openLeased(paths.map { it to null })
 
+        /** SHA-256 of a pack file, for callers that have no install row to read one from. */
+        private fun digestOf(path: Path): String {
+            val digest = java.security.MessageDigest.getInstance("SHA-256")
+            Files.newInputStream(path).use { input ->
+                val buffer = ByteArray(1 shl 16)
+                while (true) {
+                    val read = input.read(buffer)
+                    if (read < 0) break
+                    digest.update(buffer, 0, read)
+                }
+            }
+            return digest.digest().joinToString("") { "%02x".format(it) }
+        }
+
         /**
          * The active set of an installed library, each pack held by a lease.
          *
@@ -97,17 +121,25 @@ class Library private constructor(
          */
         fun openActive(library: PackLibrary): Library {
             val active = library.active()
+            // The digests the library already recorded at install, rather than a fresh
+            // hash of every pack on every query: the rows are the app's own and the
+            // background verification pass is what keeps them true.
+            val digests = active.associate { it.packUid to (it.fileSha256 ?: "") }
             val leased: List<Pair<Path, AutoCloseable?>> = active.mapNotNull { pack ->
                 // A pack whose file has been condemned refuses its lease. It is dropped
                 // from the set rather than read anyway, which is the same answer the app
                 // gives and one query short of the answer it would otherwise give.
                 library.borrow(pack.installId)?.let { lease -> lease.file to lease }
             }
-            return openLeased(leased)
+            return openLeased(leased, digests)
         }
 
-        private fun openLeased(sources: List<Pair<Path, AutoCloseable?>>): Library {
+        private fun openLeased(
+            sources: List<Pair<Path, AutoCloseable?>>,
+            digests: Map<String, String> = emptyMap(),
+        ): Library {
             val opened = mutableListOf<ActivePack>()
+            val fingerprint = mutableListOf<CachedPack>()
             val priority = mutableMapOf<String, Int>()
             val contracts = mutableMapOf<String, String>()
 
@@ -136,6 +168,10 @@ class Library private constructor(
                     )
                 }
                 opened += ActivePack(meta.packUid, JdbcDb.openReadOnly(path))
+                fingerprint += CachedPack(
+                    meta.packUid,
+                    digests[meta.packUid]?.takeIf { it.isNotEmpty() } ?: digestOf(path),
+                )
                 priority[meta.packUid] = index
                 contracts[meta.packUid] = meta.embedderId
             }
@@ -160,6 +196,7 @@ class Library private constructor(
                 active = ActiveSet(opened, priority, contracts, superseded),
                 rollables = rollables,
                 dropped = dropped,
+                fingerprint = fingerprint,
                 leases = sources.mapNotNull { it.second },
             )
         }

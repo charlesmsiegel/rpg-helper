@@ -1,5 +1,11 @@
 package dev.rpghelper.cli
 
+import dev.rpghelper.session.AskService
+import dev.rpghelper.session.BUNDLED
+import dev.rpghelper.session.EMBEDDER
+import dev.rpghelper.session.GATES
+import dev.rpghelper.session.Library
+import dev.rpghelper.session.Store
 import dev.rpghelper.builder.CorpusSpec
 import dev.rpghelper.builder.PackBuilder
 import dev.rpghelper.retrieval.Pipeline

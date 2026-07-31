@@ -12,6 +12,7 @@ repositories {
 dependencies {
     // The one module allowed to know about all the others: it is the wiring, and every
     // seam it crosses is a seam the app will have to cross too.
+    implementation(project(":session"))
     implementation(project(":pack"))
     implementation(project(":model"))
     implementation(project(":state"))

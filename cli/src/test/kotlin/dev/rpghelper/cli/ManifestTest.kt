@@ -1,5 +1,11 @@
 package dev.rpghelper.cli
 
+import dev.rpghelper.session.BUNDLED
+import dev.rpghelper.session.EMBEDDER
+import dev.rpghelper.session.GATES
+import dev.rpghelper.session.Library
+import dev.rpghelper.session.Store
+
 import dev.rpghelper.model.ModelManifest
 import java.nio.file.Files
 import kotlin.test.Test
