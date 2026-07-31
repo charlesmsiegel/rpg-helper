@@ -12,7 +12,28 @@ import kotlin.math.ln
  * contribute little. Grouping says what the rewrite already meant — these are one thing,
  * and matching either is matching it.
  */
-data class TermGroup(val terms: List<String>)
+data class TermGroup(
+    /**
+     * The wordings that each count as this concept. **Each alternative is a conjunction:**
+     * every term in it must be present for that alternative to match.
+     *
+     * A multi-word alias is one alternative, not several. Flattening *blade of the fallen*
+     * into four interchangeable tokens lets a chunk containing only *the* claim the whole
+     * concept — including the weight of the rare canonical it expands to — and clear the
+     * gate on a stopword.
+     */
+    val alternatives: List<List<String>>,
+) {
+    constructor(vararg wordings: List<String>) : this(wordings.toList())
+
+    /** Every term mentioned anywhere in the group, for the posting-list query. */
+    val terms: List<String> get() = alternatives.flatten().distinct()
+
+    companion object {
+        /** A single word, standing for itself. */
+        fun of(term: String) = TermGroup(listOf(listOf(term)))
+    }
+}
 
 /**
  * The lexical gate, as **how much of the query's information content this pack matched**.
@@ -64,8 +85,19 @@ object InformationGate {
         private val groups: List<TermGroup>,
     ) {
         /** Summed IDF of every group, matched or not. The query's total information. */
-        val queryInformation: Double =
-            groups.sumOf { group -> group.terms.maxOfOrNull { idf[it] ?: 0.0 } ?: 0.0 }
+        val queryInformation: Double = groups.sumOf { weightOf(it) }
+
+        /**
+         * What a concept is worth: the rarest alternative's rarest term.
+         *
+         * A concept is worth what its most informative wording is worth, regardless of
+         * which spelling the book happened to use — the alias rewrite exists precisely
+         * because those differ.
+         */
+        private fun weightOf(group: TermGroup): Double =
+            group.alternatives.maxOfOrNull { alternative ->
+                alternative.maxOfOrNull { idf[it] ?: 0.0 } ?: 0.0
+            } ?: 0.0
 
         /**
          * Share of [queryInformation] that [chunkId] contains, in `0..1`.
@@ -78,8 +110,12 @@ object InformationGate {
             if (queryInformation <= 0.0) return 0.0
             var matched = 0.0
             for (group in groups) {
-                val weight = group.terms.maxOfOrNull { idf[it] ?: 0.0 } ?: 0.0
-                if (group.terms.any { chunkId in (postings[it] ?: emptySet()) }) matched += weight
+                // Any alternative, but *all* of that alternative's terms. A phrase is one
+                // wording, not a bag of interchangeable ones.
+                val present = group.alternatives.any { alternative ->
+                    alternative.all { chunkId in (postings[it] ?: emptySet()) }
+                }
+                if (present) matched += weightOf(group)
             }
             return matched / queryInformation
         }

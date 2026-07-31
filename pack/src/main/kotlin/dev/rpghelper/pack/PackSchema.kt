@@ -30,6 +30,15 @@ object PackSchema {
     val KINDS: Set<String> =
         setOf("rules", "table", "statblock", "readaloud", "glossary", "setting")
 
+    /**
+     * The pinned FTS5 tokenizer, named so activation can check it rather than assume it.
+     *
+     * The app tokenizes queries this way, so an index built any other way folds terms
+     * differently — and the divergence is silent, appearing only for the words where the
+     * two disagree.
+     */
+    const val TOKENIZER: String = "unicode61 remove_diacritics 2"
+
     /** `chunks.origin`. */
     val ORIGINS: Set<String> = setOf("source", "derived")
 

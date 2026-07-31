@@ -38,6 +38,8 @@ data class Survivor(
      * in the prompt is the exact failure this step exists to prevent.
      */
     val redact: List<IntRange>?,
+    /** The candidate's text with [redact] applied, or null when redaction failed closed. */
+    val redactedText: String?,
 )
 
 /**
@@ -77,6 +79,23 @@ object Nesting {
     const val MIN_OUTSIDE_FRACTION = 0.25
 
     /**
+     * What replaces an excised child, named by its kind.
+     *
+     * Naming the kind tells the model something true and useful — that a table stood
+     * here — without telling it what the table said, which is the whole point of the
+     * excision.
+     */
+    private val MARKER = mapOf(
+        "table" to "[table omitted] ",
+        "statblock" to "[statblock omitted] ",
+        "rules" to "[rules omitted] ",
+        "readaloud" to "[read-aloud omitted] ",
+        "glossary" to "[glossary omitted] ",
+    )
+
+    private const val GENERIC_MARKER = "[omitted] "
+
+    /**
      * @param nestedChildren every chunk in the same pack whose `parent_chunk_id` is the
      * given chunk. **A lookup on the pack, not a filter on the candidates** — a lore query
      * that never retrieved the child at all still has to redact it, or the rule reaches
@@ -110,11 +129,20 @@ object Nesting {
 
         return candidates
             .filter { it.ref !in dropped }
-            .map { Survivor(it, redactions.getValue(it.ref)?.spans) }
+            .map { Survivor(it, redactions.getValue(it.ref)?.spans, redactions.getValue(it.ref)?.text) }
     }
 
-    /** The parent's own prose, and the spans excised to get it. */
-    private class Redaction(val text: String, val spans: List<IntRange>)
+    /**
+     * The parent's own prose, and the spans excised to get it.
+     *
+     * [text] carries the omission markers and is what generation and the lexical test
+     * read. [ownProse] is the same text with the markers removed, and exists for exactly
+     * one question: whether the parent has anything of *its own* left. Asking that of
+     * [text] would answer yes for a parent whose entire content was one nested table,
+     * because `[table omitted]` is not blank — and that parent contributes nothing but a
+     * marker to the generation context.
+     */
+    private class Redaction(val text: String, val ownProse: String, val spans: List<IntRange>)
 
     /**
      * Excises every nested verbatim child's span from [parent], or null if it cannot.
@@ -132,27 +160,44 @@ object Nesting {
     ): Redaction? {
         val bytes = parent.text.toByteArray(Charsets.UTF_8)
         val children = nestedChildren(parent.ref).filter(verbatimEligible)
-        if (children.isEmpty()) return Redaction(parent.text, emptyList())
+        if (children.isEmpty()) return Redaction(parent.text, parent.text, emptyList())
 
-        val spans = mutableListOf<IntRange>()
+        val located = mutableListOf<Pair<NestingCandidate, IntRange>>()
         for (child in children) {
             val span = relativeSpan(parent, child, bytes.size) ?: return null
-            spans += span
+            located += child to span
         }
-        spans.sortBy { it.first }
+        located.sortBy { it.second.first }
+        val ordered = located.map { it.first }
+        val spans = located.map { it.second }
 
         val kept = StringBuilder()
         var cursor = 0
-        for (span in spans) {
+        for ((position, span) in spans.withIndex()) {
             if (span.first > cursor) {
                 kept.append(String(bytes, cursor, span.first - cursor, Charsets.UTF_8))
             }
+            // A marker, not a silent join. Excising a table that abuts prose with no
+            // whitespace between them concatenates the bytes on either side into a word
+            // neither sentence contained -- before generation reads it, and before the
+            // lexical independence test tokenizes it, so the fabricated token can decide
+            // whether the parent survives.
+            kept.append(" ").append(MARKER[ordered.getOrNull(position)?.kind] ?: GENERIC_MARKER)
             cursor = maxOf(cursor, span.last + 1)
         }
         if (cursor < bytes.size) {
             kept.append(String(bytes, cursor, bytes.size - cursor, Charsets.UTF_8))
         }
-        return Redaction(kept.toString(), spans)
+        // Coalesce adjacent markers and collapse the whitespace they left behind.
+        val marked = kept.toString()
+            .replace(Regex("(\\[[\\w -]+omitted]\\s*)+")) { match ->
+                match.value.trim().let { if (it.contains("] [")) "[omitted] " else "$it " }
+            }
+            .replace(Regex("[ \\t]+"), " ")
+            .trim()
+        val ownProse = marked.replace(Regex("\\[[\\w -]+omitted]"), " ")
+            .replace(Regex("\\s+"), " ").trim()
+        return Redaction(marked, ownProse, spans)
     }
 
     /**
@@ -185,7 +230,7 @@ object Nesting {
         queryTerms: List<String>,
     ): Boolean {
         if (redaction == null) return false
-        if (redaction.text.isBlank()) return false
+        if (redaction.ownProse.isBlank()) return false
         return denseEvidence(parent, redaction) || lexicalEvidence(parent, redaction, queryTerms)
     }
 
@@ -229,7 +274,7 @@ object Nesting {
                 Tokenizer.tokenize(String(slice, Charsets.UTF_8))
             }
             .toSet()
-        val outside = Tokenizer.tokenize(redaction.text).toSet()
+        val outside = Tokenizer.tokenize(redaction.ownProse).toSet()
 
         val matchedInside = queryTerms.map { Tokenizer.fold(it) }.filter { it in inside }
         if (matchedInside.isEmpty()) return false

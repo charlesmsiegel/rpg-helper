@@ -318,6 +318,34 @@ class PackValidatorHardeningTest {
     }
 
     @Test
+    fun `rejects an index built with a different tokenizer`() {
+        // The app folds query terms as unicode61 remove_diacritics 2. An index built any
+        // other way holds `café` while every query carries `cafe`, and the content is
+        // silently unretrievable for the life of the pack -- no canary catches it, because
+        // a canary is ASCII by construction.
+        assertRejects(ViolationCode.FTS_INDEX_UNUSABLE) {
+            it.exec("DROP TABLE chunks_fts")
+            it.exec(
+                "CREATE VIRTUAL TABLE chunks_fts USING fts5(text, heading_path, " +
+                    "content='chunks', content_rowid='chunk_id', tokenize='unicode61')",
+            )
+            it.exec(
+                "INSERT INTO chunks_fts (rowid, text, heading_path) " +
+                    "SELECT chunk_id, text, COALESCE(heading_path, '') FROM chunks",
+            )
+        }
+    }
+
+    @Test
+    fun `rejects an index holding documents no chunk owns`() {
+        // An orphan can win a search, consume the depth budget, and resolve to nothing --
+        // so a query refuses with usable chunks sitting just below the limit.
+        assertRejects(ViolationCode.FTS_INDEX_UNUSABLE) {
+            it.exec("INSERT INTO chunks_fts (rowid, text, heading_path) VALUES (999, 'ghost', '')")
+        }
+    }
+
+    @Test
     fun `rejects two tables sharing a table_id`() {
         // Every row would be validated against one definition while the roller resolved
         // the id to either -- rolling on one table's outcomes beneath the other's citation.

@@ -64,19 +64,23 @@ class AliasRewriter(aliases: List<Alias>) {
             for (length in minOf(maxPhrase, tokens.size - index) downTo 1) {
                 val phrase = tokens.subList(index, index + length).joinToString(" ")
                 val hits = byAlias[phrase] ?: continue
-                val wordings = tokens.subList(index, index + length).toMutableList()
+                // The user's wording is ONE alternative -- the whole phrase, all of it --
+                // and each canonical is another. Flattening them into interchangeable
+                // tokens would let a chunk holding only "the" claim the concept, and with
+                // it the weight of the rare canonical the alias expands to.
+                val alternatives = mutableListOf(tokens.subList(index, index + length).toList())
                 for (hit in hits) {
                     matched += hit
                     val canonical = Tokenizer.tokenize(hit.canonical)
                     canonicals += canonical
-                    wordings += canonical
+                    alternatives += canonical
                     hit.chunkId?.let { entityHits += hit.packUid to it }
                 }
-                groups += TermGroup(wordings.distinct())
+                groups += TermGroup(alternatives.distinct())
                 consumed = length
                 break
             }
-            if (consumed == 0) groups += TermGroup(listOf(tokens[index]))
+            if (consumed == 0) groups += TermGroup.of(tokens[index])
             index += if (consumed > 0) consumed else 1
         }
 

@@ -37,11 +37,12 @@ class RouterTest {
         text: String = "body of $id",
         redact: List<IntRange>? = emptyList(),
         headingPath: String? = "Somewhere",
+        redactedText: String? = text,
     ) = Candidate(
         ref = ref(id), kind = kind, origin = origin, stableKey = "key:$id",
         sourceUid = "srd:emberlight:core", headingPath = headingPath, text = text,
         score = 1.0 / id, contributions = listOf("core"), entityHit = false,
-        denseWindow = null, redact = redact,
+        denseWindow = null, redact = redact, redactedText = redactedText,
     )
 
     private fun retrieved(vararg candidates: Candidate, gatedOut: List<String> = emptyList()) =
@@ -217,7 +218,7 @@ class RouterTest {
         // generated card, and the citations are listed instead.
         val generator = CountingGenerator()
         val answer = router().route(
-            retrieved(candidate(8, "setting", text = "lore", redact = null)),
+            retrieved(candidate(8, "setting", text = "lore", redact = null, redactedText = null)),
             generator, listOf(pack),
         )
         assertEquals(0, generator.answers, "the model is never handed an unredactable chunk")
@@ -241,7 +242,11 @@ class RouterTest {
 
         router().route(
             retrieved(
-                candidate(8, "setting", text = text, redact = listOf(start until (start + table.length))),
+                candidate(
+                    8, "setting", text = text,
+                    redact = listOf(start until (start + table.length)),
+                    redactedText = "Vashenko waits. [table omitted] Travellers pass through.",
+                ),
             ),
             generator, listOf(pack),
         )

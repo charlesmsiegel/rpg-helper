@@ -130,25 +130,33 @@ class DocumentStore(
      */
     fun putTracker(documentId: Long, key: String, value: TrackerValue) {
         val normalized = normalizeKey(key)
-        val ordinal = db.query(
-            "SELECT COALESCE(MAX(ordinal), -1) + 1 FROM trackers WHERE document_id = ?",
-            documentId,
-        ) { it.int(0) }.single()
+        // The ordinal lookup, the upsert, and the timestamp are one operation. The
+        // connection lock covers each call and not the sequence, so two threads adding
+        // different trackers can both read the same MAX(ordinal) before either inserts --
+        // and `ORDER BY ordinal` then stops preserving the order the user chose.
+        db.transaction {
+            val ordinal = db.query(
+                "SELECT COALESCE(MAX(ordinal), -1) + 1 FROM trackers WHERE document_id = ?",
+                documentId,
+            ) { it.int(0) }.single()
 
-        db.execute(
-            "INSERT INTO trackers (document_id, key, type, number_value, flag_value, " +
-                "text_value, ordinal) VALUES (?, ?, ?, ?, ?, ?, " +
-                "COALESCE((SELECT ordinal FROM trackers WHERE document_id = ? AND key = ?), ?)) " +
-                "ON CONFLICT (document_id, key) DO UPDATE SET " +
-                "type = excluded.type, number_value = excluded.number_value, " +
-                "flag_value = excluded.flag_value, text_value = excluded.text_value",
-            documentId, normalized, typeOf(value),
-            (value as? TrackerValue.Number)?.value,
-            (value as? TrackerValue.Flag)?.value,
-            (value as? TrackerValue.Text)?.value,
-            documentId, normalized, ordinal,
-        )
-        db.execute("UPDATE documents SET updated_at = ? WHERE document_id = ?", clock(), documentId)
+            db.execute(
+                "INSERT INTO trackers (document_id, key, type, number_value, flag_value, " +
+                    "text_value, ordinal) VALUES (?, ?, ?, ?, ?, ?, " +
+                    "COALESCE((SELECT ordinal FROM trackers WHERE document_id = ? AND key = ?), ?)) " +
+                    "ON CONFLICT (document_id, key) DO UPDATE SET " +
+                    "type = excluded.type, number_value = excluded.number_value, " +
+                    "flag_value = excluded.flag_value, text_value = excluded.text_value",
+                documentId, normalized, typeOf(value),
+                (value as? TrackerValue.Number)?.value,
+                (value as? TrackerValue.Flag)?.value,
+                (value as? TrackerValue.Text)?.value,
+                documentId, normalized, ordinal,
+            )
+            db.execute(
+                "UPDATE documents SET updated_at = ? WHERE document_id = ?", clock(), documentId,
+            )
+        }
     }
 
     fun removeTracker(documentId: Long, key: String) {

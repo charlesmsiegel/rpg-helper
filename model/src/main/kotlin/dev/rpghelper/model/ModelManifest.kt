@@ -88,5 +88,21 @@ data class ModelManifest(
         }
         val names = files.map { it.name }
         require(names.size == names.toSet().size) { "manifest '$id' repeats a file name" }
+        for (name in names) {
+            // A single safe leaf, because the name becomes a path under the model
+            // directory. `../state.db` or an absolute path would let a *verified* download
+            // land on unrelated application state -- the digest check confirms the bytes
+            // are the ones this build expects and says nothing about where they go.
+            require(name.isNotEmpty() && name !in setOf(".", "..")) {
+                "manifest '$id' has a file with no usable name"
+            }
+            require(!name.contains('/') && !name.contains('\\')) {
+                "manifest '$id' file '$name' is a path, not a name; it would escape the " +
+                    "model directory"
+            }
+            require(!name.startsWith(".")) {
+                "manifest '$id' file '$name' is hidden; names must be ordinary files"
+            }
+        }
     }
 }

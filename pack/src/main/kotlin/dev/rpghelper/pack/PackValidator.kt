@@ -281,6 +281,35 @@ class PackValidator(private val supportedEmbedders: Set<EmbedderContract>) {
             return
         }
 
+        // The *tokenizer* is part of the contract, not an implementation detail of the
+        // builder. The app tokenizes queries as `unicode61 remove_diacritics 2`, and an
+        // index built with anything else folds terms differently: with diacritic removal
+        // off, the index holds `café` while every query carries `cafe`, and the content is
+        // silently unretrievable for the life of the pack. No canary catches it, because a
+        // canary is drawn from ASCII by construction.
+        val tokenizer = Regex("tokenize\\s*=?\\s*['\"]([^'\"]*)['\"]").find(declared)
+            ?.groupValues?.get(1)?.replace(Regex("\\s+"), " ")?.trim()
+        if (tokenizer != PackSchema.TOKENIZER) {
+            out += Violation(
+                FTS_INDEX_UNUSABLE,
+                "chunks_fts declares tokenize='${tokenizer ?: "(absent)"}'; the format pins " +
+                    "'${PackSchema.TOKENIZER}', and any other folds query terms differently",
+            )
+            return
+        }
+        // External content over `chunks`, keyed by `chunk_id`: the rowid correspondence
+        // every other check in this validator and every query in retrieval assumes.
+        if (!declared.contains("content='chunks'") ||
+            !declared.contains("content_rowid='chunk_id'")
+        ) {
+            out += Violation(
+                FTS_INDEX_UNUSABLE,
+                "chunks_fts is not external-content over chunks(chunk_id); its rowids do " +
+                    "not correspond to chunk ids",
+            )
+            return
+        }
+
         // Row count first: it catches wholesale under-population, which one canary term
         // cannot. An index populated for chunk 1 and nothing else satisfies any single
         // probe while leaving every other chunk invisible to lexical search forever.
@@ -302,6 +331,26 @@ class PackValidator(private val supportedEmbedders: Set<EmbedderContract>) {
         } catch (e: PackReadException) {
             null // a build without the shadow table skips this rather than false-rejecting
         }
+        // And the other direction. A pack carrying every legitimate id *plus* orphan index
+        // documents activates on the check above alone, and a matching orphan consumes the
+        // lexical depth budget before `loadRows` silently drops it -- so a query can refuse
+        // with usable chunks sitting just below the limit.
+        val orphans = try {
+            db.map(
+                "SELECT d.id FROM chunks_fts_docsize d " +
+                    "LEFT JOIN chunks c ON c.chunk_id = d.id WHERE c.chunk_id IS NULL",
+            ) { it.long(0) }
+        } catch (e: PackReadException) {
+            null
+        }
+        if (orphans != null && orphans.isNotEmpty()) {
+            out += Violation(
+                FTS_INDEX_UNUSABLE,
+                "chunks_fts holds ${orphans.size} documents with no chunk " +
+                    "(${orphans.take(5).joinToString()}); they can win a search and resolve to nothing",
+            )
+        }
+
         if (unindexed != null && unindexed.isNotEmpty()) {
             out += Violation(
                 FTS_INDEX_UNUSABLE,

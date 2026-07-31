@@ -170,4 +170,17 @@ class AttributionsTest {
         val result = Attributions.validate(GeneratedAnswer("", emptyList()), context)
         assertTrue(result.isFailure)
     }
+
+    @Test
+    fun `a whitespace-only answer is refused too`() {
+        // It would otherwise produce one non-empty contextual region, render as a card with
+        // nothing in it, and reach the claim harness as zero claims -- which scores 100%
+        // support and passes the grounding gate on an answer that says nothing.
+        for (blank in listOf("   ", "\n\n", "\t ")) {
+            assertTrue(
+                Attributions.validate(GeneratedAnswer(blank, emptyList()), context).isFailure,
+                "'\u0024blank' must be refused",
+            )
+        }
+    }
 }

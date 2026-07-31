@@ -218,6 +218,7 @@ class NestingTest {
         val (parent, child) = setting()
         val redacted = Nesting.redactedText(parent, pack(parent, child), verbatimEligible)!!
         assertFalse(tableText in redacted, "the quotable table is gone")
+        assertTrue("[table omitted]" in redacted, "and a marker stands where it was")
         assertTrue("nervous baron" in redacted, "the parent's own prose stays")
         assertTrue("Travellers are watched" in redacted)
     }
@@ -228,7 +229,7 @@ class NestingTest {
         // confusing the two cuts in the wrong place -- and cuts through a character.
         val (parent, child) = setting(before = "Vashenko—a mining town—waits. ")
         assertEquals(
-            "Vashenko—a mining town—waits.  Travellers are watched but not turned away.",
+            "Vashenko—a mining town—waits. [table omitted] Travellers are watched but not turned away.",
             Nesting.redactedText(parent, pack(parent, child), verbatimEligible),
         )
     }
@@ -278,6 +279,28 @@ class NestingTest {
     }
 
     // ---------------------------------------------------------------- no nesting
+
+    @Test
+    fun `an excision leaves a boundary rather than joining the bytes either side`() {
+        // A table abutting prose with no whitespace between them would concatenate into a
+        // word neither sentence contained -- before generation reads it, and before the
+        // lexical test tokenizes it, so a fabricated token could decide whether the parent
+        // survives.
+        val (parent, child) = setting(before = "Vashenko waits.", after = "Travellers pass.")
+        val redacted = Nesting.redactedText(parent, pack(parent, child), verbatimEligible)!!
+        assertTrue("waits. [table omitted] Travellers" in redacted, redacted)
+        assertFalse("waits.Travellers" in redacted)
+    }
+
+    @Test
+    fun `a parent that is only a marker has nothing of its own`() {
+        // The marker is not the parent's prose. Judging emptiness on the marked text would
+        // answer yes for a parent whose entire content was one nested table.
+        val (bare, child) = setting(before = "", after = "")
+        val parent = bare.copy(denseRole = "expansion")
+        val kept = survivors(listOf(parent, child))
+        assertEquals(listOf(child.ref), kept.map { it.candidate.ref })
+    }
 
     @Test
     fun `unrelated candidates pass through untouched`() {

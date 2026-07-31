@@ -554,6 +554,7 @@ violation is visible the builder's guarantees have demonstrably not held.
 | derivation | derived chunks cite at least one chunk; every cited chunk exists and has `origin='source'` |
 | claim spans | in range of the derived text, non-empty, not inverted, on UTF-8 boundaries |
 | chunk references | `entities`, `tables`, `capabilities`, `constraints`, `supersessions` resolve to chunks that exist |
+| lexical index | declared FTS5, external-content over `chunks(chunk_id)`, tokenizer exactly `unicode61 remove_diacritics 2`, and its document set equal to the chunk set in **both** directions |
 | supersession self-reference | no `supersessions` row names as its correction a chunk carrying the `(source_uid, stable_key)` that same row withdraws |
 | source references | `chunks`, `source_page_labels`, `source_gaps` resolve to sources that exist |
 | closed vocabularies | `locator_scheme`, page-label `scheme`, and gap `reason` are all in their sets |

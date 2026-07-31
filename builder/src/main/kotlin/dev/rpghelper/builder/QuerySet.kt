@@ -97,12 +97,27 @@ data class QueryOutcome(
 /** A run of the whole set. */
 data class RecallReport(val outcomes: List<QueryOutcome>, val threshold: Double) {
 
-    val meanRecall: Double get() = outcomes.map { it.recall }.average()
+    /**
+     * Mean over the **positive** queries only.
+     *
+     * A correctly refused negative scores 1.0, and including those in the mean lets
+     * refusals pay for missed answers: nine held refusals and one wholly missed positive
+     * reports 0.9 and clears a retrieval-quality bar while positive recall is zero.
+     * Negatives are enforced separately and absolutely by [negativesHeld], which is the
+     * right instrument for them — a refusal is pass or fail, not a fraction.
+     */
+    val meanRecall: Double
+        get() = outcomes.filterNot { it.query.isNegative }
+            .map { it.recall }
+            .let { if (it.isEmpty()) 1.0 else it.average() }
 
     /** Negatives are reported separately: a refusal is pass/fail, not a fraction. */
     val negativesHeld: List<QueryOutcome> get() = outcomes.filter { it.query.isNegative }
 
     val passed: Boolean get() = meanRecall >= threshold && negativesHeld.all { it.refused }
+
+    /** Every negative that answered when it should have refused. */
+    val negativesBroken: List<QueryOutcome> get() = negativesHeld.filterNot { it.refused }
 
     override fun toString(): String = buildString {
         appendLine("mean recall %.3f (threshold %.3f)".format(meanRecall, threshold))

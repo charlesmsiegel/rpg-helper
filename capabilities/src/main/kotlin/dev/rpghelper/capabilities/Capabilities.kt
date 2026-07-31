@@ -43,9 +43,17 @@ object Capabilities {
     /** The one kind, deliberately. A vocabulary invented ahead of its second entry is a guess. */
     const val ROLL_TABLE = "roll-table"
 
-    fun load(db: Db): CapabilitySet {
+    /**
+     * @param superseded chunk ids this pack's active set has withdrawn. A capability rooted
+     * at one is dropped: the supersession cascade reaches capabilities precisely so a
+     * correction cannot leave a roller offering outcomes from text retrieval has removed.
+     */
+    fun load(db: Db, superseded: Set<Long> = emptySet()): CapabilitySet {
         val tables = loadTables(db)
         val rows = loadRows(db)
+        val kinds = db.map("SELECT chunk_id, kind, origin FROM chunks") {
+            it.long(0) to (it.string(1) to it.string(2))
+        }.toMap()
 
         val loaded = mutableListOf<RollableTable>()
         val dropped = mutableListOf<DroppedCapability>()
@@ -57,6 +65,14 @@ object Capabilities {
             val kind = fields[1] as String
             val chunkId = fields[2] as Long
             val manifest = fields[3] as String
+
+            if (chunkId in superseded) {
+                dropped += DroppedCapability(
+                    id,
+                    "rooted at chunk $chunkId, which an active correction has withdrawn",
+                )
+                return@forEach
+            }
 
             if (kind != ROLL_TABLE) {
                 dropped += DroppedCapability(id, "unrecognised kind '$kind'; this build ignores it")
@@ -88,6 +104,20 @@ object Capabilities {
                 dropped += DroppedCapability(
                     id,
                     "is rooted at chunk $chunkId but table $tableId belongs to chunk ${table.first}",
+                )
+                return@forEach
+            }
+
+            // And that chunk must be a verbatim source table. Outcome text renders under
+            // the quotation rule, so attaching validated rows to a `setting` or derived
+            // chunk would launder non-verbatim prose into quote styling beneath a real
+            // citation -- past the routing partition that exists to stop exactly that.
+            val classification = kinds[chunkId]
+            if (classification != ("table" to "source")) {
+                dropped += DroppedCapability(
+                    id,
+                    "targets chunk $chunkId, which is ${classification?.first}/" +
+                        "${classification?.second} rather than a verbatim source table",
                 )
                 return@forEach
             }

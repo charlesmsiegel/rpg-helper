@@ -210,6 +210,25 @@ class LexicalTest {
     }
 
     @Test
+    fun `a phrase alias is one wording, not a bag of interchangeable tokens`() {
+        // Flattened, a chunk holding only "the" would satisfy the group and collect the
+        // full weight of the rare canonical it expands to -- clearing the relevance gate
+        // on a stopword.
+        val group = AliasRewriter(aliases).rewrite("the blade of the fallen").groups
+            .single { it.alternatives.any { alt -> alt.contains("sunblade") } }
+
+        assertTrue(
+            group.alternatives.any { it == listOf("blade", "of", "the", "fallen") },
+            "the user's phrase survives whole: ${group.alternatives}",
+        )
+        assertTrue(group.alternatives.any { it == listOf("sunblade") })
+        assertTrue(
+            group.alternatives.none { it.size == 1 && it.single() == "the" },
+            "and no single stopword stands for the concept",
+        )
+    }
+
+    @Test
     fun `an unmatched query is returned unchanged`() {
         val result = AliasRewriter(aliases).rewrite("how does falling damage work")
         assertEquals(Tokenizer.tokenize("how does falling damage work"), result.terms)

@@ -242,26 +242,13 @@ class Router(
         return Card.Generated(validated.text, chips, footer.toList())
     }
 
-    /** The candidate's text with its nested verbatim spans excised, or null if unsafe. */
-    private fun redactedTextOf(candidate: Candidate): String? {
-        val spans = candidate.redact ?: return null
-        if (spans.isEmpty()) return candidate.text
-
-        val bytes = candidate.text.toByteArray(Charsets.UTF_8)
-        val kept = StringBuilder()
-        var cursor = 0
-        for (span in spans.sortedBy { it.first }) {
-            if (span.first > cursor) {
-                kept.append(String(bytes, cursor, span.first - cursor, Charsets.UTF_8))
-            }
-            // A marker rather than a silent join, so the model is not handed a sentence
-            // that runs into the next one and reads as continuous prose.
-            kept.append(" [omitted] ")
-            cursor = maxOf(cursor, span.last + 1)
-        }
-        if (cursor < bytes.size) {
-            kept.append(String(bytes, cursor, bytes.size - cursor, Charsets.UTF_8))
-        }
-        return kept.toString().replace(Regex("\\s+"), " ").trim()
-    }
+    /**
+     * The candidate's redacted text, as retrieval already computed it.
+     *
+     * Retrieval's `Nesting` produced this and the lexical independence test read the same
+     * string, so the two uses agree **by construction** rather than by two
+     * implementations happening to excise the same bytes. A second copy here was exactly
+     * that second implementation, and it disagreed: it inserted a different marker.
+     */
+    private fun redactedTextOf(candidate: Candidate): String? = candidate.redactedText
 }

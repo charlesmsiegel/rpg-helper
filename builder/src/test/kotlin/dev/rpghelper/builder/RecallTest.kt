@@ -95,6 +95,20 @@ class RecallTest {
     }
 
     @Test
+    fun `refusals cannot pay for missed answers`() {
+        // A correctly refused negative scores 1.0. Counting those in the mean lets nine
+        // held refusals and one wholly missed positive report 0.9 and clear a
+        // retrieval-quality bar while positive recall is zero.
+        val allMissed = querySet.positives.map { QueryOutcome(it, emptyList(), refused = true) }
+        val allRefused = querySet.negatives.map { QueryOutcome(it, emptyList(), refused = true) }
+        val report = RecallReport(allMissed + allRefused, threshold = 0.5)
+
+        assertEquals(0.0, report.meanRecall, "positives only")
+        assertTrue(report.negativesHeld.all { it.refused }, "the refusals did hold")
+        assertTrue(!report.passed, "and the run still fails, because nothing was found")
+    }
+
+    @Test
     fun `the semantic threshold is stricter than the structural one`() {
         // Otherwise the split is decoration: the point is that bundling real weights has
         // to be measured against a bar the stand-in cannot clear.

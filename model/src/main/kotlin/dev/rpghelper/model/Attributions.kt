@@ -84,6 +84,14 @@ object Attributions {
         answer: GeneratedAnswer,
         context: List<RedactedChunk>,
     ): Result<ValidatedAnswer> {
+        // Whitespace-only is not an answer. It would otherwise produce one non-empty
+        // contextual region, render as a card with nothing in it, and reach the claim
+        // harness as zero claims -- which scores 100% support and passes the grounding
+        // gate on an answer that says nothing.
+        if (answer.text.isBlank()) {
+            return Result.failure(AttributionException("the answer is empty"))
+        }
+
         val available = context.map { it.ref }
         val availableSet = available.toSet()
 

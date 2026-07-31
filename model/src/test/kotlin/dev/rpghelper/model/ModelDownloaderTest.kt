@@ -292,6 +292,25 @@ class ModelManifestTest {
     }
 
     @Test
+    fun `a file name that is a path is refused`() {
+        // The name becomes a path under the model directory, so `../state.db` would let a
+        // *verified* download land on unrelated application state. The digest confirms the
+        // bytes are the ones this build expects and says nothing about where they go.
+        for (name in listOf("../state.db", "/etc/passwd", "sub/dir.gguf", "..", ".", ".hidden")) {
+            val json = """
+                {
+                  "id": "test", "display_name": "Test", "license": "CC0",
+                  "files": [ { "name": "$name", "url": "https://x.invalid/a",
+                               "bytes": 10, "sha256": "${"a".repeat(64)}" } ]
+                }
+            """.trimIndent()
+            assertFailsWith<IllegalArgumentException>("'$name' must be refused") {
+                ModelManifest.parse(json)
+            }
+        }
+    }
+
+    @Test
     fun `a plaintext URL is refused`() {
         assertFailsWith<IllegalArgumentException> {
             ModelManifest.parse(json(url = "http://example.invalid/weights.gguf"))

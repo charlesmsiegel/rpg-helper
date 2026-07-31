@@ -62,6 +62,14 @@ data class Candidate(
     val denseWindow: IntRange?,
     /** Spans routing must excise before generation, or null when it cannot be done safely. */
     val redact: List<IntRange>?,
+    /**
+     * The text with those spans already excised, or null when redaction failed closed.
+     *
+     * Carried rather than recomputed: the lexical independence test read this exact
+     * string, and a second implementation downstream is a second chance to excise
+     * different bytes or insert a different marker.
+     */
+    val redactedText: String?,
 ) {
     /** Whether this renders as a quotation: verbatim-eligible kind *and* source origin. */
     val verbatim: Boolean
@@ -107,6 +115,11 @@ object Pipeline {
         val normalized = QueryNormalizer.normalize(rawQuery)
         val rewritten = AliasRewriter(loadAliases(active)).rewrite(normalized)
         val expression = LexicalQuery.build(rewritten.terms)
+        // The gate is measured over the same concepts the MATCH searched for. Measuring
+        // every group while searching only the first MAX_TERMS lets trailing text add
+        // unmatched information to the denominator and gate out a chunk that strongly
+        // matches the part actually searched.
+        val groups = rewritten.groups.take(LexicalQuery.MAX_TERMS)
         val gatedOut = mutableListOf<String>()
         val lists = mutableListOf<RetrievalList>()
 
@@ -119,7 +132,7 @@ object Pipeline {
                 // BM25 still does the ranking -- it is the better ordering, and rank is all
                 // fusion consumes. The information ratio decides only who is *in*, which is
                 // the one judgment a raw score could not make comparably.
-                val coverage = InformationGate.measure(pack, rewritten.groups)
+                val coverage = InformationGate.measure(pack, groups)
                 val kept = hits.filter { coverage.of(it.ref.chunkId) >= gates.lexical }
                 if (kept.isEmpty()) {
                     if (hits.isNotEmpty()) gatedOut += "lexical:${pack.packUid}"
@@ -194,6 +207,7 @@ object Pipeline {
                     entityHit = fusedCandidate.ref in entitySet,
                     denseWindow = windows[fusedCandidate.ref],
                     redact = survivors.getValue(fusedCandidate.ref).redact,
+                    redactedText = survivors.getValue(fusedCandidate.ref).redactedText,
                 )
             }
             .take(MAX_CANDIDATES)
@@ -203,9 +217,19 @@ object Pipeline {
 
     // ------------------------------------------------------------------ pack reads
 
+    /**
+     * Every active pack's aliases, minus those rooted at a withdrawn chunk.
+     *
+     * Filtering here rather than only on the entity hit: an alias rooted at a superseded
+     * chunk would otherwise still add its canonical to the query and its group to the
+     * gate, so withdrawn enrichment keeps broadening searches after the passage it
+     * belongs to has been removed from every other route.
+     */
     private fun loadAliases(active: ActiveSet): List<Alias> = active.packs.flatMap { pack ->
         pack.db.map("SELECT alias, canonical, chunk_id FROM entities") {
             Alias(pack.packUid, it.string(0), it.string(1), it.longOrNull(2))
+        }.filter { alias ->
+            alias.chunkId == null || ChunkRef(pack.packUid, alias.chunkId) !in active.superseded
         }
     }
 
