@@ -216,22 +216,41 @@ against a manifest with no activity to launch — running them twice would have 
 debug variant and then checked whether the release manifest happens to contain a test
 scaffold.
 
-### 4.6 The constraints engine has no production caller — *open*
+### 4.6 The constraints engine had no production caller — *fixed*
 
-`ConstraintParser` and `ConstraintEngine` are complete, well tested, and **invoked only by
-tests**. No `src/main` source queries active packs' `constraints` rows, filters superseded
-roots, applies pack priority, or reports dropped rows — so the state layer can persist a
-character's trackers and cannot validate them against the rules of the books they came
-from. `07-documents-and-constraints-spec.md` describes a subsystem that exists and is
+`ConstraintParser` and `ConstraintEngine` were complete, well tested, and **invoked only by
+tests**. No `src/main` source queried active packs' `constraints` rows, filtered superseded
+roots, applied pack priority, or reported dropped rows — so the state layer could persist a
+character's trackers and could not validate them against the rules of the books they came
+from. `07-documents-and-constraints-spec.md` described a subsystem that existed and was
 unreachable.
 
-This is the third instance of the pattern §4.1 named: a layer built, tested, and never
-attached. It is bigger than the other two because there is no obvious single call site —
+That was the third instance of the pattern §4.1 named: a layer built, tested, and never
+attached. It was bigger than the other two because there is no obvious single call site —
 the loader has to walk the active set, and the result has to reach document evaluation.
 
-**Fix: an active-set constraint loader in `:session`, alongside `AskService`**, since that
-is where the active set and the store already meet, plus a `DocumentStore` path that
-evaluates on save.
+`Rules` in `:session` is that loader, and it lives where the active set and the store
+already meet. `constraintsFor` reads every constraint row from every active pack declaring
+the document's ruleset, at that pack's priority, dropping and reporting rows rooted at a
+withdrawn chunk or refusing to parse. `check` evaluates them against a document's trackers,
+resolves each violation's citation through the pack that supplied the rule, and separates
+the ones the user has accepted. `sheet` in `:cli` is the surface: every mutation
+re-evaluates and prints, because a validator that has to be asked is a validator nobody
+asks.
+
+The one decision worth naming is what the result says when there is nothing to say.
+`RuleCheck.unchecked` distinguishes *checked, and clean* from *not checked at all* — a
+document bound to a game whose book is deactivated has no constraints to evaluate, and
+reporting that as zero violations would tell a user their character is legal under rules the
+app cannot see. That is the vacuity family of §4.7 again, caught before it shipped rather
+than after: zero claims scoring 1.0, an empty gold set scoring 100% agreement, a recall run
+with no positive queries passing. **A result computed over nothing is not a passing result**,
+and the fifth time a bug arrives in the same shape it is the shape that needs a name, not
+the instance.
+
+Still absent: an Android surface for documents. The engine, the loader, and the CLI path are
+attached; `:app` has no sheet screen, so on the device this remains reachable only through
+the tool.
 
 ### 4.7 Assumptions no test enforces
 

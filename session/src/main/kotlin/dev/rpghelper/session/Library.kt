@@ -60,6 +60,15 @@ class Library private constructor(
     val rollables: Map<String, List<RollableTable>>,
     val dropped: List<String>,
     /**
+     * Each pack's declared `ruleset_id`, or null where it declares none.
+     *
+     * Kept here because the alternative is re-reading `pack_meta` per document evaluation,
+     * on connections this object already owns. A pack with no ruleset ships no constraints
+     * — the validator refuses that combination — so a null entry is a pack that simply has
+     * no rules to contribute, not one whose rules were lost.
+     */
+    val rulesets: Map<String, String?>,
+    /**
      * The active set as a cache key sees it: `(pack_uid, file_sha256)` in priority order.
      *
      * By **content**, not by declared version. Installing a pack whose uid already exists
@@ -265,6 +274,7 @@ class Library private constructor(
             priority: MutableMap<String, Int>,
             contracts: MutableMap<String, String>,
         ): Library {
+            val rulesets = mutableMapOf<String, String?>()
 
             for ((index, source) in sources.withIndex()) {
                 val (path, _) = source
@@ -302,6 +312,7 @@ class Library private constructor(
                 )
                 priority[meta.packUid] = index
                 contracts[meta.packUid] = meta.embedderId
+                rulesets[meta.packUid] = meta.rulesetId
             }
 
             // **Resolved once per active set, not once per question.** `Supersession` is
@@ -332,6 +343,7 @@ class Library private constructor(
                 active = ActiveSet(opened, priority, contracts, superseded),
                 rollables = rollables,
                 dropped = dropped,
+                rulesets = rulesets,
                 fingerprint = fingerprint,
                 leases = sources.mapNotNull { it.second },
                 staging = staging,

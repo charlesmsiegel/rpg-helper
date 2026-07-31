@@ -5,6 +5,7 @@ import dev.rpghelper.session.BUNDLED
 import dev.rpghelper.session.EMBEDDER
 import dev.rpghelper.session.GATES
 import dev.rpghelper.session.Library
+import dev.rpghelper.session.Rules
 import dev.rpghelper.session.Store
 import dev.rpghelper.builder.CorpusSpec
 import dev.rpghelper.builder.PackBuilder
@@ -15,8 +16,10 @@ import dev.rpghelper.model.ModelDownloader
 import dev.rpghelper.model.ModelManifest
 import dev.rpghelper.pack.Packs
 import dev.rpghelper.state.ActivationResult
+import dev.rpghelper.state.DocumentStore
 import dev.rpghelper.state.InstallResult
 import dev.rpghelper.state.SupersessionImpact
+import dev.rpghelper.state.TrackerValue
 import dev.rpghelper.retrieval.Pipeline
 import dev.rpghelper.routing.LoadedRollables
 import dev.rpghelper.routing.PackCitations
@@ -41,6 +44,14 @@ rpg-helper — build packs, and answer questions out of them.
   deactivate <dir> <install-id>              take it out of the active set
   uninstall <dir> <install-id>               forget it, and unlink when unread
   roll <pack.rpgpack> <table-id>     roll on a validated table
+
+  sheet <dir> new <title> [--ruleset <id>]   start a document
+  sheet <dir> list | show <id>               what is stored, and what the rules say
+  sheet <dir> set <id> <key> <value>         set a tracker and re-check
+  sheet <dir> clear <id> <key>               remove one
+  sheet <dir> ready <id>                     leave draft: minimums start being checked
+  sheet <dir> accept <id> <fingerprint> [note]
+                                     keep a deliberate deviation from the book
   fetch-model <manifest.json> <dir>  download a model and verify it against its digests
   make-manifest <id> <name> <license> <base-url> <dir>
                                      pin a manifest to weights you already have
@@ -71,6 +82,7 @@ fun main(arguments: Array<String>) {
             "activate" -> setActive(rest, true)
             "deactivate" -> setActive(rest, false)
             "uninstall" -> uninstall(rest)
+            "sheet" -> sheet(rest)
             "fetch-model" -> fetchModel(rest)
             "make-manifest" -> makeManifest(rest)
             "help", "--help", "-h", null -> {
@@ -390,6 +402,166 @@ private fun uninstall(arguments: List<String>): Int {
         // dies first. Documents are never touched; only their validation stops.
         println("uninstalled #$installId (${pack.title})")
         return 0
+    }
+}
+
+// ---------------------------------------------------------------------- sheet
+
+/**
+ * Documents, trackers, and the rule check — **the production caller the constraints engine
+ * did not have.**
+ *
+ * `ConstraintParser` and `ConstraintEngine` were complete and tested and nothing outside
+ * their own tests ever built a `ConstraintSet` from an installed pack, so the state layer
+ * could store a character and could not check one. This is where a sheet meets the active
+ * set: every mutation re-evaluates and prints what changed, because a validator that has to
+ * be asked is a validator nobody asks.
+ */
+private fun sheet(arguments: List<String>): Int {
+    require(arguments.size >= 2) { SHEET_USAGE }
+    val rest = arguments.drop(2)
+    Store(Path.of(arguments[0])).use { store ->
+        val documents = DocumentStore(store.db)
+        return when (arguments[1]) {
+            "new" -> {
+                require(rest.isNotEmpty()) { "usage: sheet <dir> new <title> [--ruleset <id>]" }
+                val ruleset = rest.indexOf("--ruleset").takeIf { it >= 0 }?.let { rest[it + 1] }
+                val title = rest.first()
+                val document = documents.create(title = title, rulesetId = ruleset)
+                println(
+                    "#${document.documentId}  $title" +
+                        (ruleset?.let { " (bound to $it)" } ?: " (unbound: nothing will check it)"),
+                )
+                0
+            }
+
+            "list" -> {
+                val all = documents.all()
+                if (all.isEmpty()) println("no documents") else all.forEach {
+                    println(
+                        "#${it.documentId}  ${it.title}  ${it.rulesetId ?: "unbound"}" +
+                            if (it.draft) "  [draft]" else "",
+                    )
+                }
+                0
+            }
+
+            "set" -> {
+                require(rest.size == 3) { "usage: sheet <dir> set <document-id> <key> <value>" }
+                val id = documentId(rest[0])
+                // Typed by what was written, not by what the key looks like. A `range`
+                // constraint reads numbers and skips everything else, so storing `3` as text
+                // would leave the tracker on screen and invisible to every rule about it.
+                val value = rest[2].toDoubleOrNull()?.let { TrackerValue.Number(it) }
+                    ?: when (rest[2]) {
+                        "true", "yes" -> TrackerValue.Flag(true)
+                        "false", "no" -> TrackerValue.Flag(false)
+                        else -> TrackerValue.Text(rest[2])
+                    }
+                documents.putTracker(id, rest[1], value)
+                printCheck(store, documents, id)
+                0
+            }
+
+            "clear" -> {
+                require(rest.size == 2) { "usage: sheet <dir> clear <document-id> <key>" }
+                val id = documentId(rest[0])
+                documents.removeTracker(id, rest[1])
+                printCheck(store, documents, id)
+                0
+            }
+
+            "ready" -> {
+                require(rest.size == 1) { "usage: sheet <dir> ready <document-id>" }
+                val id = documentId(rest[0])
+                // Clearing `draft` is the moment the sheet claims to be complete, which is
+                // the moment minimum bounds start being evaluated. Printing the check right
+                // after is the whole point of making it a deliberate action.
+                documents.setDraft(id, draft = false)
+                printCheck(store, documents, id)
+                0
+            }
+
+            "accept" -> {
+                require(rest.size >= 2) {
+                    "usage: sheet <dir> accept <document-id> <fingerprint> [note]"
+                }
+                val id = documentId(rest[0])
+                val ruleset = documents.get(id)?.rulesetId
+                    ?: error("#$id is unbound, so it has no violations to accept")
+                documents.accept(id, rest[1], ruleset, rest.drop(2).joinToString(" ").ifBlank { null })
+                printCheck(store, documents, id)
+                0
+            }
+
+            "show" -> {
+                require(rest.size == 1) { "usage: sheet <dir> show <document-id>" }
+                val id = documentId(rest[0])
+                val document = documents.get(id) ?: error("no document #$id")
+                println("#$id  ${document.title}  ${document.rulesetId ?: "unbound"}" +
+                    if (document.draft) "  [draft]" else "")
+                documents.trackers(id).forEach { println("  ${it.key} = ${describe(it.value)}") }
+                printCheck(store, documents, id)
+                0
+            }
+
+            else -> error(SHEET_USAGE)
+        }
+    }
+}
+
+private const val SHEET_USAGE = """usage:
+  sheet <dir> new <title> [--ruleset <id>]
+  sheet <dir> list
+  sheet <dir> show <document-id>
+  sheet <dir> set <document-id> <key> <value>
+  sheet <dir> clear <document-id> <key>
+  sheet <dir> ready <document-id>
+  sheet <dir> accept <document-id> <fingerprint> [note]"""
+
+private fun documentId(argument: String): Long =
+    argument.toLongOrNull() ?: error("'$argument' is not a document id")
+
+private fun describe(value: TrackerValue): String = when (value) {
+    is TrackerValue.Number -> value.value.toString().removeSuffix(".0")
+    is TrackerValue.Flag -> if (value.value) "yes" else "no"
+    is TrackerValue.Text -> value.value
+}
+
+/**
+ * Evaluates one document against the active set and prints the result.
+ *
+ * The active set is opened for the length of the check and closed again, the same way the
+ * app opens it per question: a document validated against packs the user deactivated ten
+ * minutes ago is a document validated against rules that are no longer in play.
+ */
+private fun printCheck(store: Store, documents: DocumentStore, documentId: Long) {
+    val check = Library.openActive(store.library).use { library ->
+        Rules.check(library, documents, documentId)
+    }
+    check.dropped.forEach { System.err.println("note: constraint ${it.constraintId} dropped — ${it.reason}") }
+
+    if (check.unchecked) {
+        // Never "no violations". A sheet bound to a game whose book is not active has been
+        // checked against nothing, and saying it is clean would be a claim about rules the
+        // app cannot see.
+        println("not checked: no active pack supplies this document's ruleset")
+        return
+    }
+    // "No violations" above a list of accepted ones contradicts itself. The sheet departs
+    // from the book either way; what acceptance changed is whether that is a flag.
+    if (check.flagged.isEmpty()) {
+        println(if (check.accepted.isEmpty()) "no violations" else "no violations beyond the accepted:")
+    }
+    check.flagged.forEach { flagged ->
+        println("!! ${flagged.violation.explanation}")
+        flagged.citation?.let { println("     — ${dev.rpghelper.routing.render(it)}") }
+        // The fingerprint is what `accept` takes, so it is printed where the user reads the
+        // violation rather than left to be looked up somewhere the CLI does not offer.
+        println("     accept with: ${flagged.violation.fingerprint}")
+    }
+    check.accepted.forEach {
+        println("~~ ${it.violation.explanation}  [accepted${it.note?.let { n -> ": $n" } ?: ""}]")
     }
 }
 
