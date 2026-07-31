@@ -138,42 +138,73 @@ Two things that fell out of wiring it, both worth knowing:
   without the quote/paraphrase distinction. That is §4.2's problem, and it is the reason
   §4.2 is not merely tidiness.
 
-### 4.2 One invariant, implemented twice, compared never
+### 4.2 One invariant, implemented twice, compared never — *fixed*
 
-`cli/Render.kt` and `app/Cards.kt` each independently implement "a quote and a paraphrase
-must never be confusable" — the product's entire reason to exist. Nothing compares them.
-This is precisely the shape of the `JdbcDb`/`BundledDb` divergence that shipped a binding
-with no NULL guards: two implementations of one contract that are never compared agree
-until they don't. That one at least *had* a parity test, and it still had a blind spot,
-because it only ever compared a well-formed input.
+`cli/Render.kt` and `app/Cards.kt` each independently implemented "a quote and a paraphrase
+must never be confusable" — the product's entire reason to exist — and nothing compared
+them. By the time it was fixed there were **three** copies of the chip-span walk and a
+fourth surface with none, which is how the stored rendering came to list `[1] Source` above
+prose containing no `[1]`.
 
-**Fix: a shared `CardModel` both renderers consume, or a parity test over a fixed set of
-answers asserting both surfaces mark the same spans as verbatim.**
+`Card.layout()` in `:routing` now decides it once, in `Block`s named by provenance rather
+than appearance: `Quotation` is the only block that may be rendered as a quotation and the
+only one that ever carries text a pack wrote. Every surface paints blocks. `CardLayoutTest`
+pins the invariant per card kind; `RenderParityTest` in `:cli` compares the two text
+renderers where **both are importable** — a parity test that reimplements one renderer to
+compare against is comparing the layout to itself, and would pass on the day they actually
+diverged.
 
-### 4.3 `build_report` is write-only
+Not closed: the Compose surface still paints its own tree, so only the decisions are shared
+and not the painting. That is the right boundary — a terminal and a phone genuinely differ
+— but it means the app's rendering is still checked by no test, because `:app` has no test
+runner. See §4.5.
 
-The builder records, per pack, what it dropped and what it could not check — including
-`unchecked`, meaning derived prose that no judge ever adjudicated. `build_report` is in the
-schema, in `REQUIRED_TABLES`, written on every build, and **read by no runtime code at all**.
-So a pack whose model-written summaries were never checked for entailment installs, activates,
-and renders its prose with well-formed citation chips, and the only person who ever saw the
-warning was the operator who ran the build.
+### 4.3 `build_report` is write-only — *fixed*
 
-Two separate review findings landed on different halves of this. The theory says packs are
-untrusted; the gap is that the pack's own confession of untrustworthiness is discarded.
-**Fix: surface `build_report` severity on the Packs surface at install, and let a pack that
-declares unchecked derived prose install only with that fact on screen.**
+The builder recorded, per pack, what it dropped and what it could not check — including
+`unchecked`, meaning model-written prose that no judge adjudicated — and **no runtime code
+read the table**. So such a pack installed, activated, and rendered its prose with
+well-formed citation chips, and the only person who ever saw the warning was the operator
+who ran the build.
 
-### 4.4 The gate checks shape, never origin
+`BuildReport.of` reads it, `install` returns it, and the CLI prints it. `unchecked` sorts
+above `dropped` deliberately: a dropped item is *absent*, and absence announces itself — the
+summary is not there, the control never appears. Unchecked content is **present and
+indistinguishable from checked content**, which is the failure this product is built
+against.
 
-`pack_meta.signature` is a `BLOB` column that is written NULL and verified by nothing. The
-activation gate answers *is this a well-formed pack?* and cannot answer *did this come from
-anyone in particular?* That is a legitimate boundary of the model rather than a bug — but it
-is unwritten, and "validated" reads as "trusted" to everyone who has not read the validator.
-**Fix: either implement signature verification, or state in `00-pack-schema.md` that the
-column is reserved and that activation is a well-formedness check only.**
+The gate cannot re-check this work; the app has no frontier judge and no source document.
+Carrying the builder's own admission forward is the whole of what it can do, and it is
+labelled as a claim rather than a check.
 
-### 4.5 Assumptions no test enforces
+### 4.4 The gate checks shape, never origin — *stated*
+
+`pack_meta.signature` is a `BLOB` written NULL and verified by nothing. Implementing
+verification needs a distribution and key model, and pack distribution is one of the
+questions still open — so the resolution here is the honest one rather than a guess at a
+scheme: the boundary is now **written where it is read**, in `Packs`' own documentation and
+in `00-pack-schema.md`.
+
+Activation answers *is this a well-formed pack this build can read?* Every check it makes is
+derivable from the bytes in hand, and none is evidence of authorship. A hostile pack that
+satisfies all of them activates. What the gate buys is that such a pack cannot crash the
+app, exhaust it before it can refuse, or launder invented prose into quotation styling
+beneath a real citation — a great deal, and not the same as knowing where the book came
+from. Saying so matters because *validated* reads as *trusted* to everyone who has not read
+the validator.
+
+### 4.5 One invariant, still implemented twice — the leftover
+
+`:app` is the only module with **no tests at all**, because it is the only one needing an
+Android test runner. Its Compose tree is now the last place a rendering decision lives
+unchecked — the labels and marker placement come from `layout()`, but nothing verifies that
+the gutter is drawn, that a `Quotation` block never reaches `ProseCard`, or that the roll
+control is offered only where a table exists. Every UI bug this session was in that file.
+
+**Fix: a Robolectric or instrumented test asserting the block-to-composable mapping**, which
+is a small surface now that the decisions live elsewhere.
+
+### 4.6 Assumptions no test enforces
 
 Worth more to a reviewer than another green assertion:
 
@@ -202,14 +233,15 @@ Theory:      A pack is an untrusted compilation of an authoritative book; every 
              said about it, and refusal is a correct answer.
 Reused:      One validator for builder and app; one SQLite binding (Sqlite/BundledDb);
              one file digest (FileDigest) that the answer cache's key depends on.
-New concept: `temp.withdrawn` — supersession as a relation rather than as query text,
-             so a question's cost stops scaling with how many corrections were accepted.
+New concept: `Card.layout()` — a card as Blocks named by provenance, so every surface
+             paints the same decision instead of re-deciding it. `temp.withdrawn` —
+             supersession as a relation rather than as query text, so a question's cost
+             stops scaling with how many corrections were accepted.
 Assumes:     The bundled SQLite behaves on-device as it does on the JVM; gate thresholds
              calibrated against a stand-in embedder transfer to real weights.
 Cost:        One full scan per relation at preflight; one staged copy per direct-file CLI
              invocation; one indexed subquery plus one sqlite_temp_master lookup per
              gated query.
-Watch:       §4.2 — one invariant, two renderers, no comparison. It is also what blocks
-             the answer cache from ever being displayable on Android (§4.1), because a
-             cache hit returns a stored render rather than cards.
+Watch:       §4.5 — :app has no tests, and its Compose tree is the last place a rendering
+             decision lives unchecked. Every UI defect this session was in that one file.
 ```

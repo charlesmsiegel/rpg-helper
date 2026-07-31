@@ -240,6 +240,22 @@ private fun install(arguments: List<String>): Int {
                         ),
                     )
                 }
+                // **What the pack admits about itself.** `build_report` is the builder's
+                // record of what it dropped and what it shipped without a judge, and until
+                // now nothing read it -- so a pack carrying unadjudicated model prose said
+                // so only to whoever ran the build, never to whoever installed it.
+                result.buildNotes.forEach {
+                    println(
+                        "  ${it.severity}: ${it.subjectKind}${it.subjectId?.let { id -> " $id" } ?: ""}" +
+                            " — ${it.validation}${it.detail?.let { d -> ": $d" } ?: ""}",
+                    )
+                }
+                if (dev.rpghelper.pack.BuildReport.shipsUnchecked(result.buildNotes)) {
+                    println(
+                        "  this pack ships prose no judge adjudicated; it renders with " +
+                            "citations and the app cannot re-check it",
+                    )
+                }
                 if (result.deactivatedForReview.isNotEmpty()) {
                     println(
                         "  installed inactive: it replaces an active pack and now withdraws " +

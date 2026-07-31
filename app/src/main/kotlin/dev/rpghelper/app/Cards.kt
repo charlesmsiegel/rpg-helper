@@ -30,6 +30,8 @@ import dev.rpghelper.capabilities.RollableTable
 import dev.rpghelper.pack.ChunkRef
 import dev.rpghelper.routing.Card
 import dev.rpghelper.routing.Chip
+import dev.rpghelper.routing.Block
+import dev.rpghelper.routing.layout
 import dev.rpghelper.routing.markChips
 import dev.rpghelper.routing.Citation
 import dev.rpghelper.routing.render
@@ -61,16 +63,20 @@ fun AnswerCard(
     onSearchInactive: (() -> Unit)? = null,
 ) {
     when (card) {
+        // Labels come from `Card.layout()`, not from here. The label is the sentence that
+        // makes provenance legible to a reader who does not know this app's conventions --
+        // the whole mechanism by which "generated" and "quoted" stay distinguishable -- and
+        // three surfaces wording it three ways is three different promises.
         is Card.Verbatim -> VerbatimCard(card, modifier, rolls)
         is Card.Derived -> ProseCard(
-            label = "Summary — written by this pack's builder, not quoted",
+            label = card.labelText(),
             body = card.body,
             chips = card.chips,
             footer = card.footer,
             modifier = modifier,
         )
         is Card.Generated -> ProseCard(
-            label = "Generated on this device from setting text",
+            label = card.labelText(),
             body = card.body,
             chips = card.chips,
             footer = card.footer,
@@ -80,6 +86,10 @@ fun AnswerCard(
         is Card.Empty -> EmptyCard(card, onSearchInactive, modifier)
     }
 }
+
+/** This card's label, as `Card.layout()` words it for every surface. */
+private fun Card.labelText(): String =
+    layout().filterIsInstance<Block.Label>().first().text
 
 @Composable
 private fun VerbatimCard(

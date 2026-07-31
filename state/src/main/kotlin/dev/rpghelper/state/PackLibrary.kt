@@ -1,5 +1,7 @@
 package dev.rpghelper.state
 
+import dev.rpghelper.pack.BuildNote
+import dev.rpghelper.pack.BuildReport
 import dev.rpghelper.pack.EmbedderContract
 import dev.rpghelper.pack.FileDigest
 import dev.rpghelper.pack.Sqlite
@@ -93,6 +95,18 @@ sealed interface InstallResult {
          * decide whether they are told.
          */
         val impact: List<SupersessionImpact> = emptyList(),
+        /**
+         * What the pack says it dropped or shipped unchecked, worst first.
+         *
+         * `build_report` was written by every build and read by nothing, so a pack whose
+         * model-written summaries no judge ever adjudicated installed, activated, and
+         * rendered that prose with well-formed citation chips — and the only person who saw
+         * the warning was whoever ran the builder. The gate cannot re-check this work; the
+         * app has no frontier judge and no source document. Carrying the pack's own
+         * admission to the surface is the whole of what it can do, and not doing it was the
+         * gap.
+         */
+        val buildNotes: List<BuildNote> = emptyList(),
     ) : InstallResult
     data class Rejected(val report: ValidationReport) : InstallResult
     data class TooLarge(val limit: String) : InstallResult
@@ -204,6 +218,7 @@ class PackLibrary(
         val staged = packsDir.resolve("$installId.rpgpack")
         var broadImpact: List<SupersessionImpact> = emptyList()
         var impact: List<SupersessionImpact> = emptyList()
+        var buildNotes: List<BuildNote> = emptyList()
         val existing: InstalledPack?
         val meta: PackMeta
         val size: Long
@@ -229,6 +244,8 @@ class PackLibrary(
             }
 
             meta = Packs.readMeta(staged)
+            // Read from the staged copy, like every other decision here.
+            buildNotes = Sqlite.openReadOnly(staged).use { BuildReport.of(it) }
             existing = findReady(meta.packUid)
             if (existing != null && existing.packUid != confirmReplacing) {
                 abandon(installId, staged)
@@ -307,7 +324,9 @@ class PackLibrary(
         //    installed. `reconcile` sweeps files with no row.
         if (existing != null) deleteWhenUnread(existing.installId)
 
-        return InstallResult.Installed(requireNotNull(byId(installId)), broadImpact, impact)
+        return InstallResult.Installed(
+            requireNotNull(byId(installId)), broadImpact, impact, buildNotes,
+        )
     }
 
     /**

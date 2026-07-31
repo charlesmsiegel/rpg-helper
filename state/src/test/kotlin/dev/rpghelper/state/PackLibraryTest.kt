@@ -320,6 +320,51 @@ class PackLibraryTest {
     }
 
     @Test
+    fun `an install reports what the pack admits about itself`() {
+        // `build_report` was written by every build and read by nothing. A pack shipping
+        // model-written prose that no judge adjudicated says so in that table -- and said
+        // it only to whoever ran the builder, while the person installing it got prose with
+        // well-formed citation chips and no way to know. The gate cannot re-check the work;
+        // carrying the admission forward is the whole of what the app can do.
+        val result = library.install(
+            forge { c ->
+                c.exec(
+                    "INSERT INTO build_report (report_id, severity, subject_kind, " +
+                        "subject_id, validation, detail) VALUES " +
+                        "(90, 'unchecked', 'chunk', '4', 'claim-support', " +
+                        "'shipped without a judge')",
+                )
+            },
+        )
+        assertTrue(result is InstallResult.Installed, "got $result")
+        val unchecked = result.buildNotes.filter { it.severity == "unchecked" }
+        assertEquals(1, unchecked.size, "${result.buildNotes}")
+        assertEquals("claim-support", unchecked.single().validation)
+        assertTrue(dev.rpghelper.pack.BuildReport.shipsUnchecked(result.buildNotes))
+    }
+
+    @Test
+    fun `unchecked outranks dropped, because absence announces itself and presence does not`() {
+        val result = library.install(
+            forge { c ->
+                c.exec(
+                    "INSERT INTO build_report (report_id, severity, subject_kind, " +
+                        "subject_id, validation, detail) VALUES " +
+                        "(91, 'dropped', 'chunk', '5', 'claim-support', 'invented a detail')," +
+                        "(92, 'unchecked', 'chunk', '4', 'claim-support', 'no judge ran')",
+                )
+            },
+        )
+        assertTrue(result is InstallResult.Installed, "got $result")
+        assertEquals(
+            "unchecked",
+            result.buildNotes.first().severity,
+            "a dropped item is absent and self-announcing; unchecked content is present " +
+                "and indistinguishable from checked content: ${result.buildNotes}",
+        )
+    }
+
+    @Test
     fun `an unreadable file is rejected as malformed, not as too large`() {
         // Preflight reports limit breaches only. A file that cannot be queried at all is
         // not too large, it is not a pack -- and the validator says which.

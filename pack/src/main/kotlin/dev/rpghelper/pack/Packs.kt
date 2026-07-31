@@ -2,7 +2,22 @@ package dev.rpghelper.pack
 
 import java.nio.file.Path
 
-/** Entry point for the activation gate, and for reading a pack's identity. */
+/**
+ * Entry point for the activation gate, and for reading a pack's identity.
+ *
+ * **The gate checks shape, never origin.** It answers *is this a well-formed pack this
+ * build can read?* — the schema, the pinned tokenizer, the vector layout, the probe
+ * constant, the reference graph, the bounds — every one of them a property derivable from
+ * the bytes in hand. None is evidence of who made the file. `pack_meta.signature` exists,
+ * is written NULL, and is verified by nothing, because the signing scheme depends on the
+ * pack distribution question and that is open (`00-pack-schema.md`, "Still open").
+ *
+ * Worth saying here rather than only in the spec, because *validated* reads as *trusted* to
+ * everyone who has not read the validator. A hostile pack that satisfies every check
+ * activates. What the gate buys is that such a pack cannot crash the app, exhaust it before
+ * it can refuse, or launder invented prose into quotation styling beneath a real citation —
+ * which is a great deal, and is not the same as knowing where the book came from.
+ */
 object Packs {
 
     /**

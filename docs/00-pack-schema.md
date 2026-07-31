@@ -650,9 +650,22 @@ Deliberately deferred, with what unblocks each:
 - **The derivation rule for `stable_key`.** The column is pinned and required; how a
   builder computes a value that survives a rebuild is open. The app only ever compares
   values, so this can be settled without a schema change.
-- **The signing scheme.** `pack_meta.signature` exists and is nullable. Verification is
-  unspecified, and depends on the pack distribution question, which is open on both
-  sides.
+- **The signing scheme.** `pack_meta.signature` exists, is nullable, is written NULL by
+  the builder, and is verified by nothing. Verification is unspecified and depends on the
+  pack distribution question, which is open on both sides.
+
+  **What this means for the activation gate, stated plainly because it is easy to read the
+  other way:** activation answers *is this a well-formed pack this build can read?* It
+  never answers *did this come from anyone in particular?* Every check the gate makes is a
+  property it can verify from the bytes in hand — the schema, the tokenizer, the vector
+  layout, the probe constant, the reference graph. None of them is evidence of origin, and
+  a hostile pack that satisfies all of them activates. The gate is what stops a malformed
+  or hostile pack from *crashing the app or laundering text into quotation styling*; it is
+  not, and cannot currently be, what tells a user the book is the publisher's.
+
+  The one thing the app carries about provenance-of-authorship is `build_report`, and that
+  is the builder's own claim about itself rather than anything verified — which is exactly
+  why it is surfaced at install rather than treated as a check.
 - **Whether normalized source text ships in the pack.** Would let the two validation
   lists in §7 merge; roughly doubles text size.
 - **Images.** The on-device model accepts image input, so storing page images is
