@@ -12,6 +12,7 @@ dependencies {
     // The activation gate lives in :pack; installing is what invokes it.
     implementation(project(":pack"))
     implementation(libs.sqlite.jdbc)
+    implementation(libs.kotlinx.serialization.json)
     testImplementation(kotlin("test"))
     testImplementation(testFixtures(project(":pack")))
 }

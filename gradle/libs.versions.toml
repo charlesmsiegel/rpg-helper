@@ -4,9 +4,12 @@ kotlin = "2.2.0"
 # format requires. The platform's SQLite is not an option on the device side either --
 # see docs/pack-schema.md, "SQLite on the device".
 sqlite-jdbc = "3.50.3.0"
+# Runtime-only: constraint `args` is JSON, parsed to JsonElement. No compiler plugin.
+kotlinx-serialization = "1.9.0"
 
 [libraries]
 sqlite-jdbc = { module = "org.xerial:sqlite-jdbc", version.ref = "sqlite-jdbc" }
+kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinx-serialization" }
 
 [plugins]
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }

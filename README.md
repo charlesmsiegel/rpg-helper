@@ -50,8 +50,8 @@ described. Building follows risk and what unblocks a usable app.
 
 ## Status
 
-Early. The pack contract and its activation gate are implemented; the app itself is
-not.
+Early. The pack contract, its activation gate, and the app's own state layer are
+implemented; retrieval and the interface are not.
 
 | Component | State |
 |---|---|
@@ -62,10 +62,12 @@ not.
 | Android app module | not started |
 | Pack builder | separate project, not started |
 
-`:pack` and `:state` are plain Kotlin/JVM libraries. `:pack` is a library — it holds the format definition and every check
-a pack must survive before the app will activate it. It is deliberately Android-free so
-far: SQLite sits behind a small `Db` interface, backed by `sqlite-jdbc` here and by a
-bundled SQLite on the device later.
+Both are plain Kotlin/JVM libraries, deliberately Android-free so far. `:pack` holds the
+format definition and every check a pack must survive before the app will activate it;
+SQLite sits behind a small read-only `Db` interface, backed by `sqlite-jdbc` here and by a
+bundled SQLite on the device later. `:state` owns the app's own database — the install
+journal, documents, and trackers — and is separate rather than a widening of `:pack`,
+because a pack must never be writable by construction.
 
 ## Building
 
