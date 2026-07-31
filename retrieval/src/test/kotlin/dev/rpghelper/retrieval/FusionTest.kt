@@ -57,6 +57,24 @@ class FusionTest {
     }
 
     @Test
+    fun `equal dense hits from different packs still order totally`() {
+        // A contract group spans packs and two packs commonly both hold a chunk 1. Left
+        // comparing as equal they inherit the vector query's order, RRF awards them
+        // different rank contributions, and the pack-priority tie-break downstream never
+        // sees a tie at all.
+        val hits = listOf(
+            VectorHit(ref(1, "beta"), "content", 0.5, 0 until 10),
+            VectorHit(ref(1, "alpha"), "content", 0.5, 0 until 10),
+        )
+        repeat(5) {
+            assertEquals(
+                listOf("alpha", "beta"),
+                Fusion.collapseToChunks(hits.shuffled()).map { it.ref.packUid },
+            )
+        }
+    }
+
+    @Test
     fun `the collapse survivor is deterministic under ties`() {
         // Section 9.1 reads the surviving vector's window, so a dedup decision that
         // depended on iteration order would be untestable.

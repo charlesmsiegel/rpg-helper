@@ -30,8 +30,8 @@ class DiceConformanceTest {
         forEachVector { expr, min, max, _ ->
             val parsed = DiceExpression.parse(expr)
             assertTrue(parsed != null, "'$expr' should parse")
-            assertEquals(min, parsed.min, "'$expr' minimum")
-            assertEquals(max, parsed.max, "'$expr' maximum")
+            assertEquals(min.toLong(), parsed.min, "'$expr' minimum")
+            assertEquals(max.toLong(), parsed.max, "'$expr' maximum")
             checked++
         }
         assertTrue(checked >= 18, "expected the full vector set, saw $checked")
@@ -88,8 +88,8 @@ class DiceConformanceTest {
     fun `d100 is a legal expression and is not a spelling of d percent`() {
         val hundred = DiceExpression.parse("d100")!!
         val percentile = DiceExpression.parse("d%")!!
-        assertEquals(1 to 100, hundred.min to hundred.max)
-        assertEquals(1 to 100, percentile.min to percentile.max)
+        assertEquals(1L to 100L, hundred.min to hundred.max)
+        assertEquals(1L to 100L, percentile.min to percentile.max)
         assertTrue(percentile.percentile)
         assertTrue(!hundred.percentile, "d100 carries none of d%'s 00 mapping")
     }

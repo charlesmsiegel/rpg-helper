@@ -76,6 +76,16 @@ class QueryNormalizerTest {
     }
 
     @Test
+    fun `a leading ellipsis is read before normalization folds it away`() {
+        // Normalization maps the ellipsis to whitespace, so checking the normalized form
+        // turns "...for wizards?" into "for wizards?" -- a query matching no opener, sent
+        // to retrieval having lost the thing it was about.
+        assertTrue(QueryNormalizer.needsRewrite("\u2026for wizards?", conversationTurns = 2))
+        assertTrue(QueryNormalizer.needsRewrite("...for wizards?", conversationTurns = 2))
+        assertFalse(QueryNormalizer.needsRewrite("\u2026for wizards?", conversationTurns = 0))
+    }
+
+    @Test
     fun `a demonstrative that is not the opener does not trigger the check`() {
         // "Nothing else triggers it." The check is cheap and deliberately narrow: a query
         // mentioning "that" mid-sentence usually names its own subject, and widening the

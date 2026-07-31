@@ -7,6 +7,8 @@ import java.sql.Connection
 import java.sql.DriverManager
 import java.sql.PreparedStatement
 import java.sql.ResultSet
+import java.util.concurrent.locks.ReentrantLock
+import kotlin.concurrent.withLock
 
 /**
  * The app's state database: opened, migrated, and written through here.
@@ -20,32 +22,60 @@ class StateDb private constructor(
     val path: Path,
 ) : AutoCloseable {
 
-    fun <T> query(sql: String, vararg args: Any?, read: (Row) -> T): List<T> {
+    /**
+     * Serializes every use of the connection.
+     *
+     * `autoCommit` and the current transaction are **connection-wide state**, not
+     * per-caller state, so two threads sharing this object are not two independent
+     * writers. Without the lock, a background pack install overlapping a document edit
+     * pulls that edit into the install's transaction — and loses it when the install
+     * rolls back. The two `transaction` calls would also restore `autoCommit` underneath
+     * each other, committing partial work.
+     *
+     * Reentrant because a store legitimately queries inside its own transaction.
+     */
+    private val lock = ReentrantLock()
+
+    /** Depth of enclosing transactions, so a nested one joins rather than commits early. */
+    private var depth = 0
+
+    fun <T> query(sql: String, vararg args: Any?, read: (Row) -> T): List<T> = lock.withLock {
         prepare(sql, args).use { statement ->
             statement.executeQuery().use { results ->
                 val out = mutableListOf<T>()
                 val row = ResultSetRow(results)
                 while (results.next()) out += read(row)
-                return out
+                out
             }
         }
     }
 
-    fun execute(sql: String, vararg args: Any?): Int =
+    fun execute(sql: String, vararg args: Any?): Int = lock.withLock {
         prepare(sql, args).use { it.executeUpdate() }
+    }
 
-    /** Runs [body] in a transaction, rolling back if it throws. */
-    fun <T> transaction(body: () -> T): T {
+    /**
+     * Runs [body] in a transaction, rolling back if it throws.
+     *
+     * A nested call joins the enclosing transaction rather than opening its own: SQLite
+     * has no nested transactions, and committing the inner one would commit the outer's
+     * work early — the opposite of what the caller asked for.
+     */
+    fun <T> transaction(body: () -> T): T = lock.withLock {
+        if (depth > 0) return@withLock body()
+
         val restore = connection.autoCommit
         connection.autoCommit = false
+        depth = 1
         try {
             val result = body()
             connection.commit()
-            return result
+            result
         } catch (e: Throwable) {
             connection.rollback()
             throw e
         } finally {
+            depth = 0
             connection.autoCommit = restore
         }
     }
@@ -53,7 +83,7 @@ class StateDb private constructor(
     /** The id SQLite assigned to the most recent insert on this connection. */
     fun lastInsertId(): Long = query("SELECT last_insert_rowid()") { it.long(0) }.single()
 
-    override fun close() = connection.close()
+    override fun close() = lock.withLock { connection.close() }
 
     private fun prepare(sql: String, args: Array<out Any?>): PreparedStatement {
         val statement = connection.prepareStatement(sql)
@@ -145,8 +175,12 @@ class StateDb private constructor(
     private fun migrate(backup: (Path) -> Unit) {
         val current = query("PRAGMA user_version") { it.int(0) }.single()
         if (current == StateSchema.VERSION) return
-        require(current <= StateSchema.VERSION) {
-            "database is at version $current; this build understands ${StateSchema.VERSION}"
+        // Both bounds. A damaged or externally restored file can report a negative
+        // version, and an upper-bound-only check would let the loop start at target 0 and
+        // index MIGRATIONS[-1] -- aborting every startup from then on, with no path out
+        // that does not involve deleting the user's characters.
+        require(current in 0..StateSchema.VERSION) {
+            "database is at version $current; this build understands 0..${StateSchema.VERSION}"
         }
 
         // Fold the write-ahead log into the database file before the backup is taken. In

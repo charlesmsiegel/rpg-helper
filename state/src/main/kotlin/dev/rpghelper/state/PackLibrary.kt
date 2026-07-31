@@ -8,6 +8,8 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardOpenOption
 import java.security.MessageDigest
+import java.util.concurrent.locks.ReentrantLock
+import kotlin.concurrent.withLock
 
 /** A pack the app has installed. */
 data class InstalledPack(
@@ -55,6 +57,11 @@ class PackLibrary(
 ) {
 
     private val packsDir: Path = root.resolve("packs")
+
+    /** Open lease counts, and the files whose deletion is waiting on them. */
+    private val leaseLock = ReentrantLock()
+    private val readers = mutableMapOf<Long, Int>()
+    private val pendingDeletion = mutableSetOf<Long>()
 
     init {
         Files.createDirectories(packsDir)
@@ -153,7 +160,7 @@ class PackLibrary(
         //    a failure — a reader still holding it on a locking platform — must not
         //    unwind a swap the database already records, which would leave neither pack
         //    installed. `reconcile` sweeps files with no row.
-        if (existing != null) runCatching { Files.deleteIfExists(fileOf(existing.installId)) }
+        if (existing != null) deleteWhenUnread(existing.installId)
 
         return InstallResult.Installed(requireNotNull(byId(installId)))
     }
@@ -175,10 +182,17 @@ class PackLibrary(
         }
 
         val known = db.query("SELECT install_id FROM installed_packs") { it.long(0) }.toSet()
+        val held = leaseLock.withLock { readers.keys.toSet() }
         Files.list(packsDir).use { entries ->
             entries.filter { it.fileName.toString().endsWith(".rpgpack") }
-                .filter { it.fileName.toString().removeSuffix(".rpgpack").toLongOrNull() !in known }
-                .forEach { Files.deleteIfExists(it) }
+                .forEach { path ->
+                    val id = path.fileName.toString().removeSuffix(".rpgpack").toLongOrNull()
+                    // Reconcile is specified to run before any pack is opened, so `held`
+                    // is normally empty. Honouring it anyway costs nothing and keeps the
+                    // one rule -- a file with a reader is not unlinked -- true from every
+                    // direction rather than only from the one the caller came in through.
+                    if (id !in known && id !in held) Files.deleteIfExists(path)
+                }
         }
     }
 
@@ -222,9 +236,55 @@ class PackLibrary(
     }
 
     /** Uninstalls a pack. Documents are never touched — only their validation stops. */
+    /**
+     * Forgets the installation, and deletes its file once nothing is reading it.
+     *
+     * Unlinking a SQLite file out from under an open connection is not a crash on every
+     * platform, which is worse than if it were: on the platforms where it succeeds, the
+     * in-flight query keeps reading a file that no longer exists in the directory and
+     * returns an answer citing a book the user just removed. So the row goes now — the
+     * pack is uninstalled the moment the user says so — and the bytes go when the last
+     * reader closes, or at the next [reconcile] if the process dies first.
+     */
     fun uninstall(installId: Long) {
         db.execute("DELETE FROM installed_packs WHERE install_id = ?", installId)
-        Files.deleteIfExists(fileOf(installId))
+        deleteWhenUnread(installId)
+    }
+
+    /**
+     * Borrows the pack's file for the life of a query.
+     *
+     * A query captures the active set once, at its start, and completes against that
+     * snapshot. The lease is what makes the file half of that snapshot true as well.
+     */
+    fun borrow(installId: Long): PackLease? = leaseLock.withLock {
+        val file = fileOf(installId)
+        if (!Files.isRegularFile(file)) return@withLock null
+        readers[installId] = (readers[installId] ?: 0) + 1
+        PackLease(this, installId, file)
+    }
+
+    internal fun release(installId: Long) {
+        val orphaned = leaseLock.withLock {
+            val remaining = (readers[installId] ?: 0) - 1
+            if (remaining > 0) {
+                readers[installId] = remaining
+                return@withLock false
+            }
+            readers.remove(installId)
+            pendingDeletion.remove(installId)
+        }
+        if (orphaned) runCatching { Files.deleteIfExists(fileOf(installId)) }
+    }
+
+    /** Deletes now if unread, otherwise marks it for the last reader to clean up. */
+    private fun deleteWhenUnread(installId: Long) {
+        val held = leaseLock.withLock {
+            val held = (readers[installId] ?: 0) > 0
+            if (held) pendingDeletion += installId
+            held
+        }
+        if (!held) runCatching { Files.deleteIfExists(fileOf(installId)) }
     }
 
     fun fileOf(installId: Long): Path = packsDir.resolve("$installId.rpgpack")
@@ -329,4 +389,18 @@ class PackLibrary(
         }
         return digest.digest().joinToString("") { "%02x".format(it) }
     }
+}
+
+/**
+ * A borrowed pack file, held for the life of a query.
+ *
+ * Closing it is what lets a deferred uninstall complete, so it belongs in a `use` block
+ * rather than being closed on a happy path — a query that throws must still release.
+ */
+class PackLease internal constructor(
+    private val library: PackLibrary,
+    val installId: Long,
+    val file: Path,
+) : AutoCloseable {
+    override fun close() = library.release(installId)
 }

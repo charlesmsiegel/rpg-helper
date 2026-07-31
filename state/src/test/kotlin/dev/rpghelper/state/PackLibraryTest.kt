@@ -167,6 +167,61 @@ class PackLibraryTest {
         assertTrue(Files.exists(library.fileOf(second.installId)), "the replacement survives")
     }
 
+    @Test
+    fun `uninstalling a pack a reader holds defers the delete`() {
+        // Unlinking a SQLite file out from under an open connection is not a crash on
+        // every platform, which is worse than if it were: where it succeeds, the in-flight
+        // query keeps reading and answers citing a book the user just removed.
+        val pack = installed(library.install(forge()))
+        val lease = library.borrow(pack.installId)!!
+
+        library.uninstall(pack.installId)
+        assertEquals(0, library.installed().size, "the row goes when the user says so")
+        assertTrue(Files.exists(lease.file), "the bytes stay while someone is reading them")
+
+        lease.close()
+        assertFalse(Files.exists(library.fileOf(pack.installId)), "and go when they stop")
+    }
+
+    @Test
+    fun `the last reader out does the deleting`() {
+        val pack = installed(library.install(forge()))
+        val first = library.borrow(pack.installId)!!
+        val second = library.borrow(pack.installId)!!
+
+        library.uninstall(pack.installId)
+        first.close()
+        assertTrue(Files.exists(library.fileOf(pack.installId)), "one reader remains")
+        second.close()
+        assertFalse(Files.exists(library.fileOf(pack.installId)))
+    }
+
+    @Test
+    fun `a reader that is never uninstalled keeps its file`() {
+        val pack = installed(library.install(forge()))
+        library.borrow(pack.installId)!!.close()
+        assertTrue(Files.exists(library.fileOf(pack.installId)), "closing is not uninstalling")
+    }
+
+    @Test
+    fun `borrowing a pack that is not there yields nothing rather than a broken lease`() {
+        assertNull(library.borrow(404))
+    }
+
+    @Test
+    fun `reconcile does not sweep a file a reader holds`() {
+        // Reconcile is specified to run before any pack is opened, so this should not
+        // arise -- but the rule is "a file with a reader is not unlinked", and a rule that
+        // only holds when approached from one direction is not a rule.
+        val pack = installed(library.install(forge()))
+        val lease = library.borrow(pack.installId)!!
+        library.uninstall(pack.installId)
+
+        library.reconcile()
+        assertTrue(Files.exists(lease.file))
+        lease.close()
+    }
+
     // ------------------------------------------------------------------ reconciliation
 
     @Test

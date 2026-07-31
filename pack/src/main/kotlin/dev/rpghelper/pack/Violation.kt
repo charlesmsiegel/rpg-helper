@@ -137,6 +137,17 @@ enum class ViolationCode {
      */
     DANGLING_SOURCE_REFERENCE,
 
+    /**
+     * Two `chunks` rows share a `chunk_id`.
+     *
+     * The PRIMARY KEY declaration is the builder's word, like everything else in a pack's
+     * DDL. A duplicate makes every runtime lookup and citation join free to return either
+     * row -- pairing retrieved text with the wrong source -- and it silently shrinks the
+     * validator's own view of the pack, so the checks that would have caught the rest of
+     * the damage never see the missing rows.
+     */
+    DUPLICATE_CHUNK_ID,
+
     /** Two `sources` rows share a `source_uid`, making every erratum targeting it ambiguous. */
     DUPLICATE_SOURCE_UID,
 

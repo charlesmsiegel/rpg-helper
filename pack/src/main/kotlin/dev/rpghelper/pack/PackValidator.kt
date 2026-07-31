@@ -1,6 +1,7 @@
 package dev.rpghelper.pack
 
 import dev.rpghelper.pack.ViolationCode.CONSTRAINTS_WITHOUT_RULESET
+import dev.rpghelper.pack.ViolationCode.DUPLICATE_CHUNK_ID
 import dev.rpghelper.pack.ViolationCode.EMBEDDER_DIM_INVALID
 import dev.rpghelper.pack.ViolationCode.EMBEDDER_DIM_MISMATCH
 import dev.rpghelper.pack.ViolationCode.FTS_INDEX_UNUSABLE
@@ -107,7 +108,19 @@ class PackValidator(private val supportedEmbedders: Set<EmbedderContract>) {
         checkEmbedderContract(db, meta, violations)
         checkRulesetBinding(db, meta, violations)
 
-        val chunks = loadChunks(db)
+        val table = loadChunks(db)
+        if (table.duplicateIds.isNotEmpty()) {
+            // Refused here rather than reported alongside everything else: the map below
+            // is what every remaining check reads, and a duplicate means that map is
+            // missing rows. A cascade of secondary failures against an incomplete view is
+            // worse than one clear refusal -- the same argument REQUIRED_TABLES makes.
+            violations += Violation(
+                DUPLICATE_CHUNK_ID,
+                "chunks rows share chunk_id ${table.duplicateIds.sorted()}",
+            )
+            return ValidationReport(violations)
+        }
+        val chunks = table.byId
         val text = readTextPass(db)
 
         checkLexicalIndex(db, text.canary, chunks.size.toLong(), violations)

@@ -44,13 +44,22 @@ object LexicalSearch {
         // `Db.forEachRow` takes no bind parameters -- a deliberate limit of that
         // interface, and the reason nothing else in this module builds SQL from input.
         val literal = expression.replace("'", "''")
+
+        // Supersession is applied **inside the query**, not to its results. Filtering
+        // afterwards would let withdrawn passages occupy the depth budget: a common term
+        // matching more than `depth` corrected chunks would push every surviving hit below
+        // the limit and out of the list entirely, producing a refusal on a query with
+        // perfectly good answers in the pack. The filter belongs before the truncation
+        // because it belongs before the scoring.
+        val withdrawn = superseded.asSet()
+            .filter { it.packUid == pack.packUid }
+            .map { it.chunkId }
+        val exclusion =
+            if (withdrawn.isEmpty()) "" else " AND rowid NOT IN (${withdrawn.joinToString(",")})"
+
         return pack.db.map(
             "SELECT rowid, bm25(chunks_fts) FROM chunks_fts " +
-                "WHERE chunks_fts MATCH '$literal' ORDER BY rank LIMIT $depth",
+                "WHERE chunks_fts MATCH '$literal'$exclusion ORDER BY rank LIMIT $depth",
         ) { LexicalHit(ChunkRef(pack.packUid, it.long(0)), -it.double(1)) }
-            // Supersession is a filter applied *before* scoring rather than a ranking
-            // preference: a corrected rule and its original almost never tie, so the
-            // superseded text can win outright while priority is never consulted.
-            .filter { it.ref !in superseded }
     }
 }

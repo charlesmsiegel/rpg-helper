@@ -62,6 +62,14 @@ object QueryNormalizer {
      */
     fun needsRewrite(query: String, conversationTurns: Int): Boolean {
         if (conversationTurns <= 0) return false
+
+        // Read before normalization, which folds the ellipsis away. A leading `…` or `...`
+        // is the most explicit statement a user can make that the subject is elsewhere,
+        // and normalizing first turns "…for wizards?" into "for wizards?" — a query that
+        // matches no opener and goes to retrieval having lost the thing it was about.
+        val leading = query.trimStart()
+        if (leading.startsWith("…") || leading.startsWith("...")) return true
+
         val normalized = normalize(query)
         if (normalized.isEmpty()) return false
         if (ELLIPTICAL_PREFIXES.any { normalized.startsWith(it) }) return true

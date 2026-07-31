@@ -274,8 +274,8 @@ private fun checkCoverage(
     sorted: List<Triple<Long, Long, Long>>,
     out: MutableList<Violation>,
 ) {
-    val low = expression.min.toLong()
-    val high = expression.max.toLong()
+    val low = expression.min
+    val high = expression.max
 
     val outside = sorted.filter { it.first < low || it.second > high }
     if (outside.isNotEmpty()) {

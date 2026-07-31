@@ -481,9 +481,16 @@ Grammar, and nothing else parses:
 expr     := form modifier?
 form     := NdS | dS | 'd%'
 modifier := ('+' | '-') integer
-N, S     := positive integers
+N, S     := positive integers, N <= 100 and S <= 1000
 ```
 
+- **The operands are bounded.** `N <= 100`, `S <= 1000`. Unbounded "positive integers"
+  is not implementable: `2d2147483647` is grammatical and overflows a 32-bit outcome range
+  to a *negative* maximum, at which point a coverage check accepts a table with no rows —
+  a rollable table where every result has no outcome, reached through arithmetic rather
+  than through a missing row. The distribution is a convolution `N` times over `S` faces,
+  so `100d1000` is already the largest thing worth computing on a phone, and a table
+  needing more is not a table anyone printed.
 - **The grammar is case-sensitive and admits no whitespace.** `2D6` and `d6 + 1` do not
   parse. Both were already implied by the production rules and neither was stated, which
   is exactly the sort of gap that produces two implementations disagreeing politely.

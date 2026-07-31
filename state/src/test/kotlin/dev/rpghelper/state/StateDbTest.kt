@@ -172,6 +172,52 @@ class StateDbTest {
     }
 
     @Test
+    fun `a negative version is refused rather than indexed into the migration list`() {
+        // A damaged or externally restored file can report one, and an upper-bound-only
+        // check would start the loop at target 0 and index MIGRATIONS[-1] -- aborting
+        // every startup from then on, with no way out that keeps the user's characters.
+        val path = root.resolve("negative.db")
+        open("negative.db").use { }
+        java.sql.DriverManager.getConnection("jdbc:sqlite:$path").use { c ->
+            c.createStatement().use { it.execute("PRAGMA user_version = -1") }
+        }
+        val failure = assertFailsWith<IllegalArgumentException> { open("negative.db") }
+        assertTrue(failure.message!!.contains("-1"), "the refusal names what it saw")
+    }
+
+    @Test
+    fun `concurrent writers do not land in each other's transactions`() {
+        // autoCommit and the open transaction are connection-wide state, not per-caller
+        // state. Unserialized, one thread's edit joins another's transaction and is lost
+        // when that one rolls back -- and the two restore autoCommit underneath each other.
+        open("concurrent.db").use { db ->
+            val documents = DocumentStore(db)
+            val threads = (1..8).map { worker ->
+                Thread {
+                    repeat(10) { index ->
+                        runCatching {
+                            db.transaction { documents.create("doc-$worker-$index") }
+                        }
+                        runCatching {
+                            // A transaction that rolls back must take nothing else with it.
+                            db.transaction {
+                                documents.create("rolled-$worker-$index")
+                                error("deliberate rollback")
+                            }
+                        }
+                    }
+                }
+            }
+            threads.forEach { it.start() }
+            threads.forEach { it.join() }
+
+            val names = db.query("SELECT title FROM documents") { it.string(0) }
+            assertEquals(80, names.size, "every committed document survived")
+            assertTrue(names.none { it.startsWith("rolled-") }, "and no rolled-back one did")
+        }
+    }
+
+    @Test
     fun `a rejected pack install does not leave the database in a transaction`() {
         open().use { db ->
             assertTrue(db.query("PRAGMA foreign_keys") { it.int(0) }.single() == 1)

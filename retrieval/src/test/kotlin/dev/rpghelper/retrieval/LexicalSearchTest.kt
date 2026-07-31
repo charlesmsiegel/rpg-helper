@@ -96,6 +96,24 @@ class LexicalSearchTest {
     }
 
     @Test
+    fun `superseded chunks do not consume the depth budget`() {
+        // Filtering after the LIMIT lets withdrawn passages crowd out surviving ones: a
+        // common term matching more than `depth` corrected chunks pushes every good hit
+        // below the limit, producing a refusal on a query the pack can answer.
+        val pack = pack()
+        val topTwo = search(pack, "restrained", "the", "a", depth = 2).map { it.ref.chunkId }
+        assertEquals(2, topTwo.size)
+
+        val withoutTop = search(
+            pack, "restrained", "the", "a",
+            superseded = SupersededSet(topTwo.map { ChunkRef("core", it) }.toSet()),
+            depth = 2,
+        )
+        assertEquals(2, withoutTop.size, "the budget refills from below rather than shrinking")
+        assertTrue(withoutTop.none { it.ref.chunkId in topTwo })
+    }
+
+    @Test
     fun `depth bounds what one pack contributes`() {
         val hits = search(pack(), "grapple", "underdark", "ogre", "cavern", depth = 2)
         assertEquals(2, hits.size)

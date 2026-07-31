@@ -96,7 +96,17 @@ object Fusion {
                     .thenBy { it.window?.first ?: -1 },
             ).first()
         }
-        .sortedWith(compareByDescending<VectorHit> { it.score }.thenBy { it.ref.chunkId })
+        // Pack before chunk id, because a contract group spans packs and two packs
+        // commonly both hold a chunk 1. Ordering by id alone leaves equal-scoring hits
+        // from different books comparing as equal, so they inherit whatever order the
+        // vector query returned — and RRF then awards them *different* rank
+        // contributions, which means the pack-priority tie-break downstream never sees a
+        // tie and repeated runs can rank different books first.
+        .sortedWith(
+            compareByDescending<VectorHit> { it.score }
+                .thenBy { it.ref.packUid }
+                .thenBy { it.ref.chunkId },
+        )
 
     /**
      * Fuses the gated lists.

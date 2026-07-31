@@ -44,7 +44,24 @@ internal class TextPass(
  */
 internal class Canary(val chunkId: Long, val term: String)
 
-internal fun loadChunks(db: Db): Map<Long, ChunkRow> =
+/**
+ * Every chunk, keyed by id, plus any id that appeared more than once.
+ *
+ * The duplicates travel with the map because a map cannot represent them: `associateBy`
+ * keeps whichever row it saw last, so every downstream shape, nesting, stable-key, and
+ * reference check would be validating a view with rows silently missing from it.
+ */
+internal class ChunkTable(val byId: Map<Long, ChunkRow>, val duplicateIds: Set<Long>)
+
+internal fun loadChunks(db: Db): ChunkTable {
+    val rows = readChunkRows(db)
+    val seen = mutableSetOf<Long>()
+    val duplicates = mutableSetOf<Long>()
+    for (row in rows) if (!seen.add(row.id)) duplicates += row.id
+    return ChunkTable(rows.associateBy { it.id }, duplicates)
+}
+
+private fun readChunkRows(db: Db): List<ChunkRow> =
     db.map(
         """
         SELECT chunk_id, kind, origin, source_id, heading_path, page_label_start,
@@ -65,7 +82,7 @@ internal fun loadChunks(db: Db): Map<Long, ChunkRow> =
             stableKey = it.stringOrNull(9),
             parentId = it.longOrNull(10),
         )
-    }.associateBy { it.id }
+    }
 
 internal fun readTextPass(db: Db): TextPass {
     val lengths = HashMap<Long, Int>()

@@ -24,8 +24,12 @@ data class DiceExpression(
     val modifier: Int,
     val percentile: Boolean,
 ) {
-    val min: Int get() = count + modifier
-    val max: Int get() = count * sides + modifier
+    // Long, and bounded by MAX_COUNT/MAX_SIDES above. `2d2147483647` is grammatical
+    // under "positive integers" and overflows an Int to a *negative* maximum, which made
+    // the coverage check accept an empty row list -- a rollable table where every result
+    // has no outcome, arrived at through arithmetic rather than through a missing row.
+    val min: Long get() = count.toLong() + modifier
+    val max: Long get() = count.toLong() * sides + modifier
 
     /**
      * Exact probability of each outcome, by convolution.
@@ -72,6 +76,17 @@ data class DiceExpression(
          */
         private const val PERCENTILE_SIDES = 100
 
+        /**
+         * Ceilings on the operands, part of the pinned grammar.
+         *
+         * "Positive integers" unbounded is not implementable: the outcome range overflows,
+         * and `distribution()` convolves `count` times over `sides` faces, so `100d1000`
+         * is already the largest thing worth computing on a phone. A table needing more is
+         * not a table anyone printed.
+         */
+        const val MAX_COUNT = 100
+        const val MAX_SIDES = 1000
+
         /** Parses under the grammar, or null. Never throws, never guesses. */
         fun parse(text: String): DiceExpression? {
             if (text.isEmpty()) return null
@@ -105,6 +120,7 @@ data class DiceExpression(
                 return DiceExpression(1, PERCENTILE_SIDES, modifier, percentile = true)
             }
             val sides = positiveInt(rest) ?: return null
+            if (count > MAX_COUNT || sides > MAX_SIDES) return null
             return DiceExpression(count, sides, modifier, percentile = false)
         }
 

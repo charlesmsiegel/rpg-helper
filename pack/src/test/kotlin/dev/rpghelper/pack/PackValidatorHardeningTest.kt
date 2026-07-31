@@ -308,6 +308,30 @@ class PackValidatorHardeningTest {
     }
 
     @Test
+    fun `rejects two chunks sharing a chunk_id`() {
+        // A duplicate does not merely break lookups at runtime: it shrinks the validator's
+        // own view of the pack, so the checks that would have caught the rest of the
+        // damage never see the missing rows.
+        assertRejects(ViolationCode.DUPLICATE_CHUNK_ID) {
+            it.relax("chunks")
+            it.exec("INSERT INTO chunks SELECT * FROM chunks WHERE chunk_id = 3")
+        }
+    }
+
+    @Test
+    fun `refuses a dice expression whose range would overflow`() {
+        // `2d2147483647` is grammatical under unbounded "positive integers" and overflows
+        // a 32-bit maximum to a negative number, at which point coverage accepts a table
+        // with no rows at all.
+        assertRejects(ViolationCode.DICE_EXPR_UNPARSEABLE) {
+            it.exec("UPDATE tables SET dice_expr = '2d2147483647' WHERE table_id = 1")
+        }
+        assertRejects(ViolationCode.DICE_EXPR_UNPARSEABLE) {
+            it.exec("UPDATE tables SET dice_expr = '101d6' WHERE table_id = 1")
+        }
+    }
+
+    @Test
     fun `rejects an erratum that withdraws its own correction`() {
         // Supersession applies to every active pack carrying the targeted source,
         // including the pack the erratum lives in -- so a row naming its own target takes
