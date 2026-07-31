@@ -162,7 +162,9 @@ private fun VerbatimCard(
                     TextButton(onClick = { rolls.onRoll(ref, table) }) {
                         Text("Roll: ${table.label}")
                     }
-                    rolls.resultFor(ref, table.tableId)?.let { RolledOutcome(it, card.citation) }
+                    rolls.resultFor(ref, table.tableId)?.let {
+                        RolledOutcome(it, card.citationFor(ref))
+                    }
                 }
             }
         }

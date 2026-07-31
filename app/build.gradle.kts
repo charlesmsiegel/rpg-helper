@@ -38,6 +38,23 @@ android {
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
     }
+
+    testOptions {
+        unitTests {
+            // Robolectric needs the merged resources and the manifest to inflate anything.
+            isIncludeAndroidResources = true
+        }
+    }
+}
+
+// Unit tests run on **one** variant. `compose.ui.test.manifest` merges the activity the
+// Compose test rule launches into, and it is a `debugImplementation` by design — so the
+// release unit-test variant compiles the same tests against a manifest with no such
+// activity and every one of them fails on "unable to resolve activity". Running them twice
+// would not check anything twice; it would check the debug variant and then check whether
+// the release manifest happens to contain a test scaffold.
+androidComponents {
+    beforeVariants(selector().withBuildType("release")) { it.enableUnitTest = false }
 }
 
 configurations.all {
@@ -75,4 +92,14 @@ dependencies {
     implementation(libs.compose.ui.tooling.preview)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
+
+    // `:app` was the only module with no tests, and the only one where every defect this
+    // project found was a *rendering* defect: the feed behind a full-screen input, a roll
+    // control that could not be tapped, a quotation rule that stopped partway down at
+    // accessibility text sizes. Robolectric runs the framework on the JVM so those are
+    // reachable without a device.
+    testImplementation(kotlin("test"))
+    testImplementation(libs.robolectric)
+    testImplementation(libs.compose.ui.test.junit4)
+    debugImplementation(libs.compose.ui.test.manifest)
 }

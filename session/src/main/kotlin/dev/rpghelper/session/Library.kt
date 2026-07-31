@@ -232,13 +232,47 @@ class Library private constructor(
             val priority = mutableMapOf<String, Int>()
             val contracts = mutableMapOf<String, String>()
 
+            // **Everything after the leases are held is inside this.** Only the two
+            // anticipated validation branches used to clean up, so anything else that threw
+            // -- `readMeta` on a damaged pack, a capability query, the supersession scan --
+            // left every open database and every lease behind. The caller's `use` block has
+            // nothing to close when the constructor never returns, so questions leaked
+            // SQLite handles and an uninstall waited forever on reader counts that could
+            // never fall to zero. The set of things that can throw here is not a set anyone
+            // can enumerate, which is the argument for wrapping rather than for listing.
+            return try {
+                assemble(sources, digests, gate, staging, opened, fingerprint, priority, contracts)
+            } catch (failure: Throwable) {
+                opened.forEach { runCatching { it.db.close() } }
+                sources.forEach { runCatching { it.second?.close() } }
+                staging?.let { dir ->
+                    runCatching {
+                        Files.list(dir).use { e -> e.forEach { Files.deleteIfExists(it) } }
+                        Files.deleteIfExists(dir)
+                    }
+                }
+                throw failure
+            }
+        }
+
+        private fun assemble(
+            sources: List<Pair<Path, AutoCloseable?>>,
+            digests: Map<String, String>,
+            gate: Gate,
+            staging: Path?,
+            opened: MutableList<ActivePack>,
+            fingerprint: MutableList<CachedPack>,
+            priority: MutableMap<String, Int>,
+            contracts: MutableMap<String, String>,
+        ): Library {
+
             for ((index, source) in sources.withIndex()) {
                 val (path, _) = source
                 val db = Sqlite.openReadOnly(path)
+                // Closes only the database this loop just opened -- the wrapper above owns
+                // everything else, including the leases.
                 fun bail(message: String): Nothing {
                     db.close()
-                    opened.forEach { it.db.close() }
-                    sources.forEach { it.second?.close() }
                     error(message)
                 }
 

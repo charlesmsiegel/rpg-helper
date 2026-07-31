@@ -175,10 +175,49 @@ class PackBuilder(
                 Files.deleteIfExists(staging)
                 return BuildOutcome(path, notes.toList(), report)
             }
-            Files.move(staging, target, StandardCopyOption.REPLACE_EXISTING)
+            publish(staging, target)
             return BuildOutcome(path, notes.toList(), report)
         } catch (failure: Throwable) {
             Files.deleteIfExists(staging)
+            throw failure
+        }
+    }
+
+    /**
+     * Moves the staged pack over [target], **atomically where the filesystem allows it**.
+     *
+     * `REPLACE_EXISTING` alone is not atomic on every provider, and a failure partway
+     * through can leave the target removed or half-replaced — which contradicts the promise
+     * this whole staging dance exists to make: *a rebuild that fails leaves you exactly
+     * where you were.* Staging is a sibling of the target by construction, so `ATOMIC_MOVE`
+     * is available on ordinary filesystems.
+     *
+     * Where it is not, the old target is kept aside until the move succeeds and restored if
+     * it does not, because "usually atomic" is not a property anyone can rely on.
+     */
+    private fun publish(staging: Path, target: Path) {
+        try {
+            Files.move(
+                staging, target,
+                StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE,
+            )
+            return
+        } catch (_: java.nio.file.AtomicMoveNotSupportedException) {
+            // Fall through to keep-and-restore.
+        }
+
+        val kept = if (Files.exists(target)) {
+            target.resolveSibling("${'$'}{target.fileName}.superseded").also {
+                Files.move(target, it, StandardCopyOption.REPLACE_EXISTING)
+            }
+        } else {
+            null
+        }
+        try {
+            Files.move(staging, target, StandardCopyOption.REPLACE_EXISTING)
+            kept?.let { Files.deleteIfExists(it) }
+        } catch (failure: Throwable) {
+            kept?.let { Files.move(it, target, StandardCopyOption.REPLACE_EXISTING) }
             throw failure
         }
     }

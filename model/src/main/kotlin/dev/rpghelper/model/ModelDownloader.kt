@@ -94,7 +94,11 @@ class ModelDownloader(
             // A file that cannot be read is a file that cannot be trusted, and it fails
             // the same way a mismatch does. Letting the read throw would crash the model
             // lifecycle mid-check instead of moving it to an unavailable state.
-            if (Files.isRegularFile(target) && digestOrNull(target) == file.sha256) {
+            // **Digest and declared size.** A freshly downloaded partial is checked against
+            // both; a file already on disk was checked against only the digest, so a
+            // manifest whose `bytes` is wrong reported Complete for a file a clean install
+            // would have refused -- and the registry recorded the wrong total.
+            if (matches(target, file)) {
                 // Already here and already trustworthy. Re-fetching it would be the app
                 // spending a user's data to reach a state it is in.
                 done[file.name] = target
@@ -161,10 +165,20 @@ class ModelDownloader(
     }
 
     /** Re-verifies what is on disk, so a bit-rotted file is caught before it is loaded. */
-    fun verify(manifest: ModelManifest): Boolean = manifest.files.all { file ->
-        val path = fileOf(file.name)
-        Files.isRegularFile(path) && digestOrNull(path) == file.sha256
-    }
+    fun verify(manifest: ModelManifest): Boolean = manifest.files.all { matches(fileOf(it.name), it) }
+
+    /**
+     * Whether [path] is the file [file] describes — **both** its digest and its length.
+     *
+     * The digest alone is what a hash comparison means; the length is what the manifest
+     * *claims*, and the two disagreeing is a manifest that would fail a clean installation
+     * while passing a reuse check. One predicate so the reuse path and the verification
+     * pass cannot drift into checking different things.
+     */
+    private fun matches(path: Path, file: ModelFile): Boolean =
+        Files.isRegularFile(path) &&
+            runCatching { Files.size(path) }.getOrNull() == file.bytes &&
+            digestOrNull(path) == file.sha256
 
     private fun discard(path: Path) {
         runCatching { Files.deleteIfExists(path) }

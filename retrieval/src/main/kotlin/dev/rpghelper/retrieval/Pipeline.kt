@@ -182,7 +182,8 @@ object Pipeline {
         // for concepts the lexical query deliberately discarded, and the embedding input
         // grew with the alias table rather than with the question. A pack may define many
         // canonicals for one alias, so that is unbounded in the direction that matters.
-        val vectors = embed?.invoke(groups.flatMap { it.terms }.joinToString(" "), active.distinctContracts)
+        val searched = groups.flatMap { it.terms }
+        val vectors = embed?.invoke(searched.joinToString(" "), active.distinctContracts)
             ?: queryVectors
         val gatedOut = mutableListOf<String>()
         trimmed.forEach { gatedOut += "alias expansions dropped for '$it': term budget" }
@@ -263,9 +264,15 @@ object Pipeline {
                 candidate.ref, windows[candidate.ref], roles[candidate.ref],
             )
         }
+        // The **budgeted** terms here too. Nesting asks whether a parent matched
+        // independently of its child, and answering that with expansions the budget
+        // discarded lets a canonical nobody searched for keep a parent in the generation
+        // context -- retained as an independent match on evidence neither lexical nor dense
+        // retrieval ever used. Same mistake as embedding the unbudgeted rewrite, in the
+        // same function, missed the first time.
         val survivors = Nesting.deduplicate(
             nesting,
-            rewritten.terms,
+            searched,
             verbatimEligible = { it.kind in PackSchema.VERBATIM_ELIGIBLE_KINDS && it.origin == "source" },
             nestedChildren = { ref -> childrenOf(active, ref) },
         ).associateBy { it.candidate.ref }

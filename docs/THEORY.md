@@ -193,16 +193,28 @@ beneath a real citation — a great deal, and not the same as knowing where the 
 from. Saying so matters because *validated* reads as *trusted* to everyone who has not read
 the validator.
 
-### 4.5 One invariant, still implemented twice — the leftover
+### 4.5 One invariant, still implemented twice — *fixed*
 
-`:app` is the only module with **no tests at all**, because it is the only one needing an
-Android test runner. Its Compose tree is now the last place a rendering decision lives
-unchecked — the labels and marker placement come from `layout()`, but nothing verifies that
-the gutter is drawn, that a `Quotation` block never reaches `ProseCard`, or that the roll
-control is offered only where a table exists. Every UI bug this session was in that file.
+`:app` was the only module with **no tests at all**, and it was the module where every
+defect this project found was a *rendering* defect — each arriving as a review comment
+rather than a test failure: the feed behind a full-screen input, a roll control that could
+not be tapped, no way to reach **New topic**, a quotation rule that stopped partway down at
+accessibility text sizes.
 
-**Fix: a Robolectric or instrumented test asserting the block-to-composable mapping**, which
-is a small surface now that the decisions live elsewhere.
+`AnswerCardTest` runs Compose under Robolectric and asserts against the **semantics tree** —
+the same tree TalkBack reads, which is what makes *"does this card claim to be a
+quotation?"* a question a test can ask in the channel where the claim is made. Twelve tests:
+a quotation reaches the screen byte for byte and announces itself as one; builder-written
+prose never describes itself as quoted; a roll control appears once per table, only where a
+table exists, and rolls the one it names; a rolled outcome is quoted under the rolled
+chunk's own citation; the refusal card names what was searched and its offer can be taken;
+a cache hit is not labelled a previous session.
+
+Unit tests run on the debug variant only. `compose.ui.test.manifest` is a
+`debugImplementation` by design, so the release unit-test variant compiled the same tests
+against a manifest with no activity to launch — running them twice would have checked the
+debug variant and then checked whether the release manifest happens to contain a test
+scaffold.
 
 ### 4.6 The constraints engine has no production caller — *open*
 

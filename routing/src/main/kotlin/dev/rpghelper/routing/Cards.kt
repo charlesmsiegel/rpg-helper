@@ -49,8 +49,21 @@ sealed interface Card {
          * the child — so the card contained a table and offered no way to roll on it.
          */
         val rollableRefs: List<ChunkRef> = emptyList(),
+        /**
+         * Each rollable chunk's **own** citation, when it differs from the card's.
+         *
+         * A nested table deduplicated into its parent quote keeps its own heading path and
+         * page labels, and the parent's range is typically wider. Rendering the rolled
+         * outcome under the card's citation therefore put the book's own words beneath a
+         * locator that does not point at them — the one thing a citation exists to get
+         * right. Empty for a card whose only rollable chunk is itself.
+         */
+        val rollableCitations: Map<ChunkRef, Citation> = emptyMap(),
     ) : Card {
         val rollable: Boolean get() = rollableRefs.isNotEmpty()
+
+        /** The citation to render a roll on [ref] under: its own if it has one. */
+        fun citationFor(ref: ChunkRef): Citation = rollableCitations[ref] ?: citation
 
         /** Copy takes the citation with it: a quote in a group chat without its source is
          *  precisely the artifact this app exists to prevent. */

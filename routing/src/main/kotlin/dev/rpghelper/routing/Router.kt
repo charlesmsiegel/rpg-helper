@@ -155,6 +155,14 @@ class Router(
             // parent's citation while the capability stays keyed to the child; without
             // this the card contained a table and offered no way to roll on it.
             rollableRefs = (listOf(candidate.ref) + candidate.absorbed).filter { it in rollable },
+            // An absorbed child's outcome is quoted under *its* locator, not the parent's.
+            // Unresolvable citations are simply absent, and `citationFor` falls back to the
+            // card's -- a missing locator is worse than a broad one, and this card already
+            // exists because its own citation resolved.
+            rollableCitations = candidate.absorbed
+                .filter { it in rollable }
+                .mapNotNull { ref -> citations.resolve(ref)?.let { ref to it } }
+                .toMap(),
         )
     }
 
