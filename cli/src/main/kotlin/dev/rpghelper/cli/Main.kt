@@ -219,12 +219,20 @@ private fun ask(arguments: List<String>): Int {
                     cache = AnswerCache(store.db),
                     conversation = Conversation(store.db),
                 )
+                // **The downloaded model, if this machine can run it.** The runtime was
+                // registered at startup and this is the call that was missing: registering
+                // a runtime and then passing `generator = null` is the wire-it-but-never-
+                // call-it shape this project keeps finding, one seam further along. Null
+                // stays the honest value when no weights are here -- routing reads it as
+                // "not downloaded" and setting questions answer as citations.
+                val ready = ModelLibrary(Path.of(head[1]).resolve("models")).readyGenerator()
                 val asked = service.ask(
                     question = question,
                     library = library,
-                    // No weights are bundled, so route 3 never fires and the cache is
-                    // never consulted. That is the app's honest state before a download.
-                    generator = null,
+                    generator = ready?.second,
+                    // Weights and quantization both, for the cache key: the same weights
+                    // at four bits answer differently from the same weights at eight.
+                    modelId = ready?.first?.id ?: "none",
                     render = { renderAnswer(it, diagnostics = false) },
                     hasInactivePacks = !includeInactive &&
                         store.library.installed().any { !it.active },
@@ -688,8 +696,29 @@ private fun roll(arguments: List<String>): Int {
  * guessing from the shape of the answer.
  */
 private fun models(arguments: List<String>): Int {
-    require(arguments.size == 1) { "usage: models <dir>" }
+    require(arguments.isNotEmpty()) { "usage: models <dir> [add <manifest.json> [weights...]]" }
     val library = ModelLibrary(Path.of(arguments[0]).resolve("models"))
+
+    // `models <dir> add <manifest.json> [weights...]` -- the CLI's half of the app's "Add a
+    // manifest" button, which the tool did not have: a manifest could be *written* with
+    // make-manifest and then reached the library by nothing. Weights already on disk are
+    // copied into the model's own directory, so files fetched by other means (a browser, a
+    // local export) land where the runtime looks.
+    if (arguments.getOrNull(1) == "add") {
+        require(arguments.size >= 3) { "usage: models <dir> add <manifest.json> [weights...]" }
+        val manifest = library.add(Files.readString(Path.of(arguments[2])))
+        for (source in arguments.drop(3).map { Path.of(it) }) {
+            val name = source.fileName.toString()
+            require(manifest.files.any { it.name == name }) {
+                "'$name' is not a file this manifest names: ${manifest.files.map { it.name }}"
+            }
+            Files.copy(source, library.fileOf(manifest, name),
+                java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+        }
+        println("added ${manifest.displayName} (${manifest.id})")
+        // Fall through to the listing, which is where "did the weights verify and load"
+        // gets answered -- the question the user ran this command to settle.
+    }
     val shelved = library.list()
     if (shelved.isEmpty()) {
         println("no manifests. Add one with make-manifest, then fetch-model.")
