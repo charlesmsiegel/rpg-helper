@@ -41,7 +41,7 @@ class DiceConformanceTest {
     fun `every distribution matches exactly`() {
         forEachVector { expr, _, _, pmf ->
             if (pmf.isEmpty()) return@forEachVector
-            val computed = DiceExpression.parse(expr)!!.distribution()
+            val computed = DiceExpression.parse(expr)!!.distribution()!!
             assertEquals(pmf.size, computed.size, "'$expr' outcome count")
             for ((outcome, probability) in pmf) {
                 assertEquals(
@@ -79,9 +79,9 @@ class DiceConformanceTest {
         val triangular = DiceExpression.parse("2d6")!!
         val flat = DiceExpression.parse("d11+1")!!
         assertEquals(triangular.min to triangular.max, flat.min to flat.max)
-        assertNotEquals(triangular.distribution(), flat.distribution())
-        assertEquals(Rational(1, 6), triangular.distribution()[7], "2d6 peaks at 7")
-        assertEquals(Rational(1, 11), flat.distribution()[7], "d11+1 is flat")
+        assertNotEquals(triangular.distribution()!!, flat.distribution()!!)
+        assertEquals(Rational(1, 6), triangular.distribution()!![7], "2d6 peaks at 7")
+        assertEquals(Rational(1, 11), flat.distribution()!![7], "d11+1 is flat")
     }
 
     @Test
@@ -144,5 +144,15 @@ class DiceConformanceTest {
             directory = directory.parent
         }
         error("could not find conformance/dice-vectors.json")
+    }
+
+    @Test
+    fun `the exact PMF refuses an expression it cannot compute, rather than hanging`() {
+        // `100d1000` parses -- the grammar admits it and a table could legally use it --
+        // and its distribution is billions of exact-rational operations over growing
+        // BigIntegers. A null says where the API's domain ends; a hang says nothing.
+        val huge = DiceExpression.parse("100d1000")!!
+        assertNull(huge.distribution(), "an expression this size has no computable PMF here")
+        assertEquals(100L to 100_000L, huge.min to huge.max, "but its range is still exact")
     }
 }

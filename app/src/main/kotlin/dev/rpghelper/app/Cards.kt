@@ -5,6 +5,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -28,6 +30,7 @@ import dev.rpghelper.capabilities.RollableTable
 import dev.rpghelper.pack.ChunkRef
 import dev.rpghelper.routing.Card
 import dev.rpghelper.routing.Chip
+import dev.rpghelper.routing.markChips
 import dev.rpghelper.routing.Citation
 import dev.rpghelper.routing.render
 
@@ -109,12 +112,19 @@ private fun VerbatimCard(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.height(6.dp))
-            Row {
-                // The rule marker: a solid bar down the left of every quoted line. It is
-                // the one signal that survives a screenshot, a low-vision zoom, and a
-                // colour-blind palette, which is why the distinction does not rest on hue.
+            // **The rule is as tall as the text, measured rather than guessed.** It was a
+            // fixed 20dp per newline, which is right at font scale 1.0 and wrong at every
+            // other -- and the scales it was wrong at are the accessibility text sizes
+            // `06-ui-spec.md` requires these cards to survive, where the bar stopped
+            // partway down the quotation and the provenance gutter simply ended. Sizing the
+            // Row to its own minimum intrinsic height and filling it is the same signal
+            // whatever the reader's text size is.
+            Row(Modifier.height(IntrinsicSize.Min)) {
+                // A solid bar down the left of every quoted line: the one signal that
+                // survives a screenshot, a low-vision zoom, and a colour-blind palette,
+                // which is why the distinction does not rest on hue.
                 Surface(
-                    modifier = Modifier.width(3.dp).height(quoteHeight(card.body)),
+                    modifier = Modifier.width(3.dp).fillMaxHeight(),
                     color = MaterialTheme.colorScheme.primary,
                     content = {},
                 )
@@ -148,9 +158,6 @@ private fun VerbatimCard(
         }
     }
 }
-
-/** One line per quoted line, so the rule beside the quote is as tall as the quote. */
-private fun quoteHeight(body: String) = (20 * (body.count { it == '\n' } + 1)).dp
 
 @Composable
 private fun ProseCard(
@@ -196,31 +203,6 @@ private fun ProseCard(
             }
         }
     }
-}
-
-/**
- * [body] with a numbered marker after each chipped run.
- *
- * Offsets are UTF-8 byte spans, so the string is walked as bytes and decoded back —
- * indexing a Kotlin `String` by them would place markers wrongly the moment a card
- * contains an em-dash, which game text does constantly.
- */
-internal fun markChips(body: String, chips: List<Chip>): String {
-    if (chips.isEmpty()) return body
-    val bytes = body.toByteArray(Charsets.UTF_8)
-    val out = StringBuilder()
-    var cursor = 0
-    for ((index, chip) in chips.sortedBy { it.start }.withIndex()) {
-        val start = chip.start.coerceIn(cursor, bytes.size)
-        val end = chip.end.coerceIn(start, bytes.size)
-        out.append(String(bytes, cursor, end - cursor, Charsets.UTF_8))
-        out.append(" [${index + 1}]")
-        cursor = end
-    }
-    if (cursor < bytes.size) {
-        out.append(String(bytes, cursor, bytes.size - cursor, Charsets.UTF_8))
-    }
-    return out.toString()
 }
 
 @Composable
@@ -323,10 +305,11 @@ private fun RolledOutcome(result: RollResult, citation: Citation, modifier: Modi
             color = MaterialTheme.colorScheme.primary,
         )
         Spacer(Modifier.height(4.dp))
-        Row {
-            // The same rule marker every other quotation gets, at the same width.
+        Row(Modifier.height(IntrinsicSize.Min)) {
+            // The same rule marker every other quotation gets, at the same width, and
+            // measured the same way.
             Surface(
-                modifier = Modifier.width(3.dp).height(quoteHeight(result.row.text)),
+                modifier = Modifier.width(3.dp).fillMaxHeight(),
                 color = MaterialTheme.colorScheme.primary,
                 content = {},
             )

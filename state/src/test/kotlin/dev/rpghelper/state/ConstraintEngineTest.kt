@@ -376,6 +376,26 @@ class ConstraintEngineTest {
     }
 
     @Test
+    fun `a relationship with nothing on the other side is dropped`() {
+        // Same shape as the bound-less range, and it slipped through the same way: an empty
+        // `requires` or `excludes` constructs a rule whose engine loop cannot emit a
+        // violation, so the pack is reported as loaded and the document displays as
+        // validated against a constraint incapable of failing.
+        val empties = listOf(
+            "requires" to """{"subject":"virtue.keen-sight","requires":[]}""",
+            "excludes" to """{"subject":"virtue.keen-sight","excludes":[]}""",
+        )
+        for ((form, json) in empties) {
+            val result = ConstraintParser.parse(1, ruleset, form, json, 1)
+            assertTrue(result.isFailure, "$form accepted an empty relationship")
+            assertTrue(
+                result.exceptionOrNull()!!.message!!.contains("at least one entry"),
+                result.exceptionOrNull()!!.message!!,
+            )
+        }
+    }
+
+    @Test
     fun `malformed JSON is dropped rather than crashing the load`() {
         assertTrue(ConstraintParser.parse(1, ruleset, "range", "{not json", 1).isFailure)
         assertTrue(ConstraintParser.parse(1, ruleset, "range", """{"min":1}""", 1).isFailure)

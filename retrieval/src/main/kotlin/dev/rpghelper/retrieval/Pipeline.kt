@@ -131,7 +131,16 @@ object Pipeline {
          */
         embed: ((String, Set<String>) -> Map<String, FloatArray>)? = null,
     ): Retrieved {
-        val normalized = QueryNormalizer.normalize(rawQuery)
+        // **Bounded before anything expensive touches it**, and the same bounded string
+        // drives both halves. `MAX_TERMS * MAX_PHRASE` is the most tokens that could still
+        // compress into a full term budget -- a multi-word alias collapses up to
+        // `MAX_PHRASE` tokens into one group -- so nothing that could have survived the
+        // budget is cut, and a pasted page stops being tokenized, expanded five ways per
+        // token, and pasted into one SQL `IN` list before any bound applies.
+        val normalized = QueryNormalizer.bound(
+            QueryNormalizer.normalize(rawQuery),
+            LexicalQuery.MAX_TERMS * AliasRewriter.MAX_PHRASE,
+        )
         // Only the aliases this query could match. See `AliasRewriter.candidatePhrases`.
         val rewritten = AliasRewriter(
             loadAliases(active, AliasRewriter.candidatePhrases(normalized)),

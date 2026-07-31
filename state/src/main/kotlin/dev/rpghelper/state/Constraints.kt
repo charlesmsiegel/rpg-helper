@@ -256,7 +256,7 @@ object ConstraintParser {
                         number(requirement, "min"),
                     )
                 },
-            )
+            ).also { require(it.requirements.isNotEmpty()) { EMPTY_RELATIONSHIP } }
 
             "excludes" -> Constraint.Excludes(
                 chunkId, rulesetId, selector(obj, "subject"),
@@ -264,7 +264,10 @@ object ConstraintParser {
                     Selector(stringOf("excludes", it.jsonPrimitive))
                 },
                 constraintId, packPriority,
-            ).also(::requireDistinctExclusions)
+            ).also {
+                require(it.excluded.isNotEmpty()) { EMPTY_RELATIONSHIP }
+                requireDistinctExclusions(it)
+            }
 
             else -> error("unknown constraint form '$form'")
         }
@@ -319,6 +322,18 @@ object ConstraintParser {
             }
         }
     }
+
+    /**
+     * A relationship with nothing on the other side of it.
+     *
+     * `"requires": []` and `"excludes": []` both construct a rule whose engine loop cannot
+     * emit a violation, so the pack was reported as *loaded* and the document was presented
+     * as validated against a rule that does nothing — the silent-no-op shape the whole
+     * dropped-constraint report exists to make visible.
+     */
+    private const val EMPTY_RELATIONSHIP =
+        "a requires/excludes constraint needs at least one entry; an empty one can never " +
+            "produce a violation and would be reported as loaded"
 
     /** Every key each form understands, and nothing else is tolerated. */
     private val ARGUMENT_KEYS = mapOf(

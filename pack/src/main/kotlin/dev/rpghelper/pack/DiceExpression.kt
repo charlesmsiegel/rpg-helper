@@ -41,7 +41,16 @@ data class DiceExpression(
      * distinguishable by equality rather than by a confidence interval: they share the
      * range 2–12 and differ in every interior probability.
      */
-    fun distribution(): Map<Long, Rational> {
+    fun distribution(): Map<Long, Rational>? {
+        // **Refused above what it can actually compute.** The grammar admits `100d1000`,
+        // whose distribution is ~100,000 outcomes convolved a hundred times over a thousand
+        // faces -- on the order of five billion exact-rational operations over growing
+        // BigIntegers, which is not slow, it is a hang. Lowering the grammar instead would
+        // be the wrong repair: `MAX_COUNT` and `MAX_SIDES` are pinned, conformance vectors
+        // and real tables depend on them, and `min`/`max` and coverage -- the parts the app
+        // actually runs -- are cheap at any legal size. So the *exact PMF* says where its
+        // domain ends, rather than the parser pretending the grammar is smaller than it is.
+        if (count.toLong() * count * sides * sides > MAX_DISTRIBUTION_WORK) return null
         // Long throughout, because `min`, `max` and every table row bound already are. The
         // grammar admits a modifier up to `Int.MAX_VALUE`, so `d6+2147483647` summed in Int
         // produced wrapped negative keys -- an exact-PMF API disagreeing with the roller and
@@ -90,6 +99,15 @@ data class DiceExpression(
          */
         const val MAX_COUNT = 100
         const val MAX_SIDES = 1000
+
+        /**
+         * Roughly how many rational operations [distribution] will attempt before refusing.
+         *
+         * Ten million is a fraction of a second and covers every expression a book prints;
+         * the expressions beyond it are legal, rare, and belong to a function nothing on
+         * the device calls. [min], [max] and coverage stay exact at every legal size.
+         */
+        const val MAX_DISTRIBUTION_WORK = 10_000_000L
 
         /** Parses under the grammar, or null. Never throws, never guesses. */
         fun parse(text: String): DiceExpression? {

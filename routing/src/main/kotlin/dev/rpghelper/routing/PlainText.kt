@@ -21,11 +21,14 @@ fun Card.asPlainText(): String = when (this) {
     is Card.Verbatim -> quoted(body) + "\n  — " + render(citation) +
         if (rollable) "\n  [roll available]" else ""
 
+    // The markers go **in the prose**, not only under it. A stored turn is all a restored
+    // feed has, so a footer of `[1] Source` above a body with no `[1]` in it loses which
+    // claim that source supports -- the one thing a chip is.
     is Card.Derived -> "Summary — written by this pack's builder, not quoted:\n" +
-        indented(body) + footerLines(footer, chips)
+        indented(markChips(body, chips)) + footerLines(footer, chips)
 
     is Card.Generated -> "Generated on this device from setting text:\n" +
-        indented(body) + footerLines(footer, chips)
+        indented(markChips(body, chips)) + footerLines(footer, chips)
 
     is Card.ModelUnavailable -> statement +
         if (wouldHaveUsed.isEmpty()) "" else {
@@ -43,6 +46,38 @@ private fun quoted(body: String) = body.lineSequence().joinToString("\n") { "  \
 private fun indented(body: String) = body.lineSequence().joinToString("\n") { "  $it" }
 
 private fun footerLines(footer: List<Citation>, chips: List<Chip>): String {
-    val marked = chips.mapIndexed { index, chip -> "\n  [${index + 1}] " + render(chip.citation) }
+    val marked = chips.sortedBy { it.start }
+        .mapIndexed { index, chip -> "\n  [${index + 1}] " + render(chip.citation) }
     return marked.joinToString("") + footer.joinToString("") { "\n  — " + render(it) }
 }
+
+/**
+ * [body] with a numbered marker after each chipped run.
+ *
+ * Offsets are UTF-8 byte spans, so the string is walked as bytes and decoded back —
+ * indexing a Kotlin `String` by them would place markers wrongly the moment a card
+ * contains an em-dash, which game text does constantly.
+ *
+ * **Shared by every renderer**, because a chip's entire content is *which run of text* a
+ * citation supports. A surface that lists `[1] Source` under prose containing no `[1]` has
+ * kept the citation and thrown away the claim it was about — which for a card drawing two
+ * claims from two books is the distinction inline chips exist to carry.
+ */
+fun markChips(body: String, chips: List<Chip>): String {
+    if (chips.isEmpty()) return body
+    val bytes = body.toByteArray(Charsets.UTF_8)
+    val out = StringBuilder()
+    var cursor = 0
+    for ((index, chip) in chips.sortedBy { it.start }.withIndex()) {
+        val start = chip.start.coerceIn(cursor, bytes.size)
+        val end = chip.end.coerceIn(start, bytes.size)
+        out.append(String(bytes, cursor, end - cursor, Charsets.UTF_8))
+        out.append(" [${index + 1}]")
+        cursor = end
+    }
+    if (cursor < bytes.size) {
+        out.append(String(bytes, cursor, bytes.size - cursor, Charsets.UTF_8))
+    }
+    return out.toString()
+}
+

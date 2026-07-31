@@ -1,12 +1,12 @@
 package dev.rpghelper.state
 
+import androidx.sqlite.SQLiteConnection
+import androidx.sqlite.SQLiteStatement
+import androidx.sqlite.driver.bundled.BundledSQLiteDriver
+import androidx.sqlite.execSQL
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
-import java.sql.Connection
-import java.sql.DriverManager
-import java.sql.PreparedStatement
-import java.sql.ResultSet
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 
@@ -16,9 +16,16 @@ import kotlin.concurrent.withLock
  * Read-only pack access lives in `:pack` behind its own interface. This one writes, so it
  * is deliberately separate rather than a widening of that one — a pack must never be
  * writable by construction, and sharing an interface is how that stops being true.
+ *
+ * **Bound to the same SQLite the packs use**, for the same reason. This was JDBC, and
+ * `:app` excludes `sqlite-jdbc` because its native libraries cannot load on Android — so
+ * constructing `AskViewModel` reached `DriverManager` and the app died at startup with *no
+ * suitable driver*, before the Ask screen could draw. Fixing the read path and leaving the
+ * write path on the desktop driver was the same mistake one layer up: a binding chosen
+ * where a database happens to be opened rather than once, for the program.
  */
 class StateDb private constructor(
-    private val connection: Connection,
+    private val connection: SQLiteConnection,
     val path: Path,
 ) : AutoCloseable {
 
@@ -41,17 +48,20 @@ class StateDb private constructor(
 
     fun <T> query(sql: String, vararg args: Any?, read: (Row) -> T): List<T> = lock.withLock {
         prepare(sql, args).use { statement ->
-            statement.executeQuery().use { results ->
-                val out = mutableListOf<T>()
-                val row = ResultSetRow(results)
-                while (results.next()) out += read(row)
-                out
-            }
+            val out = mutableListOf<T>()
+            val row = StatementRow(statement)
+            while (statement.step()) out += read(row)
+            out
         }
     }
 
+    /** @return rows changed, as SQLite counts them. */
     fun execute(sql: String, vararg args: Any?): Int = lock.withLock {
-        prepare(sql, args).use { it.executeUpdate() }
+        prepare(sql, args).use { it.step() }
+        prepare("SELECT changes()", emptyArray()).use {
+            it.step()
+            it.getLong(0).toInt()
+        }
     }
 
     /**
@@ -64,19 +74,21 @@ class StateDb private constructor(
     fun <T> transaction(body: () -> T): T = lock.withLock {
         if (depth > 0) return@withLock body()
 
-        val restore = connection.autoCommit
-        connection.autoCommit = false
+        // Explicit statements rather than a driver's `autoCommit` flag: this binding has
+        // no such flag, and SQLite's own BEGIN/COMMIT is what `autoCommit` was standing in
+        // for anyway. The nesting rule above is unchanged and is what makes one BEGIN
+        // correct.
+        connection.execSQL("BEGIN")
         depth = 1
         try {
             val result = body()
-            connection.commit()
+            connection.execSQL("COMMIT")
             result
         } catch (e: Throwable) {
-            connection.rollback()
+            runCatching { connection.execSQL("ROLLBACK") }
             throw e
         } finally {
             depth = 0
-            connection.autoCommit = restore
         }
     }
 
@@ -85,17 +97,19 @@ class StateDb private constructor(
 
     override fun close() = lock.withLock { connection.close() }
 
-    private fun prepare(sql: String, args: Array<out Any?>): PreparedStatement {
-        val statement = connection.prepareStatement(sql)
+    /** Bind indices are 1-based here and column indices are 0-based, as SQLite has them. */
+    private fun prepare(sql: String, args: Array<out Any?>): SQLiteStatement {
+        val statement = connection.prepare(sql)
         args.forEachIndexed { index, value ->
+            val slot = index + 1
             when (value) {
-                null -> statement.setObject(index + 1, null)
-                is Int -> statement.setInt(index + 1, value)
-                is Long -> statement.setLong(index + 1, value)
-                is Double -> statement.setDouble(index + 1, value)
-                is Boolean -> statement.setInt(index + 1, if (value) 1 else 0)
-                is ByteArray -> statement.setBytes(index + 1, value)
-                else -> statement.setString(index + 1, value.toString())
+                null -> statement.bindNull(slot)
+                is Int -> statement.bindLong(slot, value.toLong())
+                is Long -> statement.bindLong(slot, value)
+                is Double -> statement.bindDouble(slot, value)
+                is Boolean -> statement.bindLong(slot, if (value) 1L else 0L)
+                is ByteArray -> statement.bindBlob(slot, value)
+                else -> statement.bindText(slot, value.toString())
             }
         }
         return statement
@@ -113,15 +127,11 @@ class StateDb private constructor(
         fun int(column: Int): Int = long(column).toInt()
     }
 
-    private class ResultSetRow(private val results: ResultSet) : Row {
-        override fun isNull(column: Int): Boolean {
-            results.getObject(column + 1)
-            return results.wasNull()
-        }
-
-        override fun long(column: Int): Long = results.getLong(column + 1)
-        override fun double(column: Int): Double = results.getDouble(column + 1)
-        override fun string(column: Int): String = results.getString(column + 1)
+    private class StatementRow(private val statement: SQLiteStatement) : Row {
+        override fun isNull(column: Int): Boolean = statement.isNull(column)
+        override fun long(column: Int): Long = statement.getLong(column)
+        override fun double(column: Int): Double = statement.getDouble(column)
+        override fun string(column: Int): String = statement.getText(column)
         override fun longOrNull(column: Int): Long? = if (isNull(column)) null else long(column)
         override fun doubleOrNull(column: Int): Double? =
             if (isNull(column)) null else double(column)
@@ -140,14 +150,22 @@ class StateDb private constructor(
          * the app's usefulness, because these rows are the user's characters.
          */
         fun open(path: Path, backup: (Path) -> Unit = { defaultBackup(it) }): StateDb {
-            val connection = DriverManager.getConnection("jdbc:sqlite:${path.toAbsolutePath()}")
-            connection.createStatement().use { statement ->
-                // Both are per-connection and both are off by default. Without
-                // foreign_keys the ON DELETE CASCADE clauses are decoration, and deleting
-                // a document would orphan its trackers silently and permanently.
-                statement.execute("PRAGMA foreign_keys = ON")
-                statement.execute("PRAGMA journal_mode = WAL")
-            }
+            Files.createDirectories(path.toAbsolutePath().parent)
+            val connection = BundledSQLiteDriver().open(
+                path.toAbsolutePath().toString(),
+                // OPEN_READWRITE | OPEN_CREATE. Named rather than imported so the intent
+                // survives a reader who does not know the constants — and worth stating
+                // because this is the one database in the program that is meant to be
+                // writable at all.
+                0x00000002 or 0x00000004,
+            )
+            // Both are per-connection and both are off by default. Without foreign_keys
+            // the ON DELETE CASCADE clauses are decoration, and deleting a document would
+            // orphan its trackers silently and permanently.
+            connection.execSQL("PRAGMA foreign_keys = ON")
+            // `journal_mode` answers with a row, so it is stepped rather than executed:
+            // a pragma whose result is never read is a pragma some builds never apply.
+            connection.prepare("PRAGMA journal_mode = WAL").use { it.step() }
             val db = StateDb(connection, path)
             // A migration that throws leaves the caller with no handle to close, so the
             // connection would hold the database and its WAL locked for the rest of the

@@ -34,6 +34,19 @@ object QueryNormalizer {
         return folded.lowercase().split(WHITESPACE).filter { it.isNotEmpty() }.joinToString(" ")
     }
 
+    /**
+     * [normalized], truncated to [tokens] whitespace-separated tokens.
+     *
+     * The term budget used to be applied to *groups*, after the alias rewrite — which is
+     * after the expensive part. A pasted page of text was fully tokenized, expanded into up
+     * to five candidate phrases per token, and serialized into a single `IN (...)` list, so
+     * the advertised bound constrained none of the allocation or SQL that actually costs
+     * anything. Bounding the token stream first makes the same budget cover the whole
+     * pipeline, and the bound is the one the tail of a long query was going to hit anyway.
+     */
+    fun bound(normalized: String, tokens: Int): String =
+        normalized.split(' ').asSequence().filter { it.isNotEmpty() }.take(tokens).joinToString(" ")
+
     private val WHITESPACE = Regex("\\s+")
 
     /**
