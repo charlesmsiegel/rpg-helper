@@ -141,6 +141,37 @@ class StateDbTest {
     }
 
     @Test
+    fun `a failed migration does not leave a handle nobody can close`() {
+        // The caller never receives the StateDb, so it has nothing to close: without the
+        // failure path in `open`, the connection would hold the database and its WAL
+        // locked for the rest of the process — exactly while the app tries to restore the
+        // backup this failure just made relevant.
+        assertFailsWith<IllegalStateException> {
+            open("failing.db") { error("the backup device is full") }
+        }
+        // The path is reopenable, which it would not be if a write lock had survived.
+        open("failing.db").use { db ->
+            assertEquals(
+                StateSchema.VERSION,
+                db.query("PRAGMA user_version") { it.int(0) }.single(),
+            )
+        }
+    }
+
+    @Test
+    fun `the write-ahead log is folded in before the backup is taken`() {
+        // A committed page can live only in `state.db-wal`. Copying `state.db` alone would
+        // hand back a backup missing the commits it claims to preserve.
+        val path = root.resolve("wal.db")
+        var walBytesAtBackup: Long = -1
+        StateDb.open(path) {
+            val wal = path.resolveSibling("${path.fileName}-wal")
+            walBytesAtBackup = if (Files.exists(wal)) Files.size(wal) else 0
+        }.use { }
+        assertEquals(0L, walBytesAtBackup, "the log is checked in before the copy is made")
+    }
+
+    @Test
     fun `a rejected pack install does not leave the database in a transaction`() {
         open().use { db ->
             assertTrue(db.query("PRAGMA foreign_keys") { it.int(0) }.single() == 1)

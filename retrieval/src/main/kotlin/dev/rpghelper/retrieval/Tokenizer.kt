@@ -1,0 +1,50 @@
+package dev.rpghelper.retrieval
+
+import java.text.Normalizer
+
+/**
+ * App-side tokenization matching the pack's pinned `unicode61 remove_diacritics 2`.
+ *
+ * Parity is not cosmetic. The index was built by that tokenizer, and any divergence here
+ * produces a query term that cannot match text the index holds — silently, and only for
+ * the words where the two disagree, which is the hardest kind of retrieval bug to notice.
+ *
+ * `unicode61` splits on everything that is not a letter or a digit, folds case, and with
+ * `remove_diacritics 2` strips combining marks. Digits are token characters, which is why
+ * `2d6damage` is one token rather than a number beside a word.
+ */
+object Tokenizer {
+
+    /** Splits [text] into the tokens the index would have produced. */
+    fun tokenize(text: String): List<String> {
+        val folded = fold(text)
+        val tokens = mutableListOf<String>()
+        val current = StringBuilder()
+        for (c in folded) {
+            if (c.isLetterOrDigit()) {
+                current.append(c)
+            } else if (current.isNotEmpty()) {
+                tokens += current.toString()
+                current.setLength(0)
+            }
+        }
+        if (current.isNotEmpty()) tokens += current.toString()
+        return tokens
+    }
+
+    /**
+     * The form a token is stored and matched in: NFC, diacritics stripped, lowercased.
+     *
+     * Stripping goes through NFD so a combining mark is separable from the letter it sits
+     * on — the only way to remove one without a per-character table.
+     */
+    fun fold(text: String): String {
+        val decomposed = Normalizer.normalize(text, Normalizer.Form.NFD)
+        val stripped = buildString(decomposed.length) {
+            for (c in decomposed) {
+                if (Character.getType(c) != Character.NON_SPACING_MARK.toInt()) append(c)
+            }
+        }
+        return Normalizer.normalize(stripped, Normalizer.Form.NFC).lowercase()
+    }
+}

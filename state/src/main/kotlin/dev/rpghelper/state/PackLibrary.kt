@@ -1,11 +1,12 @@
 package dev.rpghelper.state
 
 import dev.rpghelper.pack.EmbedderContract
+import dev.rpghelper.pack.PackMeta
 import dev.rpghelper.pack.Packs
 import dev.rpghelper.pack.ValidationReport
 import java.nio.file.Files
 import java.nio.file.Path
-import java.nio.file.StandardCopyOption
+import java.nio.file.StandardOpenOption
 import java.security.MessageDigest
 
 /** A pack the app has installed. */
@@ -28,7 +29,12 @@ sealed interface InstallResult {
     data class Rejected(val report: ValidationReport) : InstallResult
     data class TooLarge(val limit: String) : InstallResult
 
-    /** The uid is already installed, and [confirm] was not given. */
+    /**
+     * The uid is already installed and the caller did not agree to replace *this* pack.
+     *
+     * Carries the pack itself so the caller can name it in the prompt, and so the
+     * agreement it collects can be passed back as [InstalledPack.packUid].
+     */
     data class NeedsConfirmation(val existing: InstalledPack) : InstallResult
 }
 
@@ -66,55 +72,69 @@ class PackLibrary(
      * that leaves the old pack installed, active, and intact — which is what matters when
      * the thing being replaced is the book someone is running a game from tonight.
      *
-     * @param confirm required when a pack with the same `pack_uid` is already installed.
+     * Every decision — the size limit, the uid, what is being replaced, the metadata
+     * written to the row — is derived from the **staged copy**, never from [source].
+     * The source is typically a `content://` URI backed by another app's file, which can
+     * change between two reads of it; deciding replacement from one read and validating
+     * another would let a pack inherit an activation and a priority the user granted to a
+     * different pack entirely.
+     *
+     * @param confirmReplacing the `pack_uid` the caller has agreed to replace. Required,
+     * and must match, when a pack with the staged file's uid is already installed. A
+     * boolean would not survive the source changing underneath: it says *yes* without
+     * saying yes to what.
      */
-    fun install(source: Path, confirm: Boolean = false): InstallResult {
-        val size = Files.size(source)
-        if (size > limits.maxFileBytes) {
-            return InstallResult.TooLarge("${limits.maxFileBytes} bytes")
-        }
-
-        val existing = findReady(uidOf(source) ?: return InstallResult.Rejected(unreadable()))
-        if (existing != null && !confirm) return InstallResult.NeedsConfirmation(existing)
-
+    fun install(source: Path, confirmReplacing: String? = null): InstallResult {
         // 1. Journal the intent, with its own id. Uniqueness of pack_uid applies only
         //    among ready rows, which is what makes staging a replacement possible at all.
         val installId = db.transaction {
             db.execute(
                 "INSERT INTO installed_packs (pack_uid, pack_version, title, embedder_id, " +
                     "byte_size, state, installed_at, active, priority) " +
-                    "VALUES (?, '', '', '', ?, ?, ?, 0, ?)",
-                "", size, StateSchema.STATE_INSTALLING, clock(), nextPriority(),
+                    "VALUES (?, '', '', '', 0, ?, ?, 0, ?)",
+                "", StateSchema.STATE_INSTALLING, clock(), nextPriority(),
             )
             db.lastInsertId()
         }
 
         val staged = packsDir.resolve("$installId.rpgpack")
+        val existing: InstalledPack?
+        val meta: PackMeta
+        val size: Long
+        val digest: String
         try {
-            Files.copy(source, staged, StandardCopyOption.REPLACE_EXISTING)
+            if (!copyBounded(source, staged, limits.maxFileBytes)) {
+                abandon(installId, staged)
+                return InstallResult.TooLarge("${limits.maxFileBytes} bytes")
+            }
+            size = Files.size(staged)
+
             val report = Packs.validateFile(staged, supportedEmbedders)
             if (!report.isValid) {
                 abandon(installId, staged)
                 return InstallResult.Rejected(report)
             }
 
-            val meta = Packs.readMeta(staged)
-            val digest = sha256(staged)
+            meta = Packs.readMeta(staged)
+            existing = findReady(meta.packUid)
+            if (existing != null && existing.packUid != confirmReplacing) {
+                abandon(installId, staged)
+                return InstallResult.NeedsConfirmation(existing)
+            }
+            digest = sha256(staged)
 
             // 2. Swap: the previous ready row and the new one change together.
             db.transaction {
-                if (existing != null) {
-                    db.execute(
-                        "DELETE FROM installed_packs WHERE install_id = ?",
-                        existing.installId,
-                    )
-                }
+                db.execute(
+                    "DELETE FROM installed_packs WHERE install_id = ?",
+                    existing?.installId ?: -1L,
+                )
                 db.execute(
                     "UPDATE installed_packs SET pack_uid = ?, pack_version = ?, title = ?, " +
-                        "ruleset_id = ?, embedder_id = ?, file_sha256 = ?, state = ?, " +
-                        "active = ?, priority = ? WHERE install_id = ?",
+                        "ruleset_id = ?, embedder_id = ?, byte_size = ?, file_sha256 = ?, " +
+                        "state = ?, active = ?, priority = ? WHERE install_id = ?",
                     meta.packUid, meta.packVersion, meta.title, meta.rulesetId,
-                    meta.embedderId, digest, StateSchema.STATE_READY,
+                    meta.embedderId, size, digest, StateSchema.STATE_READY,
                     // A replacement of an inactive pack stays inactive, and a new install
                     // is never active on arrival: a pack can claim any uid it likes, so
                     // inheriting activation would let an imported file become live content
@@ -123,15 +143,19 @@ class PackLibrary(
                     existing?.priority ?: nextPriority(), installId,
                 )
             }
-
-            // 3. The old file now has no row, so reconciliation would remove it anyway.
-            if (existing != null) Files.deleteIfExists(fileOf(existing.installId))
-
-            return InstallResult.Installed(requireNotNull(byId(installId)))
         } catch (e: Exception) {
             abandon(installId, staged)
             throw e
         }
+
+        // 3. Past the commit, the replacement *is* the installation: the new row is ready
+        //    and the old row is gone. Removing the old file is housekeeping from here, so
+        //    a failure — a reader still holding it on a locking platform — must not
+        //    unwind a swap the database already records, which would leave neither pack
+        //    installed. `reconcile` sweeps files with no row.
+        if (existing != null) runCatching { Files.deleteIfExists(fileOf(existing.installId)) }
+
+        return InstallResult.Installed(requireNotNull(byId(installId)))
     }
 
     /**
@@ -260,17 +284,38 @@ class PackLibrary(
         priority = int(9),
     )
 
-    private fun unreadable() = ValidationReport(
-        listOf(
-            dev.rpghelper.pack.Violation(
-                dev.rpghelper.pack.ViolationCode.MALFORMED_SCHEMA,
-                "the file could not be read as a pack",
-            ),
-        ),
-    )
-
-    private fun uidOf(path: Path): String? =
-        runCatching { Packs.readMeta(path).packUid }.getOrNull()
+    /**
+     * Copies [source] to [target], stopping if more than [limit] bytes arrive.
+     *
+     * `Files.size` is a *claim* made by whatever sits behind the path — on Android, another
+     * app answering for a `content://` URI — and it is read before the bytes are. Enforcing
+     * the ceiling on the bytes that actually arrive means a source understating its size
+     * costs one extra buffer rather than the device's free space.
+     */
+    private fun copyBounded(source: Path, target: Path, limit: Long): Boolean =
+        Files.newInputStream(source).use { input ->
+            Files.newOutputStream(
+                target,
+                StandardOpenOption.CREATE,
+                StandardOpenOption.TRUNCATE_EXISTING,
+                StandardOpenOption.WRITE,
+            ).use { output ->
+                val buffer = ByteArray(1 shl 16)
+                var written = 0L
+                var withinLimit = true
+                while (true) {
+                    val read = input.read(buffer)
+                    if (read < 0) break
+                    written += read
+                    if (written > limit) {
+                        withinLimit = false
+                        break
+                    }
+                    output.write(buffer, 0, read)
+                }
+                withinLimit
+            }
+        }
 
     private fun sha256(path: Path): String {
         val digest = MessageDigest.getInstance("SHA-256")

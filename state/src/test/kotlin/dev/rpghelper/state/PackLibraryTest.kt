@@ -87,7 +87,7 @@ class PackLibraryTest {
     @Test
     fun `a confirmed replacement supersedes the previous install`() {
         val first = installed(library.install(forge()))
-        val second = installed(library.install(forge(), confirm = true))
+        val second = installed(library.install(forge(), confirmReplacing = PackForge.PACK_UID))
 
         assertEquals(listOf(second.installId), library.installed().map { it.installId })
         assertFalse(Files.exists(library.fileOf(first.installId)), "the old file is removed")
@@ -97,7 +97,7 @@ class PackLibraryTest {
     @Test
     fun `replacing an inactive pack leaves it inactive`() {
         installed(library.install(forge()))
-        val replacement = installed(library.install(forge(), confirm = true))
+        val replacement = installed(library.install(forge(), confirmReplacing = PackForge.PACK_UID))
         assertFalse(replacement.active, "activation is not something an install can grant")
     }
 
@@ -105,7 +105,7 @@ class PackLibraryTest {
     fun `replacing an active pack keeps it active and keeps its priority`() {
         val first = installed(library.install(forge()))
         library.setActive(first.installId, true)
-        val replacement = installed(library.install(forge(), confirm = true))
+        val replacement = installed(library.install(forge(), confirmReplacing = PackForge.PACK_UID))
         assertTrue(replacement.active, "updating a book you were using keeps it in use")
         assertEquals(first.priority, replacement.priority)
     }
@@ -116,13 +116,55 @@ class PackLibraryTest {
         library.setActive(first.installId, true)
 
         val broken = forge { it.exec("UPDATE vectors SET embedding = x'00'") }
-        assertTrue(library.install(broken, confirm = true) is InstallResult.Rejected)
+        assertTrue(library.install(broken, confirmReplacing = PackForge.PACK_UID) is InstallResult.Rejected)
 
         val survivors = library.installed()
         assertEquals(listOf(first.installId), survivors.map { it.installId })
         assertTrue(survivors.single().active, "the working pack is untouched, still active")
         assertTrue(Files.exists(library.fileOf(first.installId)))
         assertEquals(1, packFiles().size, "the staged replacement is gone")
+    }
+
+    @Test
+    fun `confirmation names the pack it agreed to replace`() {
+        // A boolean says yes without saying yes to what. If the source behind the URI
+        // changes between the prompt and the install, a bare `true` would let the second
+        // file consume an agreement made about the first.
+        installed(library.install(forge()))
+        val result = library.install(forge(), confirmReplacing = "test:pack:something-else")
+        assertTrue(result is InstallResult.NeedsConfirmation, "expected confirmation, got $result")
+        assertEquals(1, library.installed().size)
+    }
+
+    @Test
+    fun `a pack is measured by the bytes that arrive, not by the size it claims`() {
+        val strict = PackLibrary(
+            db, root, setOf(PackForge.EMBEDDER), PackLibrary.PackLimits(maxFileBytes = 1024),
+        )
+        val result = strict.install(forge())
+        assertTrue(result is InstallResult.TooLarge, "expected a size refusal, got $result")
+        assertEquals(0, strict.installed().size)
+        assertEquals(0, packFiles().size, "the partial copy is swept")
+    }
+
+    @Test
+    fun `a cleanup failure does not unwind a committed replacement`() {
+        // Past the swap the new row is ready and the old row is gone. Rolling back on a
+        // failure to delete the old *file* would remove the new row and file too, leaving
+        // neither installation registered.
+        val first = installed(library.install(forge()))
+
+        // Stand in for a reader holding the file open on a locking platform: a non-empty
+        // directory where the old file was makes the step-3 delete throw.
+        val old = library.fileOf(first.installId)
+        Files.delete(old)
+        Files.createDirectory(old)
+        Files.createFile(old.resolve("held"))
+
+        val second = installed(library.install(forge(), confirmReplacing = PackForge.PACK_UID))
+
+        assertEquals(listOf(second.installId), library.installed().map { it.installId })
+        assertTrue(Files.exists(library.fileOf(second.installId)), "the replacement survives")
     }
 
     // ------------------------------------------------------------------ reconciliation

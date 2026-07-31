@@ -333,4 +333,64 @@ class ConstraintEngineTest {
         assertTrue(selector.matches("a.b"))
         assertFalse(selector.matches("a.b.c"))
     }
+
+    @Test
+    fun `a malformed selector is a dropped constraint, not a rule that matches nothing`() {
+        // Each of these parses happily under a permissive reader and then matches no
+        // tracker, so the document displays as validated against a rule that never ran.
+        for (selector in listOf("attribute*", "attribute.*.strength", "", ".", "a..b", "A.b")) {
+            val result = ConstraintParser.parse(
+                1, ruleset, "range", """{"selector":"$selector","min":1}""", 1,
+            )
+            assertTrue(result.isFailure, "'$selector' must be refused, not silently inert")
+        }
+    }
+
+    @Test
+    fun `a bound referencing a wildcard is refused`() {
+        // A reference resolves one tracker's value. A wildcard resolves nothing and then
+        // reads as "unbounded", which is the opposite of the rule as written.
+        val result = ConstraintParser.parse(
+            1, ruleset, "range",
+            """{"selector":"a.b","max":{"tracker":"cap.*"}}""", 1,
+        )
+        assertTrue(result.isFailure)
+    }
+
+    @Test
+    fun `a self-excluding pair is refused rather than crashing evaluation`() {
+        // The engine identifies an exclusion by the unordered pair, which collapses to one
+        // element when both halves are the same selector -- and the message needs two.
+        val result = ConstraintParser.parse(
+            1, ruleset, "excludes", """{"subject":"merit.brave","excludes":["merit.brave"]}""", 1,
+        )
+        assertTrue(result.isFailure, "'X excludes X' is an authoring bug, not a rule")
+    }
+
+    @Test
+    fun `a present but nonnumeric prerequisite minimum is refused`() {
+        // Degrading these to null would silently weaken "you must have it at 3" into
+        // "you must have it at all", and report nothing.
+        for (min in listOf(""""3"""", "true", "null", "{}", """"three"""")) {
+            val result = ConstraintParser.parse(
+                1, ruleset, "requires",
+                """{"subject":"merit.brave","requires":[{"selector":"attr.wits","min":$min}]}""", 1,
+            )
+            if (min == "null") {
+                // An explicit null is an absent minimum: presence is the rule.
+                assertTrue(result.isSuccess, "an explicit null min means presence")
+                continue
+            }
+            assertTrue(result.isFailure, "min $min must be refused")
+        }
+    }
+
+    @Test
+    fun `a quoted number is not a bound`() {
+        assertTrue(
+            ConstraintParser.parse(1, ruleset, "range", """{"selector":"a.b","min":"1"}""", 1)
+                .isFailure,
+            "a JSON string is not a JSON number, however it reads",
+        )
+    }
 }

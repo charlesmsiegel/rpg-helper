@@ -1,6 +1,7 @@
 package dev.rpghelper.state
 
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
@@ -20,16 +21,53 @@ import java.security.MessageDigest
 data class Selector(val text: String) {
     private val prefix: String? = if (text.endsWith(".*")) text.dropLast(1) else null
 
+    init {
+        // Validated on construction rather than checked at use. A malformed selector --
+        // `attribute*`, an interior wildcard, an empty string -- is not a rule that
+        // matches nothing; it is a rule that was never loaded, and a document showing as
+        // validated against a rule that silently did not run is the failure this whole
+        // subsystem exists to avoid. Refusing here routes it to the dropped-constraint
+        // report, which is a thing someone can read.
+        requireKey(if (prefix != null) text.dropLast(2) else text, "selector '$text'")
+    }
+
     fun matches(key: String): Boolean =
         if (prefix != null) key.startsWith(prefix) else key == text
 
     override fun toString(): String = text
+
+    companion object {
+        /** The same production `DocumentStore.normalizeKey` writes keys into. */
+        private val SEGMENT = Regex("[a-z0-9-]+")
+
+        /**
+         * Requires an exact tracker key — the form with no wildcard at all.
+         *
+         * Used for the selector's own key and for a bound's tracker reference. `*` is
+         * not a legal segment, so `attribute.*` fails here without a separate test.
+         */
+        fun requireKey(key: String, what: String) {
+            require(key.isNotEmpty()) { "$what names no tracker key" }
+            for (segment in key.split('.')) {
+                require(SEGMENT.matches(segment)) {
+                    "$what has segment '$segment'; segments must match [a-z0-9-]+"
+                }
+            }
+        }
+    }
 }
 
 /** A bound: a literal, or the value of another tracker. */
 sealed interface Bound {
     data class Literal(val value: Double) : Bound
-    data class TrackerRef(val key: String) : Bound
+
+    data class TrackerRef(val key: String) : Bound {
+        // A reference resolves one tracker's value, so it must name one exactly. A
+        // wildcard here would resolve to nothing and read as "unbounded".
+        init {
+            Selector.requireKey(key, "tracker reference '$key'")
+        }
+    }
 
     /**
      * Resolves against [trackers], or null when it cannot constrain.
@@ -181,7 +219,7 @@ object ConstraintParser {
                     val requirement = element.jsonObject
                     Constraint.Requires.Requirement(
                         selector(requirement, "selector"),
-                        requirement["min"]?.jsonPrimitive?.doubleOrNull,
+                        number(requirement, "min"),
                     )
                 },
             )
@@ -189,7 +227,7 @@ object ConstraintParser {
             "excludes" -> Constraint.Excludes(
                 chunkId, rulesetId, selector(obj, "subject"),
                 obj.getValue("excludes").jsonArray.map { Selector(it.jsonPrimitive.content) },
-            )
+            ).also(::requireDistinctExclusions)
 
             else -> error("unknown constraint form '$form'")
         }
@@ -210,12 +248,51 @@ object ConstraintParser {
         }
     }
 
+    /**
+     * A selector must not exclude itself.
+     *
+     * `setOf` in the engine collapses the pair to one element, and the violation message
+     * needs two halves. Rejecting here rather than handling the singleton is deliberate:
+     * "X cannot be taken with X" is not a rule anyone meant to write, so a pack carrying
+     * one has an authoring bug that should reach the dropped-constraint report.
+     */
+    private fun requireDistinctExclusions(c: Constraint.Excludes) {
+        for (excluded in c.excluded) {
+            if (excluded.text == c.subject.text) {
+                error("'${c.subject}' excludes itself")
+            }
+        }
+    }
+
     private fun selector(obj: JsonObject, field: String) =
         Selector(obj.getValue(field).jsonPrimitive.content)
 
+    /**
+     * A JSON number, or null when the field is absent.
+     *
+     * Present-but-not-a-number is an error rather than a null, because for `requires`
+     * the two mean different rules: null is "you must have it at all", and a number is
+     * "you must have it at this rating". Letting `"min": true` degrade to null silently
+     * weakens the rule to presence and reports nothing.
+     */
+    private fun number(obj: JsonObject, field: String): Double? {
+        val element = obj[field] ?: return null
+        if (element is JsonNull) return null
+        val primitive = element as? JsonPrimitive ?: error("'$field' must be a JSON number")
+        return numberOf(field, primitive)
+    }
+
+    private fun numberOf(field: String, primitive: JsonPrimitive): Double {
+        require(!primitive.isString) {
+            "'$field' must be a JSON number, not the quoted string \"${primitive.content}\""
+        }
+        return primitive.doubleOrNull ?: error("'$field' is not a number: ${primitive.content}")
+    }
+
     private fun bound(obj: JsonObject, field: String): Bound? {
         val element = obj[field] ?: return null
-        (element as? JsonPrimitive)?.doubleOrNull?.let { return Bound.Literal(it) }
+        if (element is JsonNull) return null
+        if (element is JsonPrimitive) return Bound.Literal(numberOf(field, element))
         val ref = element.jsonObject.getValue("tracker").jsonPrimitive.content
         return Bound.TrackerRef(ref)
     }
@@ -356,6 +433,10 @@ class ConstraintEngine(private val constraints: List<Constraint>) {
         if (trackers.none { c.subject.matches(it.key) && it.value.isPresent }) return
 
         for (excluded in c.excluded) {
+            // The parser refuses a self-exclusion; this guards a Constraint built in code.
+            // Without it the unordered pair below collapses to one element and the
+            // message has no second half — a crash while evaluating someone's document.
+            if (excluded.text == c.subject.text) continue
             if (trackers.none { excluded.matches(it.key) && it.value.isPresent }) continue
 
             // Identified by the unordered pair. "A excludes B" and "B excludes A" are the

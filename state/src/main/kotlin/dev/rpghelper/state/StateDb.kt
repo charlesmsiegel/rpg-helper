@@ -119,7 +119,16 @@ class StateDb private constructor(
                 statement.execute("PRAGMA journal_mode = WAL")
             }
             val db = StateDb(connection, path)
-            db.migrate(backup)
+            // A migration that throws leaves the caller with no handle to close, so the
+            // connection would hold the database and its WAL locked for the rest of the
+            // process — precisely while the app is trying to restore the backup that
+            // failure just made relevant.
+            try {
+                db.migrate(backup)
+            } catch (e: Throwable) {
+                runCatching { db.close() }
+                throw e
+            }
             return db
         }
 
@@ -140,6 +149,17 @@ class StateDb private constructor(
             "database is at version $current; this build understands ${StateSchema.VERSION}"
         }
 
+        // Fold the write-ahead log into the database file before the backup is taken. In
+        // WAL mode a committed page can live only in `state.db-wal`, so copying
+        // `state.db` alone would capture a database missing the most recent commits the
+        // backup claims to preserve — and the case where that happens, a previous
+        // process ending abruptly with an unchecked-in WAL, is exactly the case where
+        // someone reaches for the backup.
+        val busy = query("PRAGMA wal_checkpoint(TRUNCATE)") { it.long(0) }.singleOrNull()
+        check(busy == 0L) {
+            "could not check the write-ahead log into $path before migrating; " +
+                "another connection is holding it"
+        }
         backup(path)
 
         for (target in (current + 1)..StateSchema.VERSION) {
