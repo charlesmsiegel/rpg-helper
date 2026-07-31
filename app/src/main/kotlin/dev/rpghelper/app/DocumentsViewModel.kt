@@ -12,7 +12,6 @@ import dev.rpghelper.session.Passage
 import dev.rpghelper.session.RuleCheck
 import dev.rpghelper.session.Rules
 import dev.rpghelper.session.SheetState
-import dev.rpghelper.session.Store
 import dev.rpghelper.state.Document
 import dev.rpghelper.state.DocumentStore
 import dev.rpghelper.state.DocumentTransfer
@@ -41,7 +40,7 @@ data class OpenSheet(
  */
 class DocumentsViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val store = Store(application.filesDir.toPath().resolve("library"))
+    private val store = Storage.of(application)
     private val documents = DocumentStore(store.db)
 
     var sheets by mutableStateOf<List<SheetState>>(emptyList())
@@ -278,6 +277,25 @@ class DocumentsViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    /**
+     * Rebinds the document to another ruleset, or to none.
+     *
+     * Acceptances are deliberately retained: their fingerprints carry the ruleset they were
+     * made under, so one from a previous binding goes dormant rather than following the
+     * document into a new game — and becomes live again if the document comes back.
+     */
+    fun rebind(documentId: Long, rulesetId: String?) {
+        viewModelScope.launch {
+            busy = true
+            withContext(Dispatchers.IO) {
+                runCatching { documents.rebind(documentId, rulesetId); read(documentId) }
+            }
+                .onSuccess { open = it; failure = null }
+                .onFailure { failure = it.message ?: "could not rebind that document" }
+            busy = false
+        }
+    }
+
     fun delete(documentId: Long) {
         viewModelScope.launch {
             withContext(Dispatchers.IO) { runCatching { documents.delete(documentId) } }
@@ -313,7 +331,7 @@ class DocumentsViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    override fun onCleared() {
-        store.close()
-    }
+    // No `onCleared` closing the store: it is the process's, shared with every other
+    // surface, and a ViewModel closing a handle three others hold is the bug this
+    // consolidation exists to remove.
 }

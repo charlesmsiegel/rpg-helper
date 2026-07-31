@@ -186,7 +186,9 @@ object Rules {
                     return@forEach
                 }
 
-                ConstraintParser.parse(constraintId, rulesetId, form, args, chunkId, priority)
+                ConstraintParser.parse(
+                    constraintId, rulesetId, form, args, chunkId, priority, pack.packUid,
+                )
                     .onSuccess { constraints += it }
                     .onFailure {
                         dropped += DroppedConstraint(
@@ -218,10 +220,17 @@ object Rules {
 
         val set = constraintsFor(library, rulesetId)
         if (set.constraints.isEmpty()) {
-            // Bound to a game no active pack supplies. The dropped rows still travel: they
-            // are the difference between "this ruleset has no rules" and "its rules would
-            // not load", and a user staring at an unchecked sheet deserves the second one.
-            return RuleCheck(emptyList(), emptyList(), set.dropped, unchecked = true)
+            // **Two different states, and only one of them is "unchecked".** A ruleset no
+            // active pack supplies has nothing to evaluate. A ruleset whose every row failed
+            // to parse has a pack, right here, reporting its own failure — calling that
+            // "install or activate the pack" sends the user to fix something that is not
+            // broken while the actual fault sits in the dropped list. `unchecked` is
+            // therefore about whether a pack supplies the ruleset at all, which is a
+            // question the dropped rows themselves answer.
+            return RuleCheck(
+                emptyList(), emptyList(), set.dropped,
+                unchecked = set.dropped.isEmpty(),
+            )
         }
 
         val violations = ConstraintEngine(set.constraints)
@@ -234,7 +243,7 @@ object Rules {
         val flagged = violations.map { violation ->
             Flagged(
                 violation = violation,
-                citation = citations.resolve(chunkOf(library, violation)),
+                citation = citations.resolve(chunkOf(violation)),
                 accepted = violation.fingerprint in accepted,
                 note = accepted[violation.fingerprint],
             )
@@ -286,7 +295,10 @@ object Rules {
                 campaign = document.campaign,
                 draft = document.draft,
                 validation = when {
-                    set.constraints.isEmpty() -> Validation.UNVALIDATED
+                    // A pack is present iff it produced rows -- parsed or dropped. All
+                    // dropped is *partly validated with nothing loaded*, not "no pack": the
+                    // remedy is the Packs surface's dropped list, not an install.
+                    set.constraints.isEmpty() && set.dropped.isEmpty() -> Validation.UNVALIDATED
                     set.dropped.isNotEmpty() -> Validation.PARTLY_VALIDATED
                     else -> Validation.VALIDATED
                 },
@@ -305,7 +317,7 @@ object Rules {
      * real rule because its locator broke is the worse trade.
      */
     fun passage(library: Library, violation: Violation): Passage? {
-        val ref = chunkOf(library, violation)
+        val ref = chunkOf(violation)
         val pack = library.packs.firstOrNull { it.packUid == ref.packUid } ?: return null
         val row = pack.db.map(
             "SELECT text, kind, origin FROM chunks WHERE chunk_id = ${ref.chunkId}",
@@ -319,24 +331,15 @@ object Rules {
     }
 
     /**
-     * Which pack's chunk a violation points at.
+     * Which chunk a violation points at — **read off the violation, not searched for**.
      *
-     * A `Violation` carries a bare `chunk_id`, and a chunk is identified everywhere
-     * downstream by `(pack_uid, chunk_id)` — so resolving one without knowing its pack
-     * would render a rule from the core book under a supplement's title the moment two
-     * active packs in one ruleset happened to number a chunk alike. The constraint's
-     * ruleset narrows the candidates; priority order picks among them the same way
-     * retrieval does.
+     * This used to look the id up across the ruleset's packs in priority order, because a
+     * `Violation` carried a bare `chunk_id`. `chunk_id` is pack-local and a ruleset is
+     * routinely supplied by two packs, so the search returned whichever pack happened to
+     * hold that number first: a rule from a supplement could open and cite an unrelated
+     * core-book passage, under a citation that looked entirely real. The constraint knows
+     * which pack it came from, so the violation carries it and there is nothing to search.
      */
-    private fun chunkOf(library: Library, violation: Violation): ChunkRef {
-        val candidates = library.packs
-            .filter { library.rulesets[it.packUid] == violation.rulesetId }
-            .sortedBy { library.active.priority[it.packUid] ?: Int.MAX_VALUE }
-        val owner = candidates.firstOrNull { pack ->
-            pack.db.map(
-                "SELECT 1 FROM chunks WHERE chunk_id = ${violation.chunkId}",
-            ) { it.long(0) }.isNotEmpty()
-        }
-        return ChunkRef(owner?.packUid ?: "", violation.chunkId)
-    }
+    private fun chunkOf(violation: Violation): ChunkRef =
+        ChunkRef(violation.packUid, violation.chunkId)
 }

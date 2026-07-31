@@ -196,6 +196,25 @@ class DocumentTransferTest {
     }
 
     @Test
+    fun `unknown keys survive an export made long after the file is gone`() {
+        // The round-trip contract only meant something while the user still had the file
+        // they imported. A document exported by a later build, imported here, and exported
+        // again next week -- with nothing to pass as `preservedFrom` -- lost every field
+        // this build cannot read, silently, from the only copy that existed.
+        val file = """
+            {"format":"rpgdoc/1","portrait":"data:image/png;base64,AAAA","tags":["archivist"],
+             "document":{"title":"Ysabeau","draft":true},
+             "trackers":[],"accepted_violations":[]}
+        """.trimIndent()
+        val imported = DocumentTransfer.import(documents, file)
+
+        val later = DocumentTransfer.export(documents, imported.documentId)
+        assertTrue("portrait" in later, later)
+        assertTrue("data:image/png;base64,AAAA" in later, later)
+        assertTrue("archivist" in later, "including arrays, not only scalars: $later")
+    }
+
+    @Test
     fun `a malformed acceptance is dropped by name rather than stored`() {
         val file = """
             {"format":"rpgdoc/1","document":{"title":"x","draft":true},"trackers":[],

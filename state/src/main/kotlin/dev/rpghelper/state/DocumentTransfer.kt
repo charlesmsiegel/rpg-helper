@@ -49,8 +49,10 @@ data class Imported(
  *   B may carry dormant acceptances from game A, and stamping every row with the current
  *   binding on import would lose A's and wrongly activate them against B.
  * - **No computed state travels.** Violations are derived, and are recomputed on import.
- * - **Unknown top-level keys are preserved**, so a document exported by a later version and
- *   re-imported by an earlier one does not quietly lose data.
+ * - **Unknown top-level keys are preserved on the document itself**, so a file written by a
+ *   later version and imported by this one does not quietly lose data — including on the
+ *   export after next, when the file it came from is long gone. They are stored in
+ *   `documents.extensions`, which exists for exactly this and had no other writer.
  */
 object DocumentTransfer {
 
@@ -77,9 +79,15 @@ object DocumentTransfer {
          */
         preservedFrom: String? = null,
     ): String {
-        val preserved = preservedFrom?.let(::preservedKeys) ?: emptyMap()
         val document = documents.get(documentId)
             ?: throw DocumentTransferException("no document $documentId")
+        // The file being replaced wins over what was stored at import, because it is the
+        // more recent statement of what this document's file carries. With no file, the
+        // stored copy is the only surviving record -- which is the case this exists for: a
+        // user who imported yesterday, restarted the app, and is exporting now.
+        val preserved = preservedFrom?.let(::preservedKeys)
+            ?: document.extensions?.let(::preservedKeys)
+            ?: emptyMap()
         val root = buildJsonObject {
             // Preserved keys first, so the format's own keys always win a collision: a file
             // that carried a stale `document` object must not overwrite the real one.
@@ -92,7 +100,6 @@ object DocumentTransfer {
                     document.campaign?.let { put("campaign", it) }
                     document.rulesetId?.let { put("ruleset_id", it) }
                     put("draft", document.draft)
-                    document.extensions?.let { put("extensions", it) }
                 },
             )
             put(
@@ -197,12 +204,19 @@ object DocumentTransfer {
             }
         }
 
+        // **Kept, not read.** Whatever a later version of this format put at the top level
+        // is stored verbatim on the document, so an export from this build carries it
+        // forward even when the file it arrived in is gone and the caller has nothing to
+        // pass as `preservedFrom`. Without this the round-trip contract held only for as
+        // long as the user kept the original file, which is not a contract.
+        val unknown = root.filterKeys { it !in OWN_KEYS }
         val document = documents.create(
             title = title,
             campaign = documentObject["campaign"]?.jsonPrimitive?.contentOrNullSafe(),
             rulesetId = documentObject["ruleset_id"]?.jsonPrimitive?.contentOrNullSafe(),
             draft = documentObject["draft"]?.jsonPrimitive?.booleanOrNullSafe() ?: true,
-            extensions = documentObject["extensions"]?.jsonPrimitive?.contentOrNullSafe(),
+            extensions = if (unknown.isEmpty()) null else
+                json.encodeToString(JsonObject.serializer(), JsonObject(unknown)),
         )
         trackers.forEach { (key, value) -> documents.putTracker(document.documentId, key, value) }
         acceptances.forEach {

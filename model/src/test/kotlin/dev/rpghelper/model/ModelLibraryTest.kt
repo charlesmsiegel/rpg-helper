@@ -110,10 +110,32 @@ class ModelLibraryTest {
         val library = library()
         val manifest = library.add(manifestText())
         library.download(manifest)
-        Files.write(library.fileOf("weights.gguf"), ByteArray(weights.size) { 7 })
+        Files.write(library.fileOf(manifest, "weights.gguf"), ByteArray(weights.size) { 7 })
 
         assertEquals(Availability.Ready, library.list().single().availability)
         assertFalse(library.verify(manifest), "the digest pass is what catches this")
+    }
+
+    @Test
+    fun `two manifests naming one file do not share it`() {
+        // `weights.gguf` is what almost every quantized model calls its artifact. In a flat
+        // directory the second download replaced the first's verified bytes, deleting either
+        // deleted the other's, and where the declared lengths matched the list went on
+        // reporting both as ready -- so the second model answered with the first's weights.
+        val library = library()
+        val first = library.add(manifestText(id = "model-a"))
+        val second = library.add(manifestText(id = "model-b"))
+        library.download(first)
+
+        assertEquals(
+            Availability.NotDownloaded,
+            library.availability(second),
+            "one model's artifact is not the other's",
+        )
+        assertTrue(library.fileOf(first, "weights.gguf") != library.fileOf(second, "weights.gguf"))
+
+        library.removeFiles(second)
+        assertTrue(library.verify(first), "and deleting one does not delete the other")
     }
 
     @Test
@@ -124,11 +146,11 @@ class ModelLibraryTest {
 
         library.remove(manifest.id)
         assertTrue(library.list().isEmpty())
-        assertTrue(Files.exists(library.fileOf("weights.gguf")), "forgetting is not deleting")
+        assertTrue(Files.exists(library.fileOf(manifest, "weights.gguf")), "forgetting is not deleting")
 
         library.add(manifestText())
         library.removeFiles(manifest)
-        assertFalse(Files.exists(library.fileOf("weights.gguf")))
+        assertFalse(Files.exists(library.fileOf(manifest, "weights.gguf")))
         assertEquals(Availability.NotDownloaded, library.list().single().availability)
     }
 

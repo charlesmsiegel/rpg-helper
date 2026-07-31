@@ -200,7 +200,7 @@ class PackCardTest {
         compose.setContent {
             PacksScreen(
                 packs = listOf(shelved()),
-                storage = PacksViewModel.Storage(packs = 84_000_000, models = 3_100_000_000, appData = 240_000),
+                storage = PacksViewModel.StorageUse(packs = 84_000_000, models = 3_100_000_000, appData = 240_000),
             )
         }
         compose.onNodeWithText("packs 84 MB", substring = true).assertExists()

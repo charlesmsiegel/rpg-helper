@@ -27,9 +27,16 @@ data class ShelvedModel(
  *
  * Storage layout, under one root:
  * ```
- *   manifests/<id>.json     what was added
- *   files/<name>            the verified artifacts, and `.name.partial` mid-download
+ *   manifests/<id>.json       what was added
+ *   files/<id>/<name>         the verified artifacts, and `.name.partial` mid-download
  * ```
+ *
+ * **A manifest's files live in a directory of its own.** `weights.gguf` is what almost every
+ * quantized model calls its artifact, so a flat directory made two manifests share one path:
+ * downloading the second silently replaced the first's verified bytes, deleting either
+ * deleted the other's, and where the declared lengths happened to match the list went on
+ * reporting both as ready. Nothing about that is visible to a user — the second model just
+ * answers with the first one's weights.
  */
 class ModelLibrary(
     root: Path,
@@ -39,10 +46,21 @@ class ModelLibrary(
     private val manifestsDir: Path = Files.createDirectories(root.resolve("manifests"))
     private val filesDir: Path = Files.createDirectories(root.resolve("files"))
 
-    /** Where the weights live, for a runtime binding that will load them. */
-    fun fileOf(name: String): Path = filesDir.resolve(name)
+    /** One model's own directory, named by its sanitized id. */
+    private fun dirOf(manifest: ModelManifest): Path =
+        Files.createDirectories(filesDir.resolve(sanitize(manifest.id)))
 
-    val downloader: ModelDownloader by lazy { ModelDownloader(filesDir, fetcher) }
+    /** Where a model's weights live, for a runtime binding that will load them. */
+    fun fileOf(manifest: ModelManifest, name: String): Path = dirOf(manifest).resolve(name)
+
+    /**
+     * The downloader for one model, writing into that model's directory.
+     *
+     * Per manifest rather than shared, because the directory is per manifest — and the
+     * partial files are too, which is what keeps an interrupted download of one model from
+     * being resumed into another's artifact.
+     */
+    fun downloaderFor(manifest: ModelManifest): ModelDownloader = ModelDownloader(dirOf(manifest), fetcher)
 
     /**
      * Every manifest that has been added, with what is on disk for it.
@@ -72,10 +90,14 @@ class ModelLibrary(
         Files.deleteIfExists(manifestsDir.resolve("${sanitize(id)}.json"))
     }
 
-    /** Deletes a model's artifacts and any partial bytes. */
+    /** Deletes a model's artifacts and any partial bytes. Its directory, so only its own. */
     fun removeFiles(manifest: ModelManifest) {
+        val downloader = downloaderFor(manifest)
         downloader.discardPartials(manifest)
-        manifest.files.forEach { Files.deleteIfExists(fileOf(it.name)) }
+        manifest.files.forEach { Files.deleteIfExists(fileOf(manifest, it.name)) }
+        // The directory too, once it is empty. A model the user deleted should not leave a
+        // named folder behind suggesting it is still half-installed.
+        runCatching { Files.delete(dirOf(manifest)) }
     }
 
     /**
@@ -89,28 +111,48 @@ class ModelLibrary(
      * open-time check and the background digest pass.
      */
     fun availability(manifest: ModelManifest): Availability = when {
-        manifest.files.all { present(it) } -> Availability.Ready
+        manifest.files.all { present(manifest, it) } -> Availability.Ready
         onDisk(manifest) > 0 -> Availability.Downloading(onDisk(manifest), manifest.totalBytes)
         else -> Availability.NotDownloaded
     }
 
     /** The digest pass, run when a user asks — or before a runtime is pointed at the files. */
-    fun verify(manifest: ModelManifest): Boolean = downloader.verify(manifest)
+    fun verify(manifest: ModelManifest): Boolean = downloaderFor(manifest).verify(manifest)
 
     fun download(
         manifest: ModelManifest,
         cancel: AtomicBoolean = AtomicBoolean(false),
         onProgress: (DownloadProgress) -> Unit = {},
-    ): DownloadResult = downloader.download(manifest, cancel, onProgress)
+    ): DownloadResult = downloaderFor(manifest).download(manifest, cancel, onProgress)
 
-    private fun present(file: ModelFile): Boolean {
-        val path = fileOf(file.name)
+    private fun present(manifest: ModelManifest, file: ModelFile): Boolean {
+        val path = fileOf(manifest, file.name)
         return Files.isRegularFile(path) &&
             runCatching { Files.size(path) }.getOrNull() == file.bytes
     }
 
     private fun onDisk(manifest: ModelManifest): Long = manifest.files.sumOf { file ->
-        runCatching { Files.size(fileOf(file.name)) }.getOrDefault(0L)
+        runCatching { Files.size(fileOf(manifest, file.name)) }.getOrDefault(0L)
+    }
+
+    /**
+     * A generator for the first model that is ready **and** has a runtime, or null.
+     *
+     * Null is the ordinary answer in this build, because [ModelRuntimes] is empty — see the
+     * note there for why a placeholder runtime would be worse than none. The digest pass runs
+     * before any runtime is handed the files: they are executable behaviour, and presence
+     * plus declared length is what a list screen may rely on, not what an interpreter may.
+     */
+    fun readyGenerator(): Pair<ModelManifest, Generator>? {
+        for (shelved in list()) {
+            if (shelved.availability !is Availability.Ready) continue
+            val runtime = ModelRuntimes.runtimeFor(shelved.manifest) ?: continue
+            if (!verify(shelved.manifest)) continue
+            val files = shelved.manifest.files.associate { it.name to fileOf(shelved.manifest, it.name) }
+            val generator = runCatching { runtime.open(shelved.manifest, files) }.getOrNull()
+            if (generator != null) return shelved.manifest to generator
+        }
+        return null
     }
 
     /**

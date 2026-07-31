@@ -1,6 +1,8 @@
 package dev.rpghelper.app
 
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import dev.rpghelper.pack.ChunkRef
@@ -61,7 +63,9 @@ class SheetScreenTest {
     private val violation = Violation(
         fingerprint = "f".repeat(64),
         rulesetId = "emberlight-2e",
+        packUid = "srd:emberlight",
         chunkId = 3,
+        trackerKey = "aptitude.might",
         explanation = "aptitude.might is 7. This game allows 1–5.",
     )
 
@@ -241,6 +245,69 @@ class SheetScreenTest {
             )
         }
         compose.onNodeWithText("3 violations").assertExists()
+    }
+
+    @Test
+    fun `a flag attaches to its own tracker, not to one whose key it starts with`() {
+        // `skill.melee` is a prefix of `skill.melee-specialty`. Matching the explanation as
+        // a substring rendered one flag under both rows and offered acceptance from the
+        // wrong one -- explanations are presentation text, not identifiers.
+        val specialty = violation.copy(
+            trackerKey = "skill.melee-specialty",
+            explanation = "skill.melee-specialty is 4. This game allows 1–3.",
+        )
+        compose.setContent {
+            SheetScreen(
+                sheet(
+                    trackers = listOf(
+                        Tracker("skill.melee", TrackerValue.Number(2.0), 0),
+                        Tracker("skill.melee-specialty", TrackerValue.Number(4.0), 1),
+                    ),
+                    check = check(flagged = listOf(Flagged(specialty, citation, false, null))),
+                ),
+            )
+        }
+        // One flag on screen, not two.
+        assertEquals(
+            1,
+            compose.onAllNodesWithText(specialty.explanation, useUnmergedTree = true)
+                .fetchSemanticsNodes(false).size,
+        )
+    }
+
+    @Test
+    fun `deleting a document asks first, and says what goes with it`() {
+        // Destructive, local, user-authored, and the control sits beside Export. One tap
+        // would take a character somebody spent an evening writing.
+        var deleted = false
+        compose.setContent { SheetScreen(sheet(check = check()), onDelete = { deleted = true }) }
+        compose.onNodeWithText("Delete").performClick()
+        assertTrue(!deleted, "the tap opens the question rather than doing it")
+        compose.onNodeWithText("no undo", substring = true).assertExists()
+
+        compose.onNodeWithText("Keep it").performClick()
+        assertTrue(!deleted, "and declining keeps it")
+    }
+
+    @Test
+    fun `confirming the deletion deletes it`() {
+        var deleted = false
+        compose.setContent { SheetScreen(sheet(check = check()), onDelete = { deleted = true }) }
+        compose.onNodeWithText("Delete").performClick()
+        compose.onAllNodesWithText("Delete").onLast().performClick()
+        assertTrue(deleted)
+    }
+
+    @Test
+    fun `a document can be rebound, and is told what happens to its rulings`() {
+        // `DocumentStore.rebind` had no production caller: a user who mistyped a ruleset had
+        // to recreate the document and every tracker on it.
+        var bound: String? = "unset"
+        compose.setContent { SheetScreen(sheet(check = check()), onRebind = { bound = it }) }
+        compose.onNodeWithText("Ruleset").performClick()
+        compose.onNodeWithText("go quiet under a different one", substring = true).assertExists()
+        compose.onNodeWithText("Rebind").performClick()
+        assertEquals("emberlight-2e", bound, "the current binding is the starting point")
     }
 
     @Test

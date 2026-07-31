@@ -91,13 +91,23 @@ object Shelf {
     fun list(library: PackLibrary): List<ShelvedPack> {
         val active = library.active()
         val activeUids = active.map { it.packUid }.toSet()
-        // Which books the active set actually supplies, by `sources.source_uid` -- the same
-        // identifier a supersession targets. Collected up front because "is this correction
-        // in force" is a question about the whole active set, not about the pack asking.
-        val activeSources = active.flatMapTo(mutableSetOf()) { pack ->
+        // What the active set actually supplies, as `(source_uid, stable_key)` -- the exact
+        // coordinate a supersession targets, not just the book.
+        //
+        // The book alone was not enough. An errata row whose `target_stable_key` is stale or
+        // misspelled points at a passage that no longer exists, `Supersession.compute`
+        // withdraws nothing for it, and the surface said it was replacing a rule anyway --
+        // telling a user a correction is in force while the uncorrected text is what every
+        // answer will quote. That is the same failure as a filter failing open, arriving
+        // through a label.
+        val activeTargets = active.flatMapTo(mutableSetOf<Pair<String, String>>()) { pack ->
             runCatching {
                 Sqlite.openReadOnly(library.fileOf(pack.installId)).use { db ->
-                    db.map("SELECT source_uid FROM sources") { it.string(0) }
+                    db.map(
+                        "SELECT s.source_uid, c.stable_key FROM chunks c " +
+                            "JOIN sources s ON s.source_id = c.source_id " +
+                            "WHERE c.stable_key IS NOT NULL",
+                    ) { it.string(0) to it.string(1) }
                 }
             }.getOrDefault(emptyList())
         }
@@ -112,7 +122,7 @@ object Shelf {
                             db,
                             pack.packUid,
                             live = pack.packUid in activeUids,
-                            activeSources = activeSources,
+                            activeTargets = activeTargets,
                         ),
                     )
                 }
@@ -134,7 +144,7 @@ object Shelf {
         db: dev.rpghelper.pack.Db,
         packUid: String,
         live: Boolean,
-        activeSources: Set<String>,
+        activeTargets: Set<Pair<String, String>>,
     ): List<SupersessionNotice> = db.map(
         "SELECT target_source_uid, target_stable_key, target_title, target_edition, " +
             "target_heading_path, target_page_label_start, target_page_label_end " +
@@ -149,12 +159,14 @@ object Shelf {
             targetHeadingPath = row.stringOrNull(4),
             pageLabelStart = row.stringOrNull(5),
             pageLabelEnd = row.stringOrNull(6),
-            // Both halves, and they are different questions: this pack must be active for
-            // its corrections to apply at all, and some active pack must actually supply
-            // the book being corrected. An erratum sitting active over a book the user
-            // never installed withdraws nothing, and saying otherwise would tell them a
-            // rule was removed when it is still the only text they have.
-            inEffect = live && row.string(0) in activeSources,
+            // Three things, and they are three different questions: this pack must be
+            // active for its corrections to apply at all; some active pack must supply the
+            // book being corrected; and that book must actually contain the passage this
+            // row names. An erratum over a book nobody installed withdraws nothing, and one
+            // whose key no longer matches anything withdraws nothing either -- and in both
+            // cases saying "in effect" tells the user a rule was removed while the
+            // uncorrected text is what every answer still quotes.
+            inEffect = live && (row.string(0) to row.string(1)) in activeTargets,
         )
     }
 }

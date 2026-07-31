@@ -8,7 +8,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import dev.rpghelper.session.ShelvedPack
 import dev.rpghelper.session.Shelf
-import dev.rpghelper.session.Store
 import dev.rpghelper.state.ActivationResult
 import dev.rpghelper.state.SupersessionImpact
 import kotlinx.coroutines.Dispatchers
@@ -26,7 +25,7 @@ import kotlinx.coroutines.withContext
  */
 class PacksViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val store = Store(application.filesDir.toPath().resolve("library"))
+    private val store = Storage.of(application)
 
     /** What the surface lists. Empty until the first load lands. */
     var packs by mutableStateOf<List<ShelvedPack>>(emptyList())
@@ -47,11 +46,17 @@ class PacksViewModel(application: Application) : AndroidViewModel(application) {
         private set
 
     /** Packs, models, and app data — the three figures `01-app-state-spec.md` §7 names. */
-    var storage by mutableStateOf(Storage(0, 0, 0))
+    var storage by mutableStateOf(StorageUse(0, 0, 0))
         private set
 
-    /** What the three storage figures are, separately, because their remedies differ. */
-    data class Storage(val packs: Long, val models: Long, val appData: Long)
+    /**
+     * What the three storage figures are, separately, because their remedies differ.
+     *
+     * Named `StorageUse` rather than `Storage` because [Storage] is now the process's one
+     * store. Two things called the same thing in one file is how a screen ends up measuring
+     * a database handle.
+     */
+    data class StorageUse(val packs: Long, val models: Long, val appData: Long)
 
     /**
      * An install stopped because its uid is already installed.
@@ -115,7 +120,15 @@ class PacksViewModel(application: Application) : AndroidViewModel(application) {
             busy = false
             result
                 .onSuccess { report(it.first, it.second) }
-                .onFailure { failure = it.message ?: "could not install that file" }
+                .onFailure {
+                    // **The staged copy goes with the failure.** A content provider that
+                    // dies partway through the copy, or an install that throws rather than
+                    // returning a result, used to leave a book-sized file in the cache that
+                    // nothing would ever look at again -- and a user retrying a flaky import
+                    // three times left three of them.
+                    it.stagedPath()?.let { path -> runCatching { java.nio.file.Files.deleteIfExists(path) } }
+                    failure = it.message ?: "could not install that file"
+                }
         }
     }
 
@@ -130,7 +143,12 @@ class PacksViewModel(application: Application) : AndroidViewModel(application) {
             busy = false
             result
                 .onSuccess { report(it.first, it.second) }
-                .onFailure { failure = it.message ?: "could not install that file" }
+                .onFailure {
+                    // Same rule on the confirm path: the copy the user was asked about is
+                    // the caller's to remove once the answer has been acted on.
+                    runCatching { java.nio.file.Files.deleteIfExists(pending.staged) }
+                    failure = it.message ?: "could not install that file"
+                }
         }
     }
 
@@ -172,6 +190,19 @@ class PacksViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * A failure that knows which staged file it left behind, so the caller can remove it.
+     *
+     * The path is created before anything can fail, and everything that can fail happens
+     * after — so "delete it on failure" needs the path to survive the throw. Carrying it on
+     * the exception keeps the create and the delete in one function instead of leaking a
+     * mutable `var` into the coroutine.
+     */
+    private class StagingFailure(val staged: java.nio.file.Path, cause: Throwable) :
+        RuntimeException(cause.message ?: "could not install that file", cause)
+
+    private fun Throwable.stagedPath(): java.nio.file.Path? = (this as? StagingFailure)?.staged
+
     private fun stageAndInstall(
         uri: android.net.Uri,
         confirmReplacing: String?,
@@ -181,10 +212,14 @@ class PacksViewModel(application: Application) : AndroidViewModel(application) {
             java.nio.file.Files.createDirectories(application.cacheDir.toPath().resolve("incoming")),
             "incoming", ".rpgpack",
         )
-        application.contentResolver.openInputStream(uri)?.use { input ->
-            java.nio.file.Files.newOutputStream(staged).use { output -> input.copyTo(output) }
-        } ?: error("could not read that file")
-        return store.library.install(staged, confirmReplacing) to staged
+        return try {
+            application.contentResolver.openInputStream(uri)?.use { input ->
+                java.nio.file.Files.newOutputStream(staged).use { output -> input.copyTo(output) }
+            } ?: error("could not read that file")
+            store.library.install(staged, confirmReplacing) to staged
+        } catch (failure: Throwable) {
+            throw StagingFailure(staged, failure)
+        }
     }
 
     private fun report(result: dev.rpghelper.state.InstallResult, staged: java.nio.file.Path) {
@@ -224,9 +259,9 @@ class PacksViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun measureStorage(): Storage {
+    private fun measureStorage(): StorageUse {
         val root = getApplication<Application>().filesDir.toPath()
-        return Storage(
+        return StorageUse(
             packs = sizeOf(root.resolve("library/packs")),
             models = sizeOf(root.resolve("models")),
             // State minus the packs it indexes: the figure a user can act on by deleting
@@ -297,7 +332,7 @@ class PacksViewModel(application: Application) : AndroidViewModel(application) {
             .onFailure { failure = it.message ?: "could not change that pack" }
     }
 
-    override fun onCleared() {
-        store.close()
-    }
+    // No `onCleared` closing the store: it is the process's, shared with every other
+    // surface, and a ViewModel closing a handle three others hold is the bug this
+    // consolidation exists to remove.
 }

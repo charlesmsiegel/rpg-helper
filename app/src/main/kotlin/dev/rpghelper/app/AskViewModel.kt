@@ -13,9 +13,9 @@ import dev.rpghelper.capabilities.SecureDiceSource
 import dev.rpghelper.pack.ChunkRef
 import dev.rpghelper.routing.Card
 import dev.rpghelper.routing.asPlainText
+import dev.rpghelper.model.ModelLibrary
 import dev.rpghelper.session.AskService
 import dev.rpghelper.session.Library
-import dev.rpghelper.session.Store
 import dev.rpghelper.state.AnswerCache
 import dev.rpghelper.state.Conversation
 import kotlinx.coroutines.Dispatchers
@@ -46,7 +46,7 @@ class AskViewModel(application: Application) : AndroidViewModel(application) {
      * byte-exactly, and a file any other app can rewrite is a file whose quotation is a
      * claim about somebody else's bytes.
      */
-    private val store = Store(application.filesDir.toPath().resolve("library"))
+    private val store = Storage.of(application)
 
     private val conversation = Conversation(store.db)
 
@@ -89,6 +89,15 @@ class AskViewModel(application: Application) : AndroidViewModel(application) {
     private var discarded = false
 
     private val roller = Roller(SecureDiceSource())
+
+    /**
+     * The downloaded models, and whatever can run one.
+     *
+     * Read per question rather than held: a model downloaded on the Models surface should
+     * take effect on the next question, not on the next launch — the same rule the active
+     * pack set follows, for the same reason.
+     */
+    private val models = ModelLibrary(application.filesDir.toPath().resolve("models"))
 
     private val voiceInput = OnDeviceVoice(application)
 
@@ -188,16 +197,21 @@ class AskViewModel(application: Application) : AndroidViewModel(application) {
                         val loadable = library.rollables.flatMap { (uid, tables) ->
                             tables.map { ChunkRef(uid, it.chunkId) to it }
                         }.groupBy({ it.first }, { it.second })
+                        // **The downloaded model, if anything in this build can run it.**
+                        // `null` here is not a placeholder: it is the honest state whenever
+                        // no weights are present *or* no runtime is bundled, and routing
+                        // reads it as "not downloaded" and answers setting questions as
+                        // citations. The Models surface says the same thing in the same
+                        // words rather than implying a download is enough.
+                        val ready = models.readyGenerator()
                         val asked = service.ask(
                             question = question,
                             library = library,
-                            // No weights are bundled yet, so no generator is offered and
-                            // route 3 never fires. That is the app's honest state before a
-                            // model is downloaded, not a degraded mode: setting questions
-                            // answer as citations rather than as prose, and the answer
-                            // cache is never consulted because there is no generated card
-                            // to keep.
-                            generator = null,
+                            generator = ready?.second,
+                            // Weights *and* quantization, because the same weights at four
+                            // bits answer differently from the same weights at eight -- and
+                            // a cache keyed without it would serve one as the other.
+                            modelId = ready?.first?.id ?: "none",
                             // **Not the default.** `AskService`'s fallback render is
                             // `cards.joinToString`, which is Kotlin's data-class toString --
                             // so a feed restored after process death read
@@ -320,8 +334,11 @@ class AskViewModel(application: Application) : AndroidViewModel(application) {
     override fun onCleared() {
         // The recognizer holds a microphone. Leaving it open past the ViewModel would keep
         // it open past the screen.
+        //
+        // The store is *not* closed: it is the process's, shared with every other surface,
+        // and a ViewModel closing a handle three others hold is the same bug one directory
+        // up from the one that made every surface open its own.
         listening?.close()
-        store.close()
     }
 
     private companion object {

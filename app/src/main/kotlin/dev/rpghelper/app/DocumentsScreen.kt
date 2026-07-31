@@ -83,6 +83,7 @@ fun DocumentsScreen(model: DocumentsViewModel = viewModel()) {
             onDismissPassage = model::dismissPassage,
             onExport = { exporter.launch("${open.document.title}.rpgdoc") },
             onDelete = { model.delete(open.document.documentId) },
+            onRebind = { model.rebind(open.document.documentId, it) },
         )
         return
     }
@@ -267,9 +268,12 @@ fun SheetScreen(
     onDismissPassage: () -> Unit = {},
     onExport: () -> Unit = {},
     onDelete: () -> Unit = {},
+    onRebind: (String?) -> Unit = {},
 ) {
     var key by remember { mutableStateOf("") }
     var value by remember { mutableStateOf("") }
+    var deleting by remember { mutableStateOf(false) }
+    var rebinding by remember { mutableStateOf(false) }
 
     Column(Modifier.fillMaxSize().padding(horizontal = 8.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -280,7 +284,8 @@ fun SheetScreen(
                 modifier = Modifier.weight(1f),
             )
             TextButton(onClick = onExport) { Text("Export") }
-            TextButton(onClick = onDelete) { Text("Delete") }
+            TextButton(onClick = { rebinding = true }) { Text("Ruleset") }
+            TextButton(onClick = { deleting = true }) { Text("Delete") }
         }
 
         Text(headline(sheet.check), style = MaterialTheme.typography.bodySmall)
@@ -300,10 +305,13 @@ fun SheetScreen(
             items(sheet.trackers, key = { it.key }) { tracker ->
                 TrackerRow(
                     tracker = tracker,
-                    // Only the violations that name this tracker. A `sum_range` over a
-                    // whole namespace names none, and pinning it to an arbitrary member
-                    // would blame one value for a total.
-                    violations = sheet.check.flagged.filter { tracker.key in it.violation.explanation },
+                    // Only the violations about *this* tracker, matched on the key the
+                    // engine put on the violation -- never on the explanation. A valid key
+                    // can be a prefix of another (`skill.melee`, `skill.melee-specialty`),
+                    // so a substring test rendered one flag under two trackers and offered
+                    // acceptance from the wrong row. Explanations are presentation text;
+                    // identifiers are identifiers.
+                    violations = sheet.check.flagged.filter { it.violation.trackerKey == tracker.key },
                     enabled = !busy,
                     onRemove = { onRemoveTracker(tracker.key) },
                     onAccept = { onAccept(it, null) },
@@ -311,10 +319,10 @@ fun SheetScreen(
                 )
             }
 
-            // Everything the flags could not be attached to a single tracker.
-            val unattached = sheet.check.flagged.filterNot { flagged ->
-                sheet.trackers.any { it.key in flagged.violation.explanation }
-            }
+            // Everything not about one tracker -- a `sum_range` over a namespace, an
+            // exclusion between two -- plus any flag whose tracker is not on this sheet.
+            val keys = sheet.trackers.mapTo(mutableSetOf()) { it.key }
+            val unattached = sheet.check.flagged.filterNot { it.violation.trackerKey in keys }
             items(unattached, key = { it.violation.fingerprint }) { flagged ->
                 ViolationRow(flagged, onAccept = { onAccept(it, null) }, onShowPassage = onShowPassage)
             }
@@ -358,6 +366,80 @@ fun SheetScreen(
     }
 
     passage?.let { PassageDialog(it, onDismissPassage) }
+
+    if (deleting) {
+        // **Destructive, local, and user-authored — so it asks.** Delete cascades through
+        // every tracker and every accepted violation, there is no undo and no server copy,
+        // and this control sits beside Export. One mistaken tap would destroy a character
+        // somebody spent an evening writing.
+        AlertDialog(
+            onDismissRequest = { deleting = false },
+            title = { Text("Delete ${sheet.document.title}?") },
+            text = {
+                Text(
+                    "This removes the document, its trackers, and the rulings you accepted. " +
+                        "There is no undo and no copy anywhere else. Export it first if you " +
+                        "might want it back.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { deleting = false; onDelete() }) { Text("Delete") }
+            },
+            dismissButton = { TextButton(onClick = { deleting = false }) { Text("Keep it") } },
+        )
+    }
+
+    if (rebinding) {
+        RebindDialog(
+            current = sheet.document.rulesetId,
+            onDismiss = { rebinding = false },
+            onRebind = { rebinding = false; onRebind(it) },
+        )
+    }
+}
+
+/**
+ * Changes which game checks this sheet.
+ *
+ * `DocumentStore.rebind` existed and was called by nothing but tests, so a user who mistyped
+ * a ruleset, installed a replacement, or wanted to unbind had to recreate the document and
+ * every tracker on it. The dialog names what will happen to their accepted rulings, because
+ * that is the part that is not obvious: acceptances are keyed by a fingerprint that contains
+ * the ruleset, so they go **dormant** rather than being deleted, and come back if the
+ * document returns to that game.
+ */
+@Composable
+private fun RebindDialog(
+    current: String?,
+    onDismiss: () -> Unit,
+    onRebind: (String?) -> Unit,
+) {
+    var ruleset by remember { mutableStateOf(current.orEmpty()) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Which game checks this sheet?") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextField(
+                    ruleset,
+                    { ruleset = it },
+                    label = { Text("Ruleset") },
+                    singleLine = true,
+                )
+                Text(
+                    "Leave it empty to unbind: the trackers stay and nothing checks them. " +
+                        "Rulings you have accepted are kept either way — they carry the game " +
+                        "they were made under, so they go quiet under a different one and " +
+                        "come back if you rebind to this one.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onRebind(ruleset.trim().ifBlank { null }) }) { Text("Rebind") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }
 
 /** Never "no violations" when nothing was checked. */

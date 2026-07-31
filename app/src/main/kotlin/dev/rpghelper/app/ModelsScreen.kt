@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.rpghelper.model.Availability
 import dev.rpghelper.model.ModelManifest
+import dev.rpghelper.model.ModelRuntimes
 import dev.rpghelper.model.ShelvedModel
 
 /**
@@ -87,7 +88,11 @@ fun ModelsScreen(
             Text(
                 "No models. The app answers rules questions out of your books without one — " +
                     "setting questions are answered as citations until a model is here. " +
-                    "Add a manifest whose digests were computed from the weights it names.",
+                    "Add a manifest whose digests were computed from the weights it names.\n\n" +
+                    // Said before the download rather than after it, because three
+                    // gigabytes is a lot to fetch to discover it cannot be run yet.
+                    "This build ships no inference runtime: a model downloaded here is " +
+                    "stored and verified, and cannot answer until one is bundled.",
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.padding(16.dp),
             )
@@ -154,6 +159,14 @@ private fun ModelCard(
             when (shelved.availability) {
                 is Availability.Ready -> {
                     Text("Downloaded", style = MaterialTheme.typography.bodySmall)
+                    // One sentence, from one place. Three surfaces wording "we cannot run
+                    // this yet" three ways would be three different promises.
+                    if (ModelRuntimes.runtimeFor(manifest) == null) {
+                        Text(
+                            ModelRuntimes.unsupported(manifest),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
                     Row {
                         TextButton(onClick = onVerify, enabled = !busy) { Text("Verify") }
                         TextButton(onClick = onRemoveFiles, enabled = !busy) { Text("Delete files") }

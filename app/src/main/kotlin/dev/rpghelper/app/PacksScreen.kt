@@ -78,7 +78,7 @@ fun PacksScreen(
     failure: String? = null,
     pending: PacksViewModel.PendingActivation? = null,
     replacing: PacksViewModel.PendingReplacement? = null,
-    storage: PacksViewModel.Storage = PacksViewModel.Storage(0, 0, 0),
+    storage: PacksViewModel.StorageUse = PacksViewModel.StorageUse(0, 0, 0),
     onInstall: () -> Unit = {},
     onSetActive: (Long, Boolean) -> Unit = { _, _ -> },
     onConfirm: (PacksViewModel.PendingActivation) -> Unit = {},

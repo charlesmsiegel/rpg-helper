@@ -87,6 +87,19 @@ sealed interface Constraint {
     val rulesetId: String
 
     /**
+     * The pack this row came from.
+     *
+     * Carried rather than reconstructed. `chunk_id` is **pack-local**, and a ruleset is
+     * routinely supplied by more than one pack — a core book and a supplement — so looking
+     * a violation's chunk up by id alone finds whichever pack happens to hold that number
+     * first. A rule from the supplement would then open and cite an unrelated passage of
+     * the core book, under a real-looking citation, which is precisely the confusion this
+     * product exists to prevent. Everything downstream identifies a chunk as
+     * `(pack_uid, chunk_id)`; this is that pair's other half.
+     */
+    val packUid: String
+
+    /**
      * `constraints.constraint_id`, and the priority of the pack it came from.
      *
      * Carried because the spec pins which passage a *shared* violation cites: where
@@ -113,6 +126,7 @@ sealed interface Constraint {
         override val rulesetId: String,
         override val constraintId: Long = 0,
         override val packPriority: Int = 0,
+        override val packUid: String = "",
         val selector: Selector,
         val min: Bound?,
         val max: Bound?,
@@ -125,6 +139,7 @@ sealed interface Constraint {
         override val rulesetId: String,
         override val constraintId: Long = 0,
         override val packPriority: Int = 0,
+        override val packUid: String = "",
         val selector: Selector,
         val min: Bound?,
         val max: Bound?,
@@ -137,6 +152,7 @@ sealed interface Constraint {
         override val rulesetId: String,
         override val constraintId: Long = 0,
         override val packPriority: Int = 0,
+        override val packUid: String = "",
         val selector: Selector,
         val min: Bound?,
         val max: Bound?,
@@ -150,6 +166,7 @@ sealed interface Constraint {
         val subject: Selector,
         override val constraintId: Long = 0,
         override val packPriority: Int = 0,
+        override val packUid: String = "",
         val requirements: List<Requirement>,
     ) : Constraint {
         data class Requirement(val selector: Selector, val min: Double?)
@@ -168,6 +185,7 @@ sealed interface Constraint {
         val excluded: List<Selector>,
         override val constraintId: Long = 0,
         override val packPriority: Int = 0,
+        override val packUid: String = "",
     ) : Constraint {
         // Never used for the violation fingerprint, which is over the unordered pair --
         // see ConstraintEngine.checkExcludes. Present so the interface stays total.
@@ -194,7 +212,27 @@ private fun render(bound: Bound?): String = when (bound) {
 data class Violation(
     val fingerprint: String,
     val rulesetId: String,
+    /**
+     * Where the rule is stated, as `(pack_uid, chunk_id)` — **never the id alone**.
+     *
+     * A pack-local id resolved against "whichever active pack has that number" cites the
+     * wrong book the moment a ruleset is supplied by two packs, which is the ordinary case:
+     * a core book and a supplement.
+     */
+    val packUid: String,
     val chunkId: Long,
+    /**
+     * The tracker this violation is about, or null for a rule about a *set* of them.
+     *
+     * A surface renders a flag beside the value it concerns, and the only alternative to
+     * carrying the key was matching the explanation as a substring — which quietly attaches
+     * a flag about `skill.melee-specialty` to `skill.melee` as well, because one key is a
+     * prefix of the other. **Explanations are presentation text, not identifiers.**
+     *
+     * Null where no single tracker is at fault: a `sum_range` over a namespace is about the
+     * total, and pinning it to an arbitrary member would blame one value for a sum.
+     */
+    val trackerKey: String? = null,
     val explanation: String,
 )
 
@@ -227,27 +265,28 @@ object ConstraintParser {
         args: String,
         chunkId: Long,
         packPriority: Int = 0,
+        packUid: String = "",
     ): Result<Constraint> = runCatching {
         val obj = json.parseToJsonElement(args).jsonObject
         requireKnownKeys(obj, ARGUMENT_KEYS[form] ?: error("unknown constraint form '$form'"))
         when (form) {
             "range" -> Constraint.Range(
-                chunkId, rulesetId, constraintId, packPriority,
+                chunkId, rulesetId, constraintId, packPriority, packUid,
                 selector(obj, "selector"), bound(obj, "min"), bound(obj, "max"),
             ).also { requireUsableBounds(it.selector, it.min, it.max) }
 
             "sum_range" -> Constraint.SumRange(
-                chunkId, rulesetId, constraintId, packPriority,
+                chunkId, rulesetId, constraintId, packPriority, packUid,
                 selector(obj, "selector"), bound(obj, "min"), bound(obj, "max"),
             ).also { requireUsableBounds(it.selector, it.min, it.max) }
 
             "count_range" -> Constraint.CountRange(
-                chunkId, rulesetId, constraintId, packPriority,
+                chunkId, rulesetId, constraintId, packPriority, packUid,
                 selector(obj, "selector"), bound(obj, "min"), bound(obj, "max"),
             ).also { requireUsableBounds(it.selector, it.min, it.max) }
 
             "requires" -> Constraint.Requires(
-                chunkId, rulesetId, selector(obj, "subject"), constraintId, packPriority,
+                chunkId, rulesetId, selector(obj, "subject"), constraintId, packPriority, packUid,
                 obj.getValue("requires").jsonArray.map { element ->
                     val requirement = element.jsonObject
                     requireKnownKeys(requirement, REQUIREMENT_KEYS)
@@ -263,7 +302,7 @@ object ConstraintParser {
                 obj.getValue("excludes").jsonArray.map {
                     Selector(stringOf("excludes", it.jsonPrimitive))
                 },
-                constraintId, packPriority,
+                constraintId, packPriority, packUid,
             ).also {
                 require(it.excluded.isNotEmpty()) { EMPTY_RELATIONSHIP }
                 requireDistinctExclusions(it)
@@ -608,7 +647,11 @@ class ConstraintEngine(constraints: List<Constraint>) {
                     listOf("pair" to ordered.joinToString("|")),
                 ),
                 rulesetId = c.rulesetId,
+                packUid = c.packUid,
                 chunkId = c.chunkId,
+                // Deliberately null: an exclusion is about a *pair*, and rendering it
+                // beside one half would say the other is the one to change.
+                trackerKey = null,
                 explanation = "${ordered[0]} cannot be taken with ${ordered[1]}.",
             )
         }
@@ -623,7 +666,11 @@ class ConstraintEngine(constraints: List<Constraint>) {
         Violation(
             fingerprint = fingerprint(c.rulesetId, formName(c), c.canonicalArgs() + discriminators),
             rulesetId = c.rulesetId,
+            packUid = c.packUid,
             chunkId = c.chunkId,
+            // The same discriminator the fingerprint uses, so "which tracker is this about"
+            // and "which acceptance does this correspond to" cannot disagree.
+            trackerKey = discriminators.firstOrNull { it.first == "key" }?.second,
             explanation = explanation,
         )
 

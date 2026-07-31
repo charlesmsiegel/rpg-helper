@@ -29,8 +29,8 @@ class ModelsViewModel(application: Application) : AndroidViewModel(application) 
 
     private val library = ModelLibrary(application.filesDir.toPath().resolve("models"))
 
-    /** For a caller that has weights and wants to know where they landed. */
-    fun fileOf(name: String) = library.fileOf(name)
+    /** For a runtime binding that has weights and wants to know where they landed. */
+    fun fileOf(manifest: ModelManifest, name: String) = library.fileOf(manifest, name)
 
     var models by mutableStateOf<List<ShelvedModel>>(emptyList())
         private set

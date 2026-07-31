@@ -3,6 +3,7 @@ package dev.rpghelper.session
 import dev.rpghelper.builder.CorpusSpec
 import dev.rpghelper.builder.PackBuilder
 import dev.rpghelper.state.DocumentStore
+import dev.rpghelper.state.DroppedConstraint
 import dev.rpghelper.state.StateDb
 import dev.rpghelper.state.TrackerValue
 import java.nio.file.Files
@@ -220,6 +221,54 @@ class RulesTest {
     fun `a draft row says minimums are not being checked`() {
         val id = sheet("aptitude.might" to 1.0)
         assertTrue(withLibrary { Rules.states(it, documents) }.single { it.documentId == id }.draft)
+    }
+
+    @Test
+    fun `a violation carries the pack that stated the rule`() {
+        // `chunk_id` is pack-local, and a ruleset is routinely supplied by two packs. The
+        // citation used to be resolved by searching for the id across them in priority
+        // order, so a supplement's rule could open an unrelated core-book passage under a
+        // citation that looked entirely real.
+        val id = sheet("aptitude.might" to 7.0, "aptitude.wits" to 3.0)
+        val flagged = withLibrary { Rules.check(it, documents, id) }
+            .flagged.single { "might" in it.violation.explanation }
+
+        assertEquals("srd:emberlight", flagged.violation.packUid, "the pack travels with the rule")
+        assertEquals(flagged.violation.packUid, flagged.citation?.packUid, "and the citation agrees")
+    }
+
+    @Test
+    fun `a violation about one tracker names it, and one about a total does not`() {
+        // The Documents surface renders a flag beside the value it concerns, and the only
+        // alternative to carrying the key was matching the explanation as a substring --
+        // which attaches a flag about `skill.melee-specialty` to `skill.melee` as well.
+        val id = sheet("aptitude.might" to 7.0, "aptitude.wits" to 9.0)
+        val flagged = withLibrary { Rules.check(it, documents, id) }.flagged
+
+        assertEquals(
+            setOf("aptitude.might", "aptitude.wits"),
+            flagged.mapNotNull { it.violation.trackerKey }.toSet(),
+            "each range violation names its own tracker",
+        )
+        assertTrue(
+            flagged.any { it.violation.trackerKey == null && "totals" in it.violation.explanation },
+            "and the sum names none, because no single value is at fault",
+        )
+    }
+
+    @Test
+    fun `a ruleset whose every rule failed to load is not reported as an absent pack`() {
+        // Two different states with two different remedies: "install or activate the pack"
+        // sends the user to fix something that is not broken, while the actual fault -- rows
+        // the pack could not load -- sits in the dropped list on the Packs surface.
+        val dropped = listOf(DroppedConstraint(1, "malformed"))
+        val checkedWithDrops = RuleCheck(emptyList(), emptyList(), dropped, unchecked = false)
+        assertFalse(checkedWithDrops.unchecked)
+
+        // And the real path: a ruleset nothing supplies has no dropped rows either.
+        val id = sheet("aptitude.might" to 3.0, ruleset = "some-other-game")
+        val check = withLibrary { Rules.check(it, documents, id) }
+        assertTrue(check.unchecked && check.dropped.isEmpty())
     }
 
     // ------------------------------------------------------------------ tap-through
