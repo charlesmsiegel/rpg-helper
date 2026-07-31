@@ -11,8 +11,10 @@ executor and the builder's validator agreeing about what an expression means.
 
 Implementation order: **8 of 8** — see the README for the full sequence and why it runs in this order.
 
-Status: specified, unimplemented. The dice **grammar** is already pinned in
-`00-pack-schema.md` §6; this document specifies its **executor**.
+Status: implemented by `:capabilities`. The dice **grammar** lives in `00-pack-schema.md`
+§6 and `:pack`, because the outcome range is needed to validate a table's coverage at
+activation; the **executor** is here, and the sampler vectors in
+`conformance/dice-vectors.json` now have a consumer on this side of the contract.
 
 ---
 
