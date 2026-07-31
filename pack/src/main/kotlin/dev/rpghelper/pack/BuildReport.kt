@@ -37,15 +37,22 @@ object BuildReport {
      */
     val SEVERITIES: List<String> = listOf("unchecked", "dropped", "note")
 
-    /** The pack's own report, worst first. Empty when it kept nothing back. */
-    fun of(db: Db): List<BuildNote> = runCatching {
-        db.map(
-            "SELECT severity, subject_kind, subject_id, validation, detail FROM build_report",
-        ) {
-            BuildNote(it.string(0), it.string(1), it.stringOrNull(2), it.string(3), it.stringOrNull(4))
-        }
-    }.getOrElse { emptyList() }
-        .sortedBy { SEVERITIES.indexOf(it.severity).takeIf { rank -> rank >= 0 } ?: SEVERITIES.size }
+    /**
+     * The pack's own report, worst first. Empty when it kept nothing back.
+     *
+     * **Throws rather than returning empty** when the table cannot be read as the format
+     * declares it. Swallowing the failure made a malformed `build_report` indistinguishable
+     * from a clean build — so a pack could hide an `unchecked` warning simply by shipping a
+     * table the reader chokes on, which is the one thing this reader exists to prevent. The
+     * activation gate checks the shape (see `PackValidator`), so by the time this runs on
+     * an installed pack the columns are known good; the throw is what keeps that true
+     * rather than assumed.
+     */
+    fun of(db: Db): List<BuildNote> = db.map(
+        "SELECT severity, subject_kind, subject_id, validation, detail FROM build_report",
+    ) {
+        BuildNote(it.string(0), it.string(1), it.stringOrNull(2), it.string(3), it.stringOrNull(4))
+    }.sortedBy { SEVERITIES.indexOf(it.severity).takeIf { rank -> rank >= 0 } ?: SEVERITIES.size }
 
     /**
      * True when the pack admits it ships content nobody adjudicated.

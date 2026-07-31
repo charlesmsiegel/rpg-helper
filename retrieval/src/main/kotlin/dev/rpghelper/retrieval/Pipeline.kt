@@ -176,7 +176,13 @@ object Pipeline {
             trimmed += own.joinToString(" ")
         }
         val expression = LexicalQuery.build(groups.flatMap { it.terms })
-        val vectors = embed?.invoke(rewritten.terms.joinToString(" "), active.distinctContracts)
+        // **The same budgeted terms both halves searched for.** This embedded
+        // `rewritten.terms` -- every expansion, including the ones the loop above had just
+        // dropped for exceeding the budget -- so dense retrieval could return candidates
+        // for concepts the lexical query deliberately discarded, and the embedding input
+        // grew with the alias table rather than with the question. A pack may define many
+        // canonicals for one alias, so that is unbounded in the direction that matters.
+        val vectors = embed?.invoke(groups.flatMap { it.terms }.joinToString(" "), active.distinctContracts)
             ?: queryVectors
         val gatedOut = mutableListOf<String>()
         trimmed.forEach { gatedOut += "alias expansions dropped for '$it': term budget" }

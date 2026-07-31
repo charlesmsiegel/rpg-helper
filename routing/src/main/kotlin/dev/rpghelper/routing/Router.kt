@@ -177,7 +177,37 @@ class Router(
                 footer += citation
             }
         }
-        return Card.Derived(candidate.ref, candidate.text, chips.sortedBy { it.start }, footer)
+        return Card.Derived(candidate.ref, candidate.text, nonOverlapping(chips, footer), footer)
+    }
+
+    /**
+     * Chips in span order, with **overlaps demoted to the footer**.
+     *
+     * `Attributions.validate` already decides this question for generated answers, in the
+     * same words: two chips over the same bytes render as one run carrying two citations,
+     * which is precisely the *which chunk actually supports this* ambiguity chips exist to
+     * remove. The derived path built chips straight from `chunk_derivation` and applied no
+     * such rule — and those rows are **pack-controlled**, so a pack could declare
+     * overlapping claim spans and every renderer would silently truncate one of them.
+     *
+     * The overlapping citation is not dropped; it moves to the footer, which says the
+     * weaker and still-true thing: this card drew on that source. Discarding it outright
+     * would lose a real attribution to fix a rendering problem.
+     */
+    private fun nonOverlapping(chips: List<Chip>, footer: MutableList<Citation>): List<Chip> {
+        val kept = mutableListOf<Chip>()
+        var cursor = 0
+        // Earlier start first, and the longer span first among equal starts -- the same
+        // ordering `Attributions.validate` uses, so the two paths keep the same chip.
+        for (chip in chips.sortedWith(compareBy({ it.start }, { -(it.end - it.start) }))) {
+            if (chip.start < cursor) {
+                footer += chip.citation
+                continue
+            }
+            kept += chip
+            cursor = chip.end
+        }
+        return kept
     }
 
     // ------------------------------------------------------------------ route 3

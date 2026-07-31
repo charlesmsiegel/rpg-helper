@@ -160,8 +160,33 @@ class PackValidator(private val supportedEmbedders: Set<EmbedderContract>) {
         checkTableRows(db, chunks, violations)
         checkAliasNormalization(db, violations)
         checkClosedVocabularies(db, violations)
+        checkBuildReport(db, violations)
 
         return ValidationReport(violations)
+    }
+
+    /**
+     * `build_report` must be **readable**, because it is the one thing the app carries
+     * forward on trust.
+     *
+     * Every other check here verifies a property of the pack. This one verifies that a
+     * *claim the pack makes about itself* can be read at all — specifically the `unchecked`
+     * severity, meaning model-written prose no judge adjudicated. The reader used to
+     * swallow a read failure and return an empty report, which made a malformed table
+     * indistinguishable from a clean build: a pack could suppress its own warning by
+     * shipping columns the reader chokes on.
+     *
+     * `REQUIRED_TABLES` only established that the name exists. This reads one row's worth
+     * of the declared shape, which is what turns "the table is there" into "the report can
+     * be read".
+     */
+    private fun checkBuildReport(db: Db, out: MutableList<Violation>) {
+        runCatching { BuildReport.of(db) }.onFailure {
+            out += Violation(
+                MALFORMED_SCHEMA,
+                "build_report cannot be read as the format declares it: ${it.message}",
+            )
+        }
     }
 
     private fun readMeta(db: Db): PackMeta =

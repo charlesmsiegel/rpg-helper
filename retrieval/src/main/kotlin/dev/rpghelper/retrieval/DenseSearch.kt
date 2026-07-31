@@ -34,14 +34,37 @@ object DenseSearch {
         val queryNorm = norm(query)
         if (queryNorm < 1e-12) return emptyList()
 
-        // Streamed, not materialized. `map` would build the whole vector corpus -- every
-        // embedding ByteArray of a 300-page book -- in heap before scoring any of it, for
-        // every query, to keep fifty. Scoring row by row keeps only the best hit per chunk
-        // and lets each BLOB be collected immediately.
-        val best = HashMap<Long, VectorHit>()
+        // Streamed, not materialized, and **bounded to `depth` survivors**. `map` would
+        // build the whole vector corpus -- every embedding ByteArray of a 300-page book --
+        // in heap before scoring any of it. Keeping one hit per chunk instead was better
+        // and still wrong at the ceiling: a valid pack may hold 500,000 chunks, so the
+        // survivor map was a half-million-entry object graph built on a phone to return
+        // fifty results.
+        //
+        // Ordering by `chunk_id` is what makes the bound possible: every row for a chunk
+        // arrives together, so a chunk can be *finalized* when the id changes and offered
+        // to a queue that never holds more than `depth`. `idx_vectors_chunk` makes the
+        // ordering an index walk rather than a sort.
+        val worstFirst = Comparator<VectorHit> { a, b ->
+            when {
+                betterThan(a, b) -> 1
+                betterThan(b, a) -> -1
+                else -> 0
+            }
+        }
+        val survivors = java.util.PriorityQueue(maxOf(depth, 1), worstFirst)
+        var currentChunk: Long? = null
+        var currentBest: VectorHit? = null
+
+        fun finalize() {
+            val finished = currentBest ?: return
+            survivors += finished
+            if (survivors.size > depth) survivors.poll()
+        }
+
         pack.db.forEachRow(
             "SELECT chunk_id, role, subchunk_index, embedding, window_start, window_end " +
-                "FROM vectors",
+                "FROM vectors ORDER BY chunk_id",
         ) { row ->
             val chunkId = row.long(0)
             val ref = ChunkRef(pack.packUid, chunkId)
@@ -64,11 +87,19 @@ object DenseSearch {
             )
             // Same survivor rule as `Fusion.collapseToChunks`, applied as we go: best
             // score, then content over expansion, then the earliest window.
-            val incumbent = best[chunkId]
-            if (incumbent == null || betterThan(hit, incumbent)) best[chunkId] = hit
+            if (chunkId != currentChunk) {
+                finalize()
+                currentChunk = chunkId
+                currentBest = null
+            }
+            val incumbent = currentBest
+            if (incumbent == null || betterThan(hit, incumbent)) currentBest = hit
         }
-        hits += best.values
+        finalize()
 
+        hits += survivors
+        // Already one hit per chunk, so this only orders them -- but it is the same call
+        // fusion makes, and having one definition of "best first" is the point.
         return Fusion.collapseToChunks(hits).take(depth)
     }
 

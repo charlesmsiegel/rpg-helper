@@ -457,4 +457,36 @@ class PackValidatorHardeningTest {
         }
         assertFalse(report.isValid, "expected a refusal, got:\n$report")
     }
+
+    // ---------------------------------------------------- the pack's claim about itself
+
+    @Test
+    fun `a build_report that cannot be read is a refusal, not an empty report`() {
+        // `build_report` is the one thing the app carries forward on trust: the builder's
+        // own admission that it shipped prose no judge adjudicated. The reader swallowed a
+        // read failure and returned nothing, which made a malformed table indistinguishable
+        // from a clean build -- so a pack could suppress its own warning simply by shipping
+        // columns the reader chokes on. `REQUIRED_TABLES` only established that the name
+        // exists.
+        val report = validate {
+            it.exec("DROP TABLE build_report")
+            it.exec("CREATE TABLE build_report (report_id INTEGER PRIMARY KEY, note TEXT)")
+        }
+        assertTrue(
+            ViolationCode.MALFORMED_SCHEMA in report.codes,
+            "expected MALFORMED_SCHEMA, got:\n$report",
+        )
+    }
+
+    @Test
+    fun `a readable build_report does not make a pack invalid`() {
+        val report = validate {
+            it.exec(
+                "INSERT INTO build_report (report_id, severity, subject_kind, subject_id, " +
+                    "validation, detail) VALUES (50, 'unchecked', 'chunk', '4', " +
+                    "'claim-support', 'no judge ran')",
+            )
+        }
+        assertTrue(report.isValid, "an honest admission is not a defect:\n$report")
+    }
 }

@@ -9,7 +9,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -77,11 +77,6 @@ data class Turn(val query: String, val answer: Answer?, val rendered: String)
 fun AskScreen(model: AskViewModel = viewModel()) {
     var question by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
-    val controls = RollControls(
-        tablesFor = model::tablesFor,
-        resultFor = model::rollOf,
-        onRoll = model::roll,
-    )
 
     // The newest turn is the one being read. Scrolling on answer rather than on every
     // recomposition leaves the user's own scroll position alone while they read back.
@@ -115,7 +110,7 @@ fun AskScreen(model: AskViewModel = viewModel()) {
                 modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                items(model.turns) { turn ->
+                itemsIndexed(model.turns) { index, turn ->
                     Column {
                         Text(
                             text = turn.query,
@@ -124,6 +119,14 @@ fun AskScreen(model: AskViewModel = viewModel()) {
                         )
                         val answer = turn.answer
                         if (answer != null) {
+                            // Bound to *this* turn: a same-uid replacement reuses
+                            // `(pack_uid, chunk_id)`, so a control keyed on the ref alone
+                            // would roll the new edition's table under an older card.
+                            val controls = RollControls(
+                                tablesFor = { ref -> model.tablesFor(index, ref) },
+                                resultFor = { ref, tableId -> model.rollOf(index, ref, tableId) },
+                                onRoll = { ref, table -> model.roll(index, ref, table) },
+                            )
                             answer.cards.forEach { card ->
                                 AnswerCard(card = card, rolls = controls)
                             }

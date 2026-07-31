@@ -628,4 +628,55 @@ class RouterTest {
             "the heading has to be charged: ${answer.diagnostics}",
         )
     }
+
+    // ---------------------------------------------------------------- overlapping claims
+
+    @Test
+    fun `overlapping derived claim spans do not truncate each other`() {
+        // `chunk_derivation` is pack-controlled and nothing stopped two rows claiming
+        // overlapping spans. Every renderer places markers by walking spans in order and
+        // advancing a cursor, so the second span was silently shortened to the bytes the
+        // first had not taken -- the citation then pointed at a run it only partly
+        // supported, on all three surfaces at once.
+        //
+        // `Attributions.validate` already answers this for generated answers: two chips
+        // over the same bytes are one run with two citations, which is the ambiguity chips
+        // exist to remove. The overlapping citation is demoted to the footer, which says
+        // the weaker and still-true thing.
+        val derivations = DerivationResolver {
+            listOf(
+                Derivation(ref(2), 0, 10),
+                Derivation(ref(3), 5, 15),
+            )
+        }
+        val answer = router(derivations = derivations).route(
+            retrieved(candidate(1, "glossary", origin = "derived", text = "a".repeat(20))),
+            generator = null,
+            activePacks = listOf(pack),
+        )
+        val card = answer.cards.filterIsInstance<Card.Derived>().single()
+
+        assertEquals(1, card.chips.size, "only the non-overlapping chip stays a chip")
+        assertEquals(0 to 10, card.chips.single().start to card.chips.single().end)
+        assertEquals(
+            listOf(citation(3)),
+            card.footer,
+            "and the overlapping citation is kept, as a weaker claim",
+        )
+    }
+
+    @Test
+    fun `non-overlapping derived claims all stay chips`() {
+        val derivations = DerivationResolver {
+            listOf(Derivation(ref(2), 0, 5), Derivation(ref(3), 5, 10))
+        }
+        val answer = router(derivations = derivations).route(
+            retrieved(candidate(1, "glossary", origin = "derived", text = "a".repeat(10))),
+            generator = null,
+            activePacks = listOf(pack),
+        )
+        val card = answer.cards.filterIsInstance<Card.Derived>().single()
+        assertEquals(2, card.chips.size)
+        assertTrue(card.footer.isEmpty())
+    }
 }
