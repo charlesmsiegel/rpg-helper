@@ -142,11 +142,8 @@ honestly promise today.
 
 ## 2. Schema
 
+<!-- BEGIN GENERATED DDL: edit StateSchema.V1, not this block -->
 ```sql
-PRAGMA user_version = 1;
-
--- Installed packs -------------------------------------------------------------
-
 CREATE TABLE installed_packs (
     install_id   INTEGER PRIMARY KEY,
     pack_uid     TEXT    NOT NULL,
@@ -163,14 +160,11 @@ CREATE TABLE installed_packs (
     priority     INTEGER NOT NULL
 );
 
-CREATE UNIQUE INDEX idx_packs_priority ON installed_packs(priority);
+CREATE UNIQUE INDEX idx_packs_priority
+    ON installed_packs(priority) WHERE state = 'ready';
 
--- Unique among ready rows only, so a replacement can be staged alongside the pack it
--- replaces (§1). A column-level UNIQUE would make the journal's first step impossible.
 CREATE UNIQUE INDEX idx_packs_uid_ready
     ON installed_packs(pack_uid) WHERE state = 'ready';
-
--- Documents -------------------------------------------------------------------
 
 CREATE TABLE documents (
     document_id INTEGER PRIMARY KEY,
@@ -206,16 +200,12 @@ CREATE TABLE accepted_violations (
     PRIMARY KEY (document_id, fingerprint)
 );
 
--- Conversation ----------------------------------------------------------------
-
 CREATE TABLE conversation_turns (
     turn_id  INTEGER PRIMARY KEY,
     asked_at TEXT    NOT NULL,
     query    TEXT    NOT NULL,
     cards    TEXT    NOT NULL
 );
-
--- Generated answer cache ------------------------------------------------------
 
 CREATE TABLE answer_cache (
     cache_key    TEXT PRIMARY KEY,
@@ -224,17 +214,19 @@ CREATE TABLE answer_cache (
     last_used_at TEXT NOT NULL
 );
 
--- Models ----------------------------------------------------------------------
-
 CREATE TABLE models (
-    model_id      TEXT PRIMARY KEY,
-    role          TEXT    NOT NULL,
+    model_id      TEXT    PRIMARY KEY,
+    role          TEXT    NOT NULL CHECK (role IN ('embedder', 'asr', 'generative')),
     state         TEXT    NOT NULL,
     bytes_total   INTEGER,
     bytes_fetched INTEGER,
     updated_at    TEXT    NOT NULL
 );
 ```
+<!-- END GENERATED DDL -->
+
+`PRAGMA user_version` is set by the migrator rather than by this block, so that applying
+a migration and recording that it was applied happen in one transaction.
 
 ### Every connection sets its pragmas
 
@@ -252,6 +244,11 @@ Here the app owns the database and *can* rely on the constraints, but only if it
 them on, on every connection, including the ones a migration opens.
 
 ### Notes on choices that are not obvious
+
+**The three tracker types are `number`, `flag`, and `text`**, defined in
+`07-documents-and-constraints-spec.md` §3.2. There is deliberately no pool type: a
+hit-point pool is two `number` trackers, which is what makes each independently
+addressable by a constraint.
 
 **Trackers use typed columns, not one value column.** `sum_range` sums numeric trackers;
 a single TEXT column would make that a scan-and-parse, and would let a `flag` silently

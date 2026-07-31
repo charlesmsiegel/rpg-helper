@@ -2,9 +2,6 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     alias(libs.plugins.kotlin.jvm)
-    // PackForge is a fixture, not a test: :state's install tests need to forge packs too,
-    // and a fixture shared through a real source set beats duplicating the schema.
-    `java-test-fixtures`
 }
 
 repositories {
@@ -12,9 +9,11 @@ repositories {
 }
 
 dependencies {
+    // The activation gate lives in :pack; installing is what invokes it.
+    implementation(project(":pack"))
     implementation(libs.sqlite.jdbc)
-    testFixturesImplementation(libs.sqlite.jdbc)
     testImplementation(kotlin("test"))
+    testImplementation(testFixtures(project(":pack")))
 }
 
 java {

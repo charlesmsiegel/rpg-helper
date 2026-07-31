@@ -55,13 +55,14 @@ not.
 
 | Component | State |
 |---|---|
-| Specifications | written for every subsystem; the pack schema is enforced against the code by test |
+| Specifications | written for every subsystem; the pack and state schemas are enforced against the code by test |
 | Pack reader + activation validator (`:pack`) | implemented |
-| Retrieval, answer cards, model runtime, documents, capabilities, UI | specified, unimplemented |
+| App state — install journal, documents, trackers (`:state`) | implemented |
+| Retrieval, answer cards, model runtime, capabilities, UI | specified, unimplemented |
 | Android app module | not started |
 | Pack builder | separate project, not started |
 
-`:pack` is a plain Kotlin/JVM library — it holds the format definition and every check
+`:pack` and `:state` are plain Kotlin/JVM libraries. `:pack` is a library — it holds the format definition and every check
 a pack must survive before the app will activate it. It is deliberately Android-free so
 far: SQLite sits behind a small `Db` interface, backed by `sqlite-jdbc` here and by a
 bundled SQLite on the device later.
@@ -74,7 +75,7 @@ Requires a JDK 21 to build — the float16 tests check the hand-written codec ag
 yet.
 
 ```sh
-./gradlew :pack:test
+./gradlew test
 ```
 
 CI (`.github/workflows/ci.yml`) runs the same command, but is currently

@@ -470,12 +470,12 @@ object PackForge {
 
 // ---------------------------------------------------------------------- JDBC helpers
 
-internal fun Connection.exec(sql: String) {
+fun Connection.exec(sql: String) {
     createStatement().use { it.execute(sql) }
 }
 
 /** Binds one row and executes it. */
-internal fun Connection.prepare(sql: String, bind: (PreparedStatement) -> Unit) {
+fun Connection.prepare(sql: String, bind: (PreparedStatement) -> Unit) {
     prepareStatement(sql).use { statement ->
         bind(statement)
         statement.executeUpdate()
@@ -483,6 +483,6 @@ internal fun Connection.prepare(sql: String, bind: (PreparedStatement) -> Unit) 
 }
 
 /** Hands the statement over so the caller can add and execute a batch. */
-internal fun Connection.prepareBatch(sql: String, fill: (PreparedStatement) -> Unit) {
+fun Connection.prepareBatch(sql: String, fill: (PreparedStatement) -> Unit) {
     prepareStatement(sql).use(fill)
 }

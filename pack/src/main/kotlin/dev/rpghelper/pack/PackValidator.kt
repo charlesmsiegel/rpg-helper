@@ -137,11 +137,8 @@ class PackValidator(private val supportedEmbedders: Set<EmbedderContract>) {
 
     private fun readMeta(db: Db): PackMeta =
         db.map(
-            """
-            SELECT schema_version, pack_uid, pack_version, title, ruleset_id,
-                   embedder_id, embedder_dim
-            FROM pack_meta
-            """.trimIndent(),
+            "SELECT schema_version, pack_uid, pack_version, title, ruleset_id, " +
+                "embedder_id, embedder_dim FROM pack_meta",
         ) {
             PackMeta(
                 schemaVersion = it.int(0),
