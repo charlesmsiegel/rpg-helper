@@ -5,6 +5,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -53,9 +54,50 @@ class MainActivity : ComponentActivity() {
         setContent {
             MaterialTheme {
                 Surface(Modifier.fillMaxSize()) {
-                    AskScreen()
+                    RootScreen()
                 }
             }
+        }
+    }
+}
+
+/** The surfaces this build has. Each one owns its own ViewModel and its own store handle. */
+enum class Destination(val label: String) {
+    ASK("Ask"),
+    PACKS("Packs"),
+}
+
+/**
+ * The whole app, which is two surfaces and a way between them.
+ *
+ * A `when` over an enum rather than a navigation library: there are two destinations and no
+ * arguments to pass, and a dependency whose whole job is to hold one enum would be a
+ * dependency to keep up to date for nothing. **The Packs surface being reachable is the
+ * point** — everything it shows was computable and appeared nowhere, so a user could not see
+ * what their packs corrected or what their builder kept back.
+ *
+ * Each surface's ViewModel opens its own `Store`. That is deliberate: `StateDb` serializes
+ * its own connection, and the alternative — one shared handle — would make the surfaces
+ * contend for it while a question is being answered.
+ */
+@Composable
+fun RootScreen() {
+    var destination by remember { mutableStateOf(Destination.ASK) }
+    Column(Modifier.fillMaxSize()) {
+        Row(Modifier.fillMaxWidth()) {
+            Destination.entries.forEach { candidate ->
+                TextButton(
+                    onClick = { destination = candidate },
+                    enabled = candidate != destination,
+                    modifier = Modifier.padding(horizontal = 4.dp),
+                ) {
+                    Text(candidate.label)
+                }
+            }
+        }
+        when (destination) {
+            Destination.ASK -> AskScreen()
+            Destination.PACKS -> PacksScreen()
         }
     }
 }
