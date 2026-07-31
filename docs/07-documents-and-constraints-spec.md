@@ -13,7 +13,8 @@ normative about *columns*.
 
 Implementation order: **7 of 8** — see the README for the full sequence and why it runs in this order.
 
-Status: specified, unimplemented.
+Status: implemented by `:state`: the five predicate forms, the fingerprint, and the
+dropped-constraint report. The document UI that surfaces them is not.
 
 ---
 

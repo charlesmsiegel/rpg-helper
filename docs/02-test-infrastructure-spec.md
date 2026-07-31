@@ -11,8 +11,10 @@ query sets, the claim-support judge, the shared conformance vectors, and what ga
 
 Implementation order: **2 of 8** — see the README for the full sequence and why it runs in this order.
 
-Status: specified, partially implemented — the pack rejection corpus and the schema-drift
-gate exist in `:pack`.
+Status: implemented. The corpus lives in `corpus/srd/` as text and is assembled into a
+pack by `:builder` at test time; recall, claim support, the rejection corpus, the
+schema-drift check, and the dice conformance vectors all gate from there. The semantic
+tier and the mutation checks wait on real weights and on a release branch respectively.
 
 ---
 

@@ -13,7 +13,9 @@ Retrieval never decides whether something is quoted.
 
 Implementation order: **4 of 8** — see the README for the full sequence and why it runs in this order.
 
-Status: specified, unimplemented.
+Status: implemented by `:retrieval`, and gated end to end against `corpus/srd/` by
+`:builder`. The dense half runs against the stand-in embedder until real weights arrive,
+which is why the recall gate has a structural threshold as well as a semantic one.
 
 ---
 

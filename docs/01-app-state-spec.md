@@ -9,7 +9,8 @@ window.
 
 Implementation order: **1 of 8** — see the README for the full sequence and why it runs in this order.
 
-Status: specified, unimplemented.
+Status: implemented by `:state` — the journalled install, reader leases, documents,
+trackers, acceptances, and the constraint engine.
 
 ---
 

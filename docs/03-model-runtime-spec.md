@@ -9,7 +9,11 @@ the download contract, and the degradation behaviour each absence produces.
 
 Implementation order: **3 of 8** — see the README for the full sequence and why it runs in this order.
 
-Status: specified, unimplemented.
+Status: implemented by `:model`, except the weights. The interfaces, the registry, the
+attribution contract with its unattributed-region fallback, the availability states, and
+the verified resumable download are all in place. `HashingEmbedder` is a deterministic
+stand-in with no weights, and the manifests in `models/` refuse to parse until a real
+digest is filled in — deliberately, so an unverified download cannot ship.
 
 ---
 
