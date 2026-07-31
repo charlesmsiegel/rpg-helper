@@ -1,3 +1,17 @@
+pluginManagement {
+    repositories {
+        google {
+            content {
+                includeGroupByRegex("com\\.android.*")
+                includeGroupByRegex("com\\.google.*")
+                includeGroupByRegex("androidx.*")
+            }
+        }
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+
 rootProject.name = "rpg-helper"
 
 include(":pack")
@@ -9,3 +23,5 @@ include(":capabilities")
 include(":routing")
 
 include(":cli")
+
+include(":app")

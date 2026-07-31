@@ -64,9 +64,9 @@ and get quote cards carrying the book's bytes and citations resolved out of the 
 | Model interfaces, attributions, claim support, downloader (`:model`) | implemented; no weights bundled |
 | Capabilities and the dice roller (`:capabilities`) | implemented |
 | Pack builder (`:builder`) | implemented; anchors, claim judging, expansion generation |
-| Command-line tool (`:cli`) | implemented — `build`, `verify`, `ask`, `roll`, `fetch-model` |
+| Command-line tool (`:cli`) | implemented — `build`, `verify`, `ask`, `roll`, `fetch-model`, `make-manifest`, and the library commands |
+| Android app (`:app`) | started — the Ask surface and all five cards render; builds to a debug APK |
 | Test corpus (`corpus/srd`) | Emberlight, an original CC BY 4.0 game written for this purpose |
-| Android app module | not started — the one thing needing an SDK this repository does not have |
 
 Two things are deliberately absent rather than unfinished.
 
@@ -78,7 +78,14 @@ generative half runs against the `Generator` interface, so every card and every 
 exercised by fakes. Point `fetch-model` at a manifest and the download path is real,
 resumable, and digest-verified.
 
-**No UI.** `06-ui-spec.md` is written and unimplemented; it needs the `:app` module.
+**The UI is started, not finished.** `:app` renders the five cards with the
+quote/paraphrase distinction the spec requires — a verbatim body never passes through a
+rich-text renderer, and it does not re-wrap, because re-flowing a quotation is editing
+it. The surfaces around it (Packs, Documents, Settings) and the wiring from the input
+field to retrieval are not there yet.
+
+Building it needs an Android SDK, which is not vendored: set `sdk.dir` in
+`local.properties`, or `ANDROID_HOME`, and run `./gradlew :app:assembleDebug`.
 
 Every module is a plain Kotlin/JVM library, deliberately Android-free so far. `:pack`
 holds the format definition and every check a pack must survive before the app will

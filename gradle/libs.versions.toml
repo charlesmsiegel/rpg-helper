@@ -6,10 +6,26 @@ kotlin = "2.2.0"
 sqlite-jdbc = "3.50.3.0"
 # Runtime-only: constraint `args` is JSON, parsed to JsonElement. No compiler plugin.
 kotlinx-serialization = "1.9.0"
+# The Android Gradle Plugin and Compose. Kept to versions that pair with Kotlin 2.2:
+# Compose's compiler ships inside the Kotlin plugin from 2.0 on, so there is no separate
+# compiler-extension version to keep in step -- which was the usual source of drift.
+agp = "8.7.3"
+compose-bom = "2024.12.01"
+androidx-activity = "1.9.3"
+androidx-lifecycle = "2.8.7"
 
 [libraries]
 sqlite-jdbc = { module = "org.xerial:sqlite-jdbc", version.ref = "sqlite-jdbc" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinx-serialization" }
+compose-bom = { module = "androidx.compose:compose-bom", version.ref = "compose-bom" }
+compose-material3 = { module = "androidx.compose.material3:material3" }
+compose-ui = { module = "androidx.compose.ui:ui" }
+compose-ui-tooling-preview = { module = "androidx.compose.ui:ui-tooling-preview" }
+androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidx-activity" }
+androidx-lifecycle-viewmodel-compose = { module = "androidx.lifecycle:lifecycle-viewmodel-compose", version.ref = "androidx-lifecycle" }
 
 [plugins]
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
+android-application = { id = "com.android.application", version.ref = "agp" }
+kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
+kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
