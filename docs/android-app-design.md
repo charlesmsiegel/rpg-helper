@@ -1,4 +1,4 @@
-# RPG Helper — Android App Design
+# Ludex RPG — Android App Design
 
 The app. Runs entirely on a phone, entirely offline, against content packs built
 elsewhere (see `pack-builder-requirements.md`).

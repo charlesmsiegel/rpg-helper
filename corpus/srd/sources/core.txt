@@ -3,7 +3,7 @@ A Game of Cinders and Small Courage
 
 Second Edition
 
-Written for the rpg-helper project as an openly licensed test corpus.
+Written for the Ludex RPG project as an openly licensed test corpus.
 Published by the Cinder Press. All text in this document is released under
 the Creative Commons Attribution 4.0 International licence.
 

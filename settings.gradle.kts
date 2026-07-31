@@ -12,7 +12,7 @@ pluginManagement {
     }
 }
 
-rootProject.name = "rpg-helper"
+rootProject.name = "ludex-rpg"
 
 include(":pack")
 include(":state")

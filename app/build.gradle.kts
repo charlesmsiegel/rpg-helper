@@ -37,11 +37,11 @@ val extractLlamaJni by tasks.registering(Copy::class) {
 }
 
 android {
-    namespace = "dev.rpghelper.app"
+    namespace = "dev.ludex.app"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "dev.rpghelper.app"
+        applicationId = "dev.ludex.app"
         // 26 is where the app can rely on a modern ICU and on adoptable storage behaving.
         minSdk = 26
         targetSdk = 34
