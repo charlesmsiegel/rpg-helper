@@ -237,14 +237,33 @@ class HttpRangeFetcher(
             java.net.http.HttpResponse.BodyHandlers.ofInputStream(),
         )
         return when (response.statusCode()) {
-            // 206 means the range was honoured. 200 to a ranged request means it was not,
-            // and the body starts at zero — reported as such rather than assumed.
-            206 -> response.body() to from
+            // 206 says *a* range was served; `Content-Range` says which one. A
+            // misconfigured server answering 206 with `bytes 0-…` would otherwise be
+            // reported as starting where we asked, so the caller would append a whole
+            // body to the partial file, fail the digest after spending the bandwidth,
+            // and fail the same way on every retry instead of restarting cleanly.
+            206 -> response.body() to rangeStart(response)
+            // 200 to a ranged request means the range was ignored and the body starts at
+            // zero — reported as such rather than assumed.
             200 -> response.body() to 0L
             else -> {
                 response.body().close()
                 throw java.io.IOException("HTTP ${response.statusCode()}")
             }
         }
+    }
+
+    /** First byte of `Content-Range: bytes <start>-<end>/<total>`. */
+    private fun rangeStart(response: java.net.http.HttpResponse<InputStream>): Long {
+        // A 206 with no Content-Range is not something to guess about: assuming it
+        // starts where we asked is the assumption this method exists to remove.
+        val header = response.headers().firstValue("Content-Range").orElse(null)
+            ?: throw java.io.IOException("206 with no Content-Range; cannot place the bytes")
+        return CONTENT_RANGE.find(header)?.groupValues?.get(1)?.toLongOrNull()
+            ?: throw java.io.IOException("unparseable Content-Range '$header'")
+    }
+
+    private companion object {
+        val CONTENT_RANGE = Regex("bytes\\s+(\\d+)-")
     }
 }

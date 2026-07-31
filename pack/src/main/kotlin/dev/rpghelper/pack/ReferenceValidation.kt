@@ -7,6 +7,7 @@ import dev.rpghelper.pack.ViolationCode.DICE_EXPR_UNPARSEABLE
 import dev.rpghelper.pack.ViolationCode.TABLE_ROWS_INCOMPLETE
 import dev.rpghelper.pack.ViolationCode.ALIAS_NOT_NORMALIZED
 import dev.rpghelper.pack.ViolationCode.DUPLICATE_SOURCE_ID
+import dev.rpghelper.pack.ViolationCode.DUPLICATE_TABLE_ID
 import dev.rpghelper.pack.ViolationCode.DUPLICATE_SOURCE_UID
 import dev.rpghelper.pack.ViolationCode.GAP_REASON_INVALID
 import dev.rpghelper.pack.ViolationCode.MISSING_CHUNK_REFERENCE
@@ -177,8 +178,19 @@ internal fun checkAliasNormalization(db: Db, out: MutableList<Violation>) {
 internal fun checkTableRows(db: Db, chunks: Map<Long, ChunkRow>, out: MutableList<Violation>) {
     val tableChunk = mutableMapOf<Long, Long>()
     val expressions = mutableMapOf<Long, DiceExpression>()
+    val seenTableIds = mutableSetOf<Long>()
     db.forEachRow("SELECT table_id, chunk_id, dice_expr FROM tables") { row ->
         val tableId = row.long(0)
+        // Two rows can share a table_id under a pack's own DDL, and the maps below would
+        // keep whichever SQLite returned last: every row would then be validated against
+        // one definition while the roller resolved the id to either, rolling on one
+        // table's outcomes beneath another table's citation.
+        if (!seenTableIds.add(tableId)) {
+            out += Violation(
+                DUPLICATE_TABLE_ID,
+                "two tables rows share table_id $tableId",
+            )
+        }
         tableChunk[tableId] = row.long(1)
         val expr = row.string(2)
         val parsed = DiceExpression.parse(expr)

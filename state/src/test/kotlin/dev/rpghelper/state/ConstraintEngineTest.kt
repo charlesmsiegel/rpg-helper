@@ -386,6 +386,83 @@ class ConstraintEngineTest {
     }
 
     @Test
+    fun `statically inverted literal bounds are refused`() {
+        // Every value violates one side or the other, so the rule flags every document and
+        // the UI offers an impossible correction -- "this game allows 5-1".
+        assertTrue(
+            ConstraintParser.parse(
+                1, ruleset, "range", """{"selector":"a.b","min":5,"max":1}""", 1,
+            ).isFailure,
+        )
+        // A tracker-referenced bound is left alone: it depends on values the parser cannot
+        // see, and an inversion there is a fact about one document rather than the rule.
+        assertTrue(
+            ConstraintParser.parse(
+                1, ruleset, "range",
+                """{"selector":"a.b","min":5,"max":{"tracker":"cap.total"}}""", 1,
+            ).isSuccess,
+        )
+    }
+
+    @Test
+    fun `a numeric prerequisite is not satisfied by a non-numeric tracker`() {
+        // Defaulting a text or flag tracker to 0.0 satisfies any minimum at or below zero,
+        // so a prerequisite silently passes on a value that is not a rating at all.
+        val constraint = parse(
+            "requires",
+            """{"subject":"merit.brave","requires":[{"selector":"attr.wits","min":0}]}""",
+        )
+        val violations = ConstraintEngine(listOf(constraint)).evaluate(
+            trackers(
+                "merit.brave" to TrackerValue.Flag(true),
+                "attr.wits" to TrackerValue.Text("quick"),
+            ),
+            draft = false,
+        )
+        assertEquals(1, violations.size, "a text value is not a rating of zero")
+    }
+
+    @Test
+    fun `a shared exclusion pair cites the highest-priority pack`() {
+        // The spec pins which passage a shared violation cites so that two implementations
+        // pick the same one. Left to loader order, a rebuild could change the passage shown
+        // beneath a rule the user has already read.
+        fun excludes(chunk: Long, id: Long, priority: Int) = Constraint.Excludes(
+            chunkId = chunk, rulesetId = ruleset,
+            subject = Selector("merit.keen-sight"), excluded = listOf(Selector("flaw.blind")),
+            constraintId = id, packPriority = priority,
+        )
+        val document = trackers(
+            "merit.keen-sight" to TrackerValue.Flag(true),
+            "flaw.blind" to TrackerValue.Flag(true),
+        )
+
+        val rows = listOf(excludes(70, 9, 2), excludes(40, 3, 0), excludes(50, 1, 1))
+        for (order in listOf(rows, rows.reversed(), rows.shuffled())) {
+            val violation = ConstraintEngine(order).evaluate(document, draft = false).single()
+            assertEquals(40, violation.chunkId, "the highest-priority pack's passage")
+        }
+    }
+
+    @Test
+    fun `ties within one pack fall to the lowest constraint id`() {
+        fun excludes(chunk: Long, id: Long) = Constraint.Excludes(
+            chunkId = chunk, rulesetId = ruleset,
+            subject = Selector("merit.keen-sight"), excluded = listOf(Selector("flaw.blind")),
+            constraintId = id, packPriority = 0,
+        )
+        val document = trackers(
+            "merit.keen-sight" to TrackerValue.Flag(true),
+            "flaw.blind" to TrackerValue.Flag(true),
+        )
+        val rows = listOf(excludes(80, 12), excludes(20, 4), excludes(60, 7))
+        assertEquals(
+            20,
+            ConstraintEngine(rows.shuffled()).evaluate(document, draft = false).single().chunkId,
+        )
+    }
+
+    @Test
     fun `a quoted number is not a bound`() {
         assertTrue(
             ConstraintParser.parse(1, ruleset, "range", """{"selector":"a.b","min":"1"}""", 1)

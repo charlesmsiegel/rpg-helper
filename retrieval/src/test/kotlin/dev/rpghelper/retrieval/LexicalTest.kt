@@ -142,6 +142,17 @@ class LexicalTest {
     }
 
     @Test
+    fun `a supplementary-plane letter survives tokenization`() {
+        // Kotlin iterates a string as UTF-16, so a code point above the BMP is two
+        // surrogate Chars and `Char.isLetterOrDigit` rejects both -- while unicode61
+        // indexes the code point as a letter. The term would vanish from the query and
+        // could never match text the index demonstrably holds.
+        val gothic = "\uD800\uDF30\uD800\uDF32"  // GOTHIC LETTERS AHSA, BAIRKAN
+        assertEquals(listOf(gothic.lowercase()), Tokenizer.tokenize(gothic))
+        assertEquals(listOf("ash", gothic.lowercase()), Tokenizer.tokenize("ash $gothic"))
+    }
+
+    @Test
     fun `punctuation splits tokens`() {
         assertEquals(listOf("fast", "cast"), Tokenizer.tokenize("fast-cast"))
         assertEquals(listOf("d", "d"), Tokenizer.tokenize("D&D"))

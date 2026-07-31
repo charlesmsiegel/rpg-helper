@@ -20,9 +20,16 @@ object Tokenizer {
         val folded = fold(text)
         val tokens = mutableListOf<String>()
         val current = StringBuilder()
-        for (c in folded) {
-            if (c.isLetterOrDigit()) {
-                current.append(c)
+        // By code point, not by Char. A supplementary-plane letter is two UTF-16
+        // surrogates and `Char.isLetterOrDigit` rejects both, while `unicode61` indexes
+        // the code point as a letter -- so the term would vanish from the query and could
+        // never match text the index demonstrably holds.
+        var index = 0
+        while (index < folded.length) {
+            val codePoint = folded.codePointAt(index)
+            index += Character.charCount(codePoint)
+            if (Character.isLetterOrDigit(codePoint)) {
+                current.appendCodePoint(codePoint)
             } else if (current.isNotEmpty()) {
                 tokens += current.toString()
                 current.setLength(0)
@@ -41,8 +48,13 @@ object Tokenizer {
     fun fold(text: String): String {
         val decomposed = Normalizer.normalize(text, Normalizer.Form.NFD)
         val stripped = buildString(decomposed.length) {
-            for (c in decomposed) {
-                if (Character.getType(c) != Character.NON_SPACING_MARK.toInt()) append(c)
+            var at = 0
+            while (at < decomposed.length) {
+                val codePoint = decomposed.codePointAt(at)
+                at += Character.charCount(codePoint)
+                if (Character.getType(codePoint) != Character.NON_SPACING_MARK.toInt()) {
+                    appendCodePoint(codePoint)
+                }
             }
         }
         return Normalizer.normalize(stripped, Normalizer.Form.NFC).lowercase()

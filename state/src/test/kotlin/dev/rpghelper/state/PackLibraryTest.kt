@@ -222,6 +222,34 @@ class PackLibraryTest {
         lease.close()
     }
 
+    @Test
+    fun `a condemned pack cannot be borrowed even while its file exists`() {
+        // The race the lock closes: deciding on Files.exists alone would hand out a lease
+        // on bytes whose deletion is already committed, and the query would read a file
+        // that vanishes underneath it.
+        val pack = installed(library.install(forge()))
+        val holder = library.borrow(pack.installId)!!
+        library.uninstall(pack.installId)
+
+        assertTrue(Files.exists(library.fileOf(pack.installId)), "still there for its reader")
+        assertNull(library.borrow(pack.installId), "but not lendable to anyone new")
+        holder.close()
+        assertFalse(Files.exists(library.fileOf(pack.installId)))
+    }
+
+    @Test
+    fun `verification fails rather than throwing when the file has gone`() {
+        // External storage cleanup and a concurrent removal both arrive here, and neither
+        // is a digest mismatch. Letting the read throw leaves the row active for a pack
+        // every subsequent open will fail on.
+        val pack = installed(library.install(forge()))
+        library.setActive(pack.installId, true)
+        Files.delete(library.fileOf(pack.installId))
+
+        assertFalse(library.verify(pack.installId))
+        assertFalse(library.installed().single().active, "and the row is deactivated")
+    }
+
     // ------------------------------------------------------------------ reconciliation
 
     @Test

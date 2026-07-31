@@ -68,12 +68,18 @@ class DocumentStore(
         extensions: String? = null,
     ): Document {
         val now = clock()
-        db.execute(
-            "INSERT INTO documents (title, campaign, ruleset_id, draft, extensions, " +
-                "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            title, campaign, rulesetId, draft, extensions, now, now,
-        )
-        return requireNotNull(get(db.lastInsertId()))
+        // Insert and id-lookup together. `last_insert_rowid()` is per-connection, not
+        // per-caller, so with the connection lock released between the two a concurrent
+        // insert would hand this caller the *other* document -- and every subsequent
+        // wizard edit would land on the wrong character.
+        return db.transaction {
+            db.execute(
+                "INSERT INTO documents (title, campaign, ruleset_id, draft, extensions, " +
+                    "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                title, campaign, rulesetId, draft, extensions, now, now,
+            )
+            requireNotNull(get(db.lastInsertId()))
+        }
     }
 
     fun get(documentId: Long): Document? = db.query(

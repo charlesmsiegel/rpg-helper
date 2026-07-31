@@ -308,6 +308,26 @@ class PackValidatorHardeningTest {
     }
 
     @Test
+    fun `refuses an out-of-range schema version rather than truncating it`() {
+        // 4294967297 narrows to exactly 1 in an Int. The version is the one claim the gate
+        // must read literally, because on an unrecognised schema the remaining columns may
+        // not mean what this code thinks they mean.
+        assertRejects(ViolationCode.UNSUPPORTED_SCHEMA_VERSION) {
+            it.exec("UPDATE pack_meta SET schema_version = 4294967297")
+        }
+    }
+
+    @Test
+    fun `rejects two tables sharing a table_id`() {
+        // Every row would be validated against one definition while the roller resolved
+        // the id to either -- rolling on one table's outcomes beneath the other's citation.
+        assertRejects(ViolationCode.DUPLICATE_TABLE_ID) {
+            it.relax("tables")
+            it.exec("INSERT INTO tables (table_id, chunk_id, dice_expr) VALUES (1, 1, 'd6')")
+        }
+    }
+
+    @Test
     fun `rejects two chunks sharing a chunk_id`() {
         // A duplicate does not merely break lookups at runtime: it shrinks the validator's
         // own view of the pack, so the checks that would have caught the rest of the

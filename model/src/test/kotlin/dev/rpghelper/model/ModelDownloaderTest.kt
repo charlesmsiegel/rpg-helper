@@ -186,6 +186,24 @@ class ModelDownloaderTest {
     }
 
     @Test
+    fun `a 206 whose Content-Range starts at zero is not taken at its word`() {
+        // A misconfigured server answering 206 with `bytes 0-...` would otherwise be
+        // reported as starting where we asked, so the caller appends a whole body to the
+        // partial file, fails the digest after spending the bandwidth, and fails the same
+        // way on every retry instead of restarting cleanly.
+        Files.write(directory.resolve("weights.gguf.partial"), weights.copyOfRange(0, 5_000))
+
+        val lying = RangeFetcher { _, _ -> ByteArrayInputStream(weights) to 0L }
+        val result = ModelDownloader(directory, lying).download(manifest())
+
+        assertTrue(result is DownloadResult.Complete, "got $result")
+        assertTrue(
+            weights.contentEquals(Files.readAllBytes(directory.resolve("weights.gguf"))),
+            "the partial was discarded and the body written from the start",
+        )
+    }
+
+    @Test
     fun `a partial longer than the declared file is discarded rather than resumed onto`() {
         Files.write(directory.resolve("weights.gguf.partial"), ByteArray(weights.size + 500))
 

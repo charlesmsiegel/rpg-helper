@@ -258,33 +258,42 @@ class PackLibrary(
      * snapshot. The lease is what makes the file half of that snapshot true as well.
      */
     fun borrow(installId: Long): PackLease? = leaseLock.withLock {
+        // Refused once the file is condemned, even while it still exists. Deciding on
+        // `Files.exists` alone would hand out a lease on a file whose deletion is already
+        // committed, which is the query-snapshot guarantee failing in the one direction
+        // it is supposed to hold.
+        if (installId in pendingDeletion) return@withLock null
         val file = fileOf(installId)
         if (!Files.isRegularFile(file)) return@withLock null
         readers[installId] = (readers[installId] ?: 0) + 1
         PackLease(this, installId, file)
     }
 
-    internal fun release(installId: Long) {
-        val orphaned = leaseLock.withLock {
-            val remaining = (readers[installId] ?: 0) - 1
-            if (remaining > 0) {
-                readers[installId] = remaining
-                return@withLock false
-            }
-            readers.remove(installId)
-            pendingDeletion.remove(installId)
+    internal fun release(installId: Long) = leaseLock.withLock {
+        val remaining = (readers[installId] ?: 0) - 1
+        if (remaining > 0) {
+            readers[installId] = remaining
+            return@withLock
         }
-        if (orphaned) runCatching { Files.deleteIfExists(fileOf(installId)) }
+        readers.remove(installId)
+        if (pendingDeletion.remove(installId)) {
+            runCatching { Files.deleteIfExists(fileOf(installId)) }
+        }
     }
 
-    /** Deletes now if unread, otherwise marks it for the last reader to clean up. */
-    private fun deleteWhenUnread(installId: Long) {
-        val held = leaseLock.withLock {
-            val held = (readers[installId] ?: 0) > 0
-            if (held) pendingDeletion += installId
-            held
-        }
-        if (!held) runCatching { Files.deleteIfExists(fileOf(installId)) }
+    /**
+     * Deletes now if unread, otherwise leaves it to the last reader out.
+     *
+     * The condemnation and the unlink both happen **under the lock**. Releasing it in
+     * between leaves a window where `borrow` sees a file that still exists and hands out a
+     * lease on bytes that are about to vanish — a race that costs nothing to close and
+     * whose symptom, a query reading a deleted file, is untraceable after the fact.
+     */
+    private fun deleteWhenUnread(installId: Long) = leaseLock.withLock {
+        pendingDeletion += installId
+        if ((readers[installId] ?: 0) > 0) return@withLock
+        pendingDeletion -= installId
+        runCatching { Files.deleteIfExists(fileOf(installId)) }
     }
 
     fun fileOf(installId: Long): Path = packsDir.resolve("$installId.rpgpack")
@@ -293,7 +302,11 @@ class PackLibrary(
     fun verify(installId: Long): Boolean {
         val row = byId(installId) ?: return false
         val expected = row.fileSha256 ?: return false
-        val actual = sha256(fileOf(installId))
+        // A file that cannot be read is a file that cannot be verified, and it fails the
+        // same way a mismatch does. Letting the read throw past this point leaves the row
+        // active for a pack every subsequent open will fail on -- external storage
+        // cleanup and a concurrent removal both arrive here, not as a digest mismatch.
+        val actual = runCatching { sha256(fileOf(installId)) }.getOrNull()
         if (actual != expected) {
             db.execute(
                 "UPDATE installed_packs SET active = 0, verified_at = NULL WHERE install_id = ?",

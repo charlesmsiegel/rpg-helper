@@ -178,6 +178,15 @@ enum class ViolationCode {
     DANGLING_TABLE_REFERENCE,
 
     /**
+     * Two `tables` rows share a `table_id`.
+     *
+     * Validation would check every row against whichever definition the query returned
+     * last, while the roller resolves the same id to either — rolling on one table's
+     * outcomes and rendering them beneath the other's citation.
+     */
+    DUPLICATE_TABLE_ID,
+
+    /**
      * A table row's stored text is not the slice of its table chunk that its span names.
      *
      * The roller renders outcome text under the quotation rule. Unchecked, that launders

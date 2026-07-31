@@ -218,6 +218,32 @@ class StateDbTest {
     }
 
     @Test
+    fun `concurrent creates each get back the document they created`() {
+        // last_insert_rowid() is per-connection, not per-caller. With the lock released
+        // between the insert and the lookup, a caller receives the *other* thread's
+        // document -- and every subsequent wizard edit lands on the wrong character.
+        open("creates.db").use { db ->
+            val documents = DocumentStore(db)
+            val results = java.util.concurrent.ConcurrentHashMap<String, Long>()
+            val threads = (1..8).map { worker ->
+                Thread {
+                    repeat(10) { index ->
+                        val title = "doc-$worker-$index"
+                        results[title] = documents.create(title).documentId
+                    }
+                }
+            }
+            threads.forEach { it.start() }
+            threads.forEach { it.join() }
+
+            assertEquals(80, results.size)
+            for ((title, id) in results) {
+                assertEquals(title, documents.get(id)?.title, "id $id came back as someone else")
+            }
+        }
+    }
+
+    @Test
     fun `a rejected pack install does not leave the database in a transaction`() {
         open().use { db ->
             assertTrue(db.query("PRAGMA foreign_keys") { it.int(0) }.single() == 1)

@@ -86,7 +86,11 @@ class PackValidator(private val supportedEmbedders: Set<EmbedderContract>) {
         // Read the version alone before anything else: on an unrecognised version the
         // remaining columns may not mean what this code thinks they mean, and a
         // best-effort read of an unknown layout produces confident nonsense.
-        val versions = db.map("SELECT schema_version FROM pack_meta") { it.int(0) }
+        // Long, not Int. `Row.int` narrows, and a pack declaring 4294967297 would
+        // truncate to exactly 1 -- admitting a file that explicitly says it is a schema
+        // this build does not understand, which is the one claim the gate must read
+        // literally before it reads anything else.
+        val versions = db.map("SELECT schema_version FROM pack_meta") { it.long(0) }
         if (versions.size != 1) {
             violations += Violation(
                 PACK_META_NOT_SINGLETON,
@@ -94,7 +98,7 @@ class PackValidator(private val supportedEmbedders: Set<EmbedderContract>) {
             )
             return ValidationReport(violations)
         }
-        if (versions[0] != PackSchema.SCHEMA_VERSION) {
+        if (versions[0] != PackSchema.SCHEMA_VERSION.toLong()) {
             violations += Violation(
                 UNSUPPORTED_SCHEMA_VERSION,
                 "pack declares schema_version ${versions[0]}, " +

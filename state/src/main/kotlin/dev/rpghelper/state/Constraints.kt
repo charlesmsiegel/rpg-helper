@@ -87,6 +87,19 @@ sealed interface Constraint {
     val rulesetId: String
 
     /**
+     * `constraints.constraint_id`, and the priority of the pack it came from.
+     *
+     * Carried because the spec pins which passage a *shared* violation cites: where
+     * several rows produce the same `excludes` pair, the citation is the one from the
+     * highest-priority pack, ties falling to the lowest `constraint_id`. Without the two
+     * keys the winner is whichever row the loader happened to reach first — so a rebuild
+     * or a reordering of packs could change the passage shown beneath a rule the user
+     * already read.
+     */
+    val constraintId: Long
+    val packPriority: Int
+
+    /**
      * Everything the rule *says*, for the fingerprint.
      *
      * The bounds belong here, not just the selector: accepting "at most 5" is not
@@ -98,6 +111,8 @@ sealed interface Constraint {
     data class Range(
         override val chunkId: Long,
         override val rulesetId: String,
+        override val constraintId: Long = 0,
+        override val packPriority: Int = 0,
         val selector: Selector,
         val min: Bound?,
         val max: Bound?,
@@ -108,6 +123,8 @@ sealed interface Constraint {
     data class SumRange(
         override val chunkId: Long,
         override val rulesetId: String,
+        override val constraintId: Long = 0,
+        override val packPriority: Int = 0,
         val selector: Selector,
         val min: Bound?,
         val max: Bound?,
@@ -118,6 +135,8 @@ sealed interface Constraint {
     data class CountRange(
         override val chunkId: Long,
         override val rulesetId: String,
+        override val constraintId: Long = 0,
+        override val packPriority: Int = 0,
         val selector: Selector,
         val min: Bound?,
         val max: Bound?,
@@ -129,6 +148,8 @@ sealed interface Constraint {
         override val chunkId: Long,
         override val rulesetId: String,
         val subject: Selector,
+        override val constraintId: Long = 0,
+        override val packPriority: Int = 0,
         val requirements: List<Requirement>,
     ) : Constraint {
         data class Requirement(val selector: Selector, val min: Double?)
@@ -145,6 +166,8 @@ sealed interface Constraint {
         override val rulesetId: String,
         val subject: Selector,
         val excluded: List<Selector>,
+        override val constraintId: Long = 0,
+        override val packPriority: Int = 0,
     ) : Constraint {
         // Never used for the violation fingerprint, which is over the unordered pair --
         // see ConstraintEngine.checkExcludes. Present so the interface stays total.
@@ -197,24 +220,33 @@ object ConstraintParser {
 
     private val json = Json { ignoreUnknownKeys = true }
 
-    fun parse(constraintId: Long, rulesetId: String, form: String, args: String, chunkId: Long):
-        Result<Constraint> = runCatching {
+    fun parse(
+        constraintId: Long,
+        rulesetId: String,
+        form: String,
+        args: String,
+        chunkId: Long,
+        packPriority: Int = 0,
+    ): Result<Constraint> = runCatching {
         val obj = json.parseToJsonElement(args).jsonObject
         when (form) {
             "range" -> Constraint.Range(
-                chunkId, rulesetId, selector(obj, "selector"), bound(obj, "min"), bound(obj, "max"),
+                chunkId, rulesetId, constraintId, packPriority,
+                selector(obj, "selector"), bound(obj, "min"), bound(obj, "max"),
             ).also { requireUsableBounds(it.selector, it.min, it.max) }
 
             "sum_range" -> Constraint.SumRange(
-                chunkId, rulesetId, selector(obj, "selector"), bound(obj, "min"), bound(obj, "max"),
+                chunkId, rulesetId, constraintId, packPriority,
+                selector(obj, "selector"), bound(obj, "min"), bound(obj, "max"),
             ).also { requireUsableBounds(it.selector, it.min, it.max) }
 
             "count_range" -> Constraint.CountRange(
-                chunkId, rulesetId, selector(obj, "selector"), bound(obj, "min"), bound(obj, "max"),
+                chunkId, rulesetId, constraintId, packPriority,
+                selector(obj, "selector"), bound(obj, "min"), bound(obj, "max"),
             ).also { requireUsableBounds(it.selector, it.min, it.max) }
 
             "requires" -> Constraint.Requires(
-                chunkId, rulesetId, selector(obj, "subject"),
+                chunkId, rulesetId, selector(obj, "subject"), constraintId, packPriority,
                 obj.getValue("requires").jsonArray.map { element ->
                     val requirement = element.jsonObject
                     Constraint.Requires.Requirement(
@@ -227,6 +259,7 @@ object ConstraintParser {
             "excludes" -> Constraint.Excludes(
                 chunkId, rulesetId, selector(obj, "subject"),
                 obj.getValue("excludes").jsonArray.map { Selector(it.jsonPrimitive.content) },
+                constraintId, packPriority,
             ).also(::requireDistinctExclusions)
 
             else -> error("unknown constraint form '$form'")
@@ -245,6 +278,17 @@ object ConstraintParser {
             if (bound is Bound.TrackerRef && selector.matches(bound.key)) {
                 error("selector '$selector' matches its own bound tracker '${bound.key}'")
             }
+        }
+        // Two literals in the wrong order describe a range nothing can satisfy. Every
+        // matching value then violates one side or the other, and the UI offers the user
+        // an impossible correction -- "this game allows 5-1". A rule that flags every
+        // document is a malformed rule, and it belongs in the dropped report rather than
+        // on screen. Tracker-referenced bounds are left alone: those depend on values
+        // this parser cannot see, and an inversion there is a fact about one document.
+        val low = (min as? Bound.Literal)?.value
+        val high = (max as? Bound.Literal)?.value
+        if (low != null && high != null && low > high) {
+            error("bounds are inverted: min $low is above max $high")
         }
     }
 
@@ -305,7 +349,19 @@ object ConstraintParser {
  * rules are the norm, and an app that refuses to store a legal-at-this-table character is
  * an app that gets deleted.
  */
-class ConstraintEngine(private val constraints: List<Constraint>) {
+class ConstraintEngine(constraints: List<Constraint>) {
+
+    /**
+     * Evaluated in the order the spec's citation rule names: highest-priority pack first,
+     * then lowest `constraint_id`.
+     *
+     * Sorting once here rather than reasoning about it at each use is what makes
+     * "whichever fired first wins" *be* the specified winner. The `excludes` pair
+     * deduplication depends on it, and a rule stated so two implementations pick the same
+     * passage is not one the loader's iteration order gets to decide.
+     */
+    private val constraints: List<Constraint> =
+        constraints.sortedWith(compareBy({ it.packPriority }, { it.constraintId }))
 
     /**
      * @param draft while set, **minimum bounds are not evaluated**. A half-entered sheet
@@ -410,7 +466,13 @@ class ConstraintEngine(private val constraints: List<Constraint>) {
             val satisfied = if (requirement.min == null) {
                 matches.any { it.value.isPresent }
             } else {
-                matches.any { ((it.value as? TrackerValue.Number)?.value ?: 0.0) >= requirement.min }
+                // Only a numeric tracker can satisfy a numeric minimum. Defaulting a text
+                // or flag tracker to 0.0 satisfies any minimum at or below zero, so a
+                // prerequisite silently passes on a value that is not a rating at all.
+                matches.any { entry ->
+                    val number = (entry.value as? TrackerValue.Number)?.value
+                    number != null && number >= requirement.min
+                }
             }
             if (!satisfied) {
                 val need = requirement.min?.let { "${requirement.selector} ${it.trim()}" }
