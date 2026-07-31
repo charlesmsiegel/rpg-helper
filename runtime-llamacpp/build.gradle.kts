@@ -18,6 +18,9 @@ repositories {
  */
 dependencies {
     api(project(":model"))
+    // `ChunkRef` and friends: `:model`'s API types reference them, and a test that builds a
+    // RedactedChunk needs them on its own classpath.
+    testImplementation(project(":pack"))
     implementation(libs.llama)
     testImplementation(kotlin("test"))
 }
