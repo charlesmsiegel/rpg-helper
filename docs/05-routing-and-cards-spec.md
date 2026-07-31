@@ -12,7 +12,8 @@ about not squandering that between the database and the screen.
 
 Implementation order: **5 of 8** — see the README for the full sequence and why it runs in this order.
 
-Status: specified, unimplemented.
+Status: implemented by `:routing`. The generative half runs against the `Generator`
+interface, so every card and every guard is exercised by fakes rather than by weights.
 
 ---
 

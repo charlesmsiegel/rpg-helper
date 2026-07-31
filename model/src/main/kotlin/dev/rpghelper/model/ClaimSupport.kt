@@ -1,5 +1,7 @@
 package dev.rpghelper.model
 
+import dev.rpghelper.pack.ChunkRef
+
 /** One assertion an answer makes, and what the answer said supports it. */
 data class Claim(
     val text: String,

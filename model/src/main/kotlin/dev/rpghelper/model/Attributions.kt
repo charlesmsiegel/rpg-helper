@@ -1,5 +1,7 @@
 package dev.rpghelper.model
 
+import dev.rpghelper.pack.ChunkRef
+
 import dev.rpghelper.pack.Utf8
 
 /**

@@ -1,5 +1,7 @@
 package dev.rpghelper.retrieval
 
+import dev.rpghelper.pack.ChunkRef
+
 import dev.rpghelper.pack.JdbcDb
 import dev.rpghelper.pack.PackForge
 import dev.rpghelper.pack.exec

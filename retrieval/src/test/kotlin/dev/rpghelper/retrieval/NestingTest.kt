@@ -1,5 +1,7 @@
 package dev.rpghelper.retrieval
 
+import dev.rpghelper.pack.ChunkRef
+
 import dev.rpghelper.pack.PackSchema
 import kotlin.test.Test
 import kotlin.test.assertEquals

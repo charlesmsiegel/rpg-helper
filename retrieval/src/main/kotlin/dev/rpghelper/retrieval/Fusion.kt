@@ -1,5 +1,7 @@
 package dev.rpghelper.retrieval
 
+import dev.rpghelper.pack.ChunkRef
+
 /**
  * One vector row's score, and the window of its chunk's text it scored over.
  *

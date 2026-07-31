@@ -1,13 +1,11 @@
 package dev.rpghelper.retrieval
 
+import dev.rpghelper.pack.ChunkRef
 import dev.rpghelper.pack.Db
 import dev.rpghelper.pack.map
 
 /** A pack the user has activated, opened read-only. */
 class ActivePack(val packUid: String, val db: Db)
-
-/** A chunk, identified the only way that is unambiguous across packs. */
-data class ChunkRef(val packUid: String, val chunkId: Long)
 
 /**
  * Chunks removed from the candidate set because an active pack corrects them.

@@ -1,7 +1,6 @@
 package dev.rpghelper.model
 
-/** A chunk identified the only way that is unambiguous across packs. */
-data class ChunkRef(val packUid: String, val chunkId: Long)
+import dev.rpghelper.pack.ChunkRef
 
 /** One turn of the conversation window normalization may resolve against. */
 data class Turn(val query: String, val answer: String)

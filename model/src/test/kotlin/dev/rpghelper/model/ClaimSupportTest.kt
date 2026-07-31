@@ -1,5 +1,7 @@
 package dev.rpghelper.model
 
+import dev.rpghelper.pack.ChunkRef
+
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
