@@ -37,6 +37,22 @@ data class BuildOutcome(val path: Path, val notes: List<BuildNote>)
 class PackBuilder(
     private val spec: CorpusSpec,
     private val embedder: Embedder,
+    /**
+     * Adjudicates whether a derived summary is supported by the chunks it cites.
+     *
+     * A derived chunk is model-written prose the app renders with citations — the
+     * identical trust claim as a generated answer, made by a different model at a
+     * different time. Its `chunk_derivation` rows guarantee the cited chunks *exist* and
+     * nothing else, so a summary that invents a detail carries a well-formed citation,
+     * renders as attributed text, and passes every validation the format has. The builder
+     * is the natural home for the check: it already has the frontier model, it has the
+     * source, and it has no latency budget.
+     *
+     * Null skips the check and records that it was skipped, which is honest. Silently
+     * shipping unchecked summaries is what this exists to stop.
+     */
+    private val judge: dev.rpghelper.model.Judge? = null,
+    private val claimThreshold: Double = 1.0,
 ) {
 
     private val notes = mutableListOf<BuildNote>()
@@ -218,6 +234,7 @@ class PackBuilder(
     private fun writeDerived(c: Connection) {
         var derivationId = 1L
         for (derived in spec.derived) {
+            if (!supported(derived)) continue
             val id = nextChunkId++
             c.prepare(
                 "INSERT INTO chunks (chunk_id, kind, origin, text) VALUES (?, ?, 'derived', ?)",
@@ -257,6 +274,45 @@ class PackBuilder(
                 }
             }
         }
+    }
+
+    /**
+     * Whether a derived summary is entailed by the chunks it cites.
+     *
+     * A summary that fails is **dropped and recorded**, not shipped. Dropping it costs the
+     * user a convenience; shipping it puts a fabricated detail on screen wearing a
+     * citation, which is the one thing the app must never do.
+     */
+    private fun supported(derived: CorpusSpec.DerivedSpec): Boolean {
+        val evidence = derived.cites.map { citation ->
+            val target = chunkIdByStableKey[citation.stableKey]
+                ?: error("derived chunk cites '${citation.stableKey}', which is not in the pack")
+            chunkTexts.getValue(target)
+        }
+
+        if (judge == null) {
+            notes += BuildNote(
+                "unchecked", "chunk", null, "claim-support",
+                "no judge was supplied, so this summary ships unadjudicated",
+            )
+            return true
+        }
+
+        val claims = derived.text.split(Regex("(?<=[.!?])\\s+"))
+            .map { it.trim() }.filter { it.length > 1 }
+        val unsupported = claims.filterNot { judge.judge(it, evidence).entailed }
+        val rate = if (claims.isEmpty()) 1.0 else {
+            (claims.size - unsupported.size).toDouble() / claims.size
+        }
+        if (rate < claimThreshold) {
+            notes += BuildNote(
+                "dropped", "chunk", null, "claim-support",
+                "summary dropped: ${unsupported.size} of ${claims.size} claims are not " +
+                    "supported by the chunks it cites -- ${unsupported.firstOrNull()}",
+            )
+            return false
+        }
+        return true
     }
 
     // ------------------------------------------------------------------ index and vectors

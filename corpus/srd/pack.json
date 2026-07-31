@@ -25,7 +25,6 @@
   "attribution": "Emberlight, by the rpg-helper project, licensed CC BY 4.0.",
   "built_at": "2026-07-31T00:00:00Z",
   "builder_version": "corpus-builder/1.0.0",
-
   "sources": [
     {
       "source_uid": "srd:emberlight:core",
@@ -35,19 +34,40 @@
       "publisher": "Cinder Press",
       "locator_scheme": "page",
       "page_labels": [
-        { "seq": 0, "phys_start": 1, "phys_end": 3, "scheme": "roman-lower", "start_value": 1 },
-        { "seq": 1, "phys_start": 4, "phys_end": 24, "scheme": "decimal", "start_value": 1 }
+        {
+          "seq": 0,
+          "phys_start": 1,
+          "phys_end": 3,
+          "scheme": "roman-lower",
+          "start_value": 1
+        },
+        {
+          "seq": 1,
+          "phys_start": 4,
+          "phys_end": 24,
+          "scheme": "decimal",
+          "start_value": 1
+        }
       ],
       "gaps": [
-        { "reason": "front-matter", "from": "EMBERLIGHT", "to": "carry no rules." },
-        { "reason": "legal", "from": "OPEN LICENCE NOTICE", "to": "is not reproduced here." }
+        {
+          "reason": "front-matter",
+          "from": "EMBERLIGHT",
+          "to": "carry no rules."
+        },
+        {
+          "reason": "legal",
+          "from": "OPEN LICENCE NOTICE",
+          "to": "is not reproduced here."
+        }
       ],
       "chunks": [
         {
           "stable_key": "srd:core:resolution",
           "kind": "rules",
           "heading_path": "How to Play > Resolution",
-          "page_label_start": "1", "page_label_end": "1",
+          "page_label_start": "1",
+          "page_label_end": "1",
           "from": "Resolution. When the outcome",
           "to": "regardless of Difficulty."
         },
@@ -55,7 +75,8 @@
           "stable_key": "srd:core:aptitudes",
           "kind": "rules",
           "heading_path": "How to Play > Aptitudes",
-          "page_label_start": "1", "page_label_end": "2",
+          "page_label_start": "1",
+          "page_label_end": "2",
           "from": "Aptitudes. Every character",
           "to": "the one that fits the fiction."
         },
@@ -63,7 +84,8 @@
           "stable_key": "srd:core:difficulty",
           "kind": "rules",
           "heading_path": "How to Play > Difficulty",
-          "page_label_start": "2", "page_label_end": "2",
+          "page_label_start": "2",
+          "page_label_end": "2",
           "from": "Difficulty. The Warden sets",
           "to": "answer is simply no."
         },
@@ -71,7 +93,8 @@
           "stable_key": "srd:core:seizing",
           "kind": "rules",
           "heading_path": "How to Play > Seizing",
-          "page_label_start": "2", "page_label_end": "3",
+          "page_label_start": "2",
+          "page_label_end": "3",
           "from": "Seizing. To seize a creature",
           "to": "the target is Held despite the failure",
           "children": [
@@ -79,7 +102,8 @@
               "stable_key": "srd:core:seizing-mishaps",
               "kind": "table",
               "heading_path": "How to Play > Seizing > Mishaps",
-              "page_label_start": "3", "page_label_end": "3",
+              "page_label_start": "3",
+              "page_label_end": "3",
               "from": "d6 | Mishap",
               "to": "the target is Held despite the failure"
             }
@@ -89,7 +113,8 @@
           "stable_key": "srd:core:conditions",
           "kind": "rules",
           "heading_path": "How to Play > Conditions",
-          "page_label_start": "3", "page_label_end": "3",
+          "page_label_start": "3",
+          "page_label_end": "3",
           "from": "Conditions. A condition lasts",
           "to": "against Difficulty 7."
         },
@@ -97,7 +122,8 @@
           "stable_key": "srd:core:harm",
           "kind": "rules",
           "heading_path": "How to Play > Harm",
-          "page_label_start": "4", "page_label_end": "4",
+          "page_label_start": "4",
+          "page_label_end": "4",
           "from": "Harm. A character can take",
           "to": "demands otherwise."
         },
@@ -105,7 +131,8 @@
           "stable_key": "srd:core:boons",
           "kind": "rules",
           "heading_path": "How to Play > Boons",
-          "page_label_start": "4", "page_label_end": "4",
+          "page_label_start": "4",
+          "page_label_end": "4",
           "from": "Boons. A character may take",
           "to": "yourself."
         },
@@ -113,7 +140,8 @@
           "stable_key": "srd:core:marches",
           "kind": "setting",
           "heading_path": "The Cinder Marches",
-          "page_label_start": "9", "page_label_end": "10",
+          "page_label_start": "9",
+          "page_label_end": "10",
           "from": "The Cinder Marches are the low country",
           "to": "good coin for ash taken from the summit",
           "children": [
@@ -121,7 +149,8 @@
               "stable_key": "srd:core:marches-rumours",
               "kind": "table",
               "heading_path": "The Cinder Marches > Rumours",
-              "page_label_start": "10", "page_label_end": "10",
+              "page_label_start": "10",
+              "page_label_end": "10",
               "from": "d6 | Rumour",
               "to": "good coin for ash taken from the summit"
             }
@@ -131,7 +160,8 @@
           "stable_key": "srd:core:ashfall",
           "kind": "setting",
           "heading_path": "The Cinder Marches > Ashfall",
-          "page_label_start": "10", "page_label_end": "11",
+          "page_label_start": "10",
+          "page_label_end": "11",
           "from": "Ashfall. Ash falls on the Marches",
           "to": "when the fall turns heavy."
         },
@@ -139,7 +169,8 @@
           "stable_key": "srd:core:old-road",
           "kind": "setting",
           "heading_path": "The Cinder Marches > The Old Road",
-          "page_label_start": "11", "page_label_end": "11",
+          "page_label_start": "11",
+          "page_label_end": "11",
           "from": "The Old Road. The road up",
           "to": "rather than a mystery worth solving."
         },
@@ -147,7 +178,8 @@
           "stable_key": "srd:core:cinder-hound",
           "kind": "statblock",
           "heading_path": "Bestiary > Cinder Hound",
-          "page_label_start": "18", "page_label_end": "18",
+          "page_label_start": "18",
+          "page_label_end": "18",
           "from": "Cinder Hound. Might 3",
           "to": "Bright Success."
         },
@@ -155,7 +187,8 @@
           "stable_key": "srd:core:ash-warden",
           "kind": "statblock",
           "heading_path": "Bestiary > Ash Warden",
-          "page_label_start": "18", "page_label_end": "19",
+          "page_label_start": "18",
+          "page_label_end": "19",
           "from": "Ash Warden. Might 2",
           "to": "last forty years."
         }
@@ -169,17 +202,28 @@
       "publisher": "Cinder Press",
       "locator_scheme": "page",
       "page_labels": [
-        { "seq": 0, "phys_start": 1, "phys_end": 12, "scheme": "decimal", "start_value": 1 }
+        {
+          "seq": 0,
+          "phys_start": 1,
+          "phys_end": 12,
+          "scheme": "decimal",
+          "start_value": 1
+        }
       ],
       "gaps": [
-        { "reason": "front-matter", "from": "THE DOOR IN THE EMBER", "to": "International licence." }
+        {
+          "reason": "front-matter",
+          "from": "THE DOOR IN THE EMBER",
+          "to": "International licence."
+        }
       ],
       "chunks": [
         {
           "stable_key": "srd:door:ascent-boxed",
           "kind": "readaloud",
           "heading_path": "Part One > The Ascent",
-          "page_label_start": "2", "page_label_end": "2",
+          "page_label_start": "2",
+          "page_label_end": "2",
           "from": "The old road narrows here",
           "to": "the better part of an hour."
         },
@@ -187,7 +231,8 @@
           "stable_key": "srd:door:ascent",
           "kind": "rules",
           "heading_path": "Part One > The Ascent > Running It",
-          "page_label_start": "2", "page_label_end": "2",
+          "page_label_start": "2",
+          "page_label_end": "2",
           "from": "The party begins at the foot",
           "to": "rather than applying it silently."
         },
@@ -195,7 +240,8 @@
           "stable_key": "srd:door:hounds",
           "kind": "rules",
           "heading_path": "Part Two > What Follows",
-          "page_label_start": "4", "page_label_end": "4",
+          "page_label_start": "4",
+          "page_label_end": "4",
           "from": "Two cinder hounds have been tracking",
           "to": "the cord to come off."
         },
@@ -203,7 +249,8 @@
           "stable_key": "srd:door:held",
           "kind": "glossary",
           "heading_path": "Appendix > Conditions > Held",
-          "page_label_start": "11", "page_label_end": "11",
+          "page_label_start": "11",
+          "page_label_end": "11",
           "from": "Held. A Held creature",
           "to": "is not an attempt to escape."
         },
@@ -211,95 +258,212 @@
           "stable_key": "srd:door:shaken",
           "kind": "glossary",
           "heading_path": "Appendix > Conditions > Shaken",
-          "page_label_start": "11", "page_label_end": "11",
+          "page_label_start": "11",
+          "page_label_end": "11",
           "from": "Shaken. A Shaken creature",
           "to": "nothing else."
         }
       ]
     }
   ],
-
   "derived": [
     {
       "kind": "glossary",
-      "text": "Seizing is resolved as a contested roll of Might against the target's better of Might or Grace, and a success leaves the target Held. A Held creature cannot move away and takes a penalty of two on anything but an escape attempt.",
+      "text": "Seizing is resolved as a contested roll of Might against the target's higher of Might or Grace, and a success leaves the target Held. A Held creature may not move away, and rolls at a penalty of two on any action that is not an attempt to escape.",
       "cites": [
-        { "stable_key": "srd:core:seizing", "claim": "Seizing is resolved as a contested roll of Might against the target's better of Might or Grace, and a success leaves the target Held." },
-        { "stable_key": "srd:door:held" }
+        {
+          "stable_key": "srd:core:seizing",
+          "claim": "Seizing is resolved as a contested roll of Might against the target's higher of Might or Grace, and a success leaves the target Held."
+        },
+        {
+          "stable_key": "srd:door:held"
+        }
       ]
     }
   ],
-
   "tables": [
     {
       "chunk": "srd:core:seizing-mishaps",
       "dice_expr": "d6",
       "rows": [
-        { "lo": 1, "hi": 1, "text": "You lose your footing and are Shaken until your next turn" },
-        { "lo": 2, "hi": 2, "text": "Your grip tears cloth, not flesh, and the target moves freely" },
-        { "lo": 3, "hi": 3, "text": "You are dragged one pace toward whatever the target chooses" },
-        { "lo": 4, "hi": 4, "text": "Nothing further goes wrong" },
-        { "lo": 5, "hi": 5, "text": "Nothing further goes wrong" },
-        { "lo": 6, "hi": 6, "text": "You catch a limb after all; the target is Held despite the failure" }
+        {
+          "lo": 1,
+          "hi": 1,
+          "text": "You lose your footing and are Shaken until your next turn"
+        },
+        {
+          "lo": 2,
+          "hi": 2,
+          "text": "Your grip tears cloth, not flesh, and the target moves freely"
+        },
+        {
+          "lo": 3,
+          "hi": 3,
+          "text": "You are dragged one pace toward whatever the target chooses"
+        },
+        {
+          "lo": 4,
+          "hi": 4,
+          "text": "Nothing further goes wrong"
+        },
+        {
+          "lo": 5,
+          "hi": 5,
+          "text": "Nothing further goes wrong"
+        },
+        {
+          "lo": 6,
+          "hi": 6,
+          "text": "You catch a limb after all; the target is Held despite the failure"
+        }
       ]
     },
     {
       "chunk": "srd:core:marches-rumours",
       "dice_expr": "d6",
       "rows": [
-        { "lo": 1, "hi": 1, "text": "The mountain is not burning; something inside it is" },
-        { "lo": 2, "hi": 2, "text": "A warden's lantern will not light within sight of the old road" },
-        { "lo": 3, "hi": 3, "text": "The ash tastes of iron in the week before it snows" },
-        { "lo": 4, "hi": 4, "text": "There is a door in the Ember that opens from the far side" },
-        { "lo": 5, "hi": 5, "text": "Cinder hounds will not cross running water, and know why" },
-        { "lo": 6, "hi": 6, "text": "Someone is paying good coin for ash taken from the summit" }
+        {
+          "lo": 1,
+          "hi": 1,
+          "text": "The mountain is not burning; something inside it is"
+        },
+        {
+          "lo": 2,
+          "hi": 2,
+          "text": "A warden's lantern will not light within sight of the old road"
+        },
+        {
+          "lo": 3,
+          "hi": 3,
+          "text": "The ash tastes of iron in the week before it snows"
+        },
+        {
+          "lo": 4,
+          "hi": 4,
+          "text": "There is a door in the Ember that opens from the far side"
+        },
+        {
+          "lo": 5,
+          "hi": 5,
+          "text": "Cinder hounds will not cross running water, and know why"
+        },
+        {
+          "lo": 6,
+          "hi": 6,
+          "text": "Someone is paying good coin for ash taken from the summit"
+        }
       ]
     }
   ],
-
   "capabilities": [
-    { "kind": "roll-table", "chunk": "srd:core:seizing-mishaps", "label": "Seizing mishaps" },
-    { "kind": "roll-table", "chunk": "srd:core:marches-rumours", "label": "Marches rumours" }
+    {
+      "kind": "roll-table",
+      "chunk": "srd:core:seizing-mishaps",
+      "label": "Seizing mishaps"
+    },
+    {
+      "kind": "roll-table",
+      "chunk": "srd:core:marches-rumours",
+      "label": "Marches rumours"
+    }
   ],
-
   "entities": [
-    { "canonical": "seizing", "alias": "grapple", "kind": "rules-term", "chunk": "srd:core:seizing" },
-    { "canonical": "seizing", "alias": "grappling", "kind": "rules-term", "chunk": "srd:core:seizing" },
-    { "canonical": "seizing", "alias": "wrestle", "kind": "rules-term", "chunk": "srd:core:seizing" },
-    { "canonical": "seizing", "alias": "grab", "kind": "rules-term", "chunk": "srd:core:seizing" },
-    { "canonical": "held", "alias": "restrained", "kind": "rules-term", "chunk": "srd:door:held" },
-    { "canonical": "cinder marches", "alias": "the marches", "kind": "place", "chunk": "srd:core:marches" },
-    { "canonical": "cinder hound", "alias": "ash hound", "kind": "creature", "chunk": "srd:core:cinder-hound" },
-    { "canonical": "difficulty", "alias": "target number", "kind": "rules-term", "chunk": "srd:core:difficulty" },
-    { "canonical": "bright success", "alias": "critical", "kind": "rules-term", "chunk": null }
+    {
+      "canonical": "seizing",
+      "alias": "grapple",
+      "kind": "rules-term",
+      "chunk": "srd:core:seizing"
+    },
+    {
+      "canonical": "seizing",
+      "alias": "grappling",
+      "kind": "rules-term",
+      "chunk": "srd:core:seizing"
+    },
+    {
+      "canonical": "seizing",
+      "alias": "wrestle",
+      "kind": "rules-term",
+      "chunk": "srd:core:seizing"
+    },
+    {
+      "canonical": "seizing",
+      "alias": "grab",
+      "kind": "rules-term",
+      "chunk": "srd:core:seizing"
+    },
+    {
+      "canonical": "held",
+      "alias": "restrained",
+      "kind": "rules-term",
+      "chunk": "srd:door:held"
+    },
+    {
+      "canonical": "cinder marches",
+      "alias": "the marches",
+      "kind": "place",
+      "chunk": "srd:core:marches"
+    },
+    {
+      "canonical": "cinder hound",
+      "alias": "ash hound",
+      "kind": "creature",
+      "chunk": "srd:core:cinder-hound"
+    },
+    {
+      "canonical": "difficulty",
+      "alias": "target number",
+      "kind": "rules-term",
+      "chunk": "srd:core:difficulty"
+    },
+    {
+      "canonical": "bright success",
+      "alias": "critical",
+      "kind": "rules-term",
+      "chunk": null
+    }
   ],
-
   "constraints": [
     {
       "form": "range",
       "chunk": "srd:core:aptitudes",
-      "args": { "selector": "aptitude.*", "min": 1, "max": 5 }
+      "args": {
+        "selector": "aptitude.*",
+        "min": 1,
+        "max": 5
+      }
     },
     {
       "form": "sum_range",
       "chunk": "srd:core:aptitudes",
-      "args": { "selector": "aptitude.*", "min": 4, "max": 10 }
+      "args": {
+        "selector": "aptitude.*",
+        "min": 4,
+        "max": 10
+      }
     },
     {
       "form": "count_range",
       "chunk": "srd:core:boons",
-      "args": { "selector": "boon.*", "max": 3 }
+      "args": {
+        "selector": "boon.*",
+        "max": 3
+      }
     },
     {
       "form": "requires",
       "chunk": "srd:core:boons",
       "args": {
         "subject": "boon.iron-handed",
-        "requires": [ { "selector": "aptitude.might", "min": 3 } ]
+        "requires": [
+          {
+            "selector": "aptitude.might",
+            "min": 3
+          }
+        ]
       }
     }
   ],
-
   "supersessions": [
     {
       "_comment": [
