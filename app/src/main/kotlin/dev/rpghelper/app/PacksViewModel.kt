@@ -42,6 +42,26 @@ class PacksViewModel(application: Application) : AndroidViewModel(application) {
     var pending by mutableStateOf<PendingActivation?>(null)
         private set
 
+    /** Non-null while an install is waiting on the user to agree to replace a pack. */
+    var replacing by mutableStateOf<PendingReplacement?>(null)
+        private set
+
+    /** Packs, models, and app data — the three figures `01-app-state-spec.md` §7 names. */
+    var storage by mutableStateOf(Storage(0, 0, 0))
+        private set
+
+    /** What the three storage figures are, separately, because their remedies differ. */
+    data class Storage(val packs: Long, val models: Long, val appData: Long)
+
+    /**
+     * An install stopped because its uid is already installed.
+     *
+     * The staged file is kept, not re-copied: a user agreeing to replace should not wait for
+     * a second copy of a 300 MB book, and re-reading the source on confirm would be reading
+     * a file that may have changed since it was validated.
+     */
+    data class PendingReplacement(val staged: java.nio.file.Path, val existing: String, val title: String)
+
     /**
      * An activation the library refused to perform unattended, with the reason it refused.
      *
@@ -72,9 +92,158 @@ class PacksViewModel(application: Application) : AndroidViewModel(application) {
             loaded
                 .onSuccess { packs = it }
                 .onFailure { failure = it.message ?: "could not read the library" }
+            storage = withContext(Dispatchers.IO) { measureStorage() }
             busy = false
         }
     }
+
+    /**
+     * Installs a file the user picked.
+     *
+     * **The only install path there is.** The document is copied into the app's own cache
+     * before anything looks at it, because a content URI is a handle to a file another app
+     * owns and may rewrite: validating what the picker returned and then installing what the
+     * picker returns *again* would be checking one file and quoting another. The library
+     * then copies it a second time into its own directory, which is the same rule one layer
+     * down and worth paying twice for.
+     */
+    fun install(uri: android.net.Uri) {
+        if (busy) return
+        viewModelScope.launch {
+            busy = true
+            val result = withContext(Dispatchers.IO) { runCatching { stageAndInstall(uri, null) } }
+            busy = false
+            result
+                .onSuccess { report(it.first, it.second) }
+                .onFailure { failure = it.message ?: "could not install that file" }
+        }
+    }
+
+    /** Confirms a replacement against the **staged bytes that were validated**, not the source. */
+    fun confirmReplace(pending: PendingReplacement) {
+        replacing = null
+        viewModelScope.launch {
+            busy = true
+            val result = withContext(Dispatchers.IO) {
+                runCatching { store.library.install(pending.staged, pending.existing) to pending.staged }
+            }
+            busy = false
+            result
+                .onSuccess { report(it.first, it.second) }
+                .onFailure { failure = it.message ?: "could not install that file" }
+        }
+    }
+
+    fun cancelReplace() {
+        val staged = replacing?.staged
+        replacing = null
+        // The temp copy goes with the decision. Keeping it would leave a book-sized file in
+        // the cache that nothing will ever look at again.
+        staged?.let { path -> viewModelScope.launch { withContext(Dispatchers.IO) { runCatching { java.nio.file.Files.deleteIfExists(path) } } } }
+    }
+
+    fun uninstall(installId: Long) {
+        viewModelScope.launch {
+            busy = true
+            withContext(Dispatchers.IO) { runCatching { store.library.uninstall(installId) } }
+                .onFailure { failure = it.message ?: "could not uninstall that pack" }
+            busy = false
+            refresh()
+        }
+    }
+
+    /**
+     * Moves a pack up or down the priority order.
+     *
+     * The order is total and visible: it decides which pack's chunk wins an exact tie in
+     * retrieval and which passage a shared violation cites, so a user who cannot see or
+     * change it cannot explain either outcome.
+     */
+    fun move(installId: Long, up: Boolean) {
+        val order = packs.map { it.pack.installId }.toMutableList()
+        val at = order.indexOf(installId)
+        val to = if (up) at - 1 else at + 1
+        if (at < 0 || to !in order.indices) return
+        order[at] = order[to].also { order[to] = order[at] }
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { runCatching { store.library.reorder(order) } }
+                .onFailure { failure = it.message ?: "could not reorder" }
+            refresh()
+        }
+    }
+
+    private fun stageAndInstall(
+        uri: android.net.Uri,
+        confirmReplacing: String?,
+    ): Pair<dev.rpghelper.state.InstallResult, java.nio.file.Path> {
+        val application = getApplication<Application>()
+        val staged = java.nio.file.Files.createTempFile(
+            java.nio.file.Files.createDirectories(application.cacheDir.toPath().resolve("incoming")),
+            "incoming", ".rpgpack",
+        )
+        application.contentResolver.openInputStream(uri)?.use { input ->
+            java.nio.file.Files.newOutputStream(staged).use { output -> input.copyTo(output) }
+        } ?: error("could not read that file")
+        return store.library.install(staged, confirmReplacing) to staged
+    }
+
+    private fun report(result: dev.rpghelper.state.InstallResult, staged: java.nio.file.Path) {
+        // The staged copy is only kept when the user is being asked something about it.
+        fun discard() = runCatching { java.nio.file.Files.deleteIfExists(staged) }
+        when (result) {
+            is dev.rpghelper.state.InstallResult.Installed -> {
+                discard()
+                failure = when {
+                    result.deactivatedForReview.isNotEmpty() ->
+                        "Installed inactive: it replaces an active pack and now withdraws a " +
+                            "large part of another active book, which is a decision to make " +
+                            "rather than one to inherit."
+                    result.buildNotes.any { it.severity == "unchecked" } ->
+                        "Installed. This pack ships content nobody adjudicated — see its card."
+                    else -> null
+                }
+                refresh()
+            }
+            is dev.rpghelper.state.InstallResult.NeedsConfirmation -> {
+                replacing = PendingReplacement(
+                    staged = staged,
+                    existing = result.existing.packUid,
+                    title = result.existing.title,
+                )
+            }
+            is dev.rpghelper.state.InstallResult.TooLarge -> {
+                discard()
+                failure = "That pack is larger than this app will install: ${result.limit}"
+            }
+            is dev.rpghelper.state.InstallResult.Rejected -> {
+                discard()
+                // The violations, not "invalid". A pack that will not activate is a pack
+                // somebody built, and the person holding it can only fix what they are told.
+                failure = "That pack would not activate:\n${result.report}"
+            }
+        }
+    }
+
+    private fun measureStorage(): Storage {
+        val root = getApplication<Application>().filesDir.toPath()
+        return Storage(
+            packs = sizeOf(root.resolve("library/packs")),
+            models = sizeOf(root.resolve("models")),
+            // State minus the packs it indexes: the figure a user can act on by deleting
+            // conversations, not the one they act on by uninstalling a book.
+            appData = sizeOf(root.resolve("library/state.db")),
+        )
+    }
+
+    private fun sizeOf(path: java.nio.file.Path): Long = runCatching {
+        if (!java.nio.file.Files.exists(path)) return 0
+        if (java.nio.file.Files.isRegularFile(path)) return java.nio.file.Files.size(path)
+        java.nio.file.Files.walk(path).use { entries ->
+            entries.filter { java.nio.file.Files.isRegularFile(it) }
+                .mapToLong { runCatching { java.nio.file.Files.size(it) }.getOrDefault(0L) }
+                .sum()
+        }
+    }.getOrDefault(0L)
 
     /**
      * Activates or deactivates, asking first only when the library says to.

@@ -150,6 +150,74 @@ class PackCardTest {
         compose.onNodeWithText("No packs installed", substring = true).assertExists()
     }
 
+    // ---------------------------------------------------------------- install and order
+
+    @Test
+    fun `installing from a file is offered, because it is the only install path there is`() {
+        var picked = false
+        compose.setContent { PacksScreen(packs = emptyList(), onInstall = { picked = true }) }
+        compose.onNodeWithText("Install from a file").performClick()
+        assertTrue(picked)
+    }
+
+    @Test
+    fun `replacing a pack with the same identifier is asked about, not assumed`() {
+        // Two files claiming one identifier cannot both be active: everything downstream
+        // names a passage by (pack, chunk), so the two would merge.
+        var confirmed = false
+        val replacing = PacksViewModel.PendingReplacement(
+            staged = java.nio.file.Path.of("/tmp/staged.rpgpack"),
+            existing = "srd:emberlight",
+            title = "Emberlight SRD",
+        )
+        compose.setContent {
+            PacksScreen(
+                packs = listOf(shelved()),
+                replacing = replacing,
+                onConfirmReplace = { confirmed = true },
+            )
+        }
+        compose.onNodeWithText("Replace Emberlight SRD?").assertExists()
+        compose.onNodeWithText("keeps your documents", substring = true).assertExists()
+        compose.onNodeWithText("Replace").performClick()
+        assertTrue(confirmed)
+    }
+
+    @Test
+    fun `priority can be changed, and the ends of the list say so`() {
+        val moves = mutableListOf<Pair<Long, Boolean>>()
+        compose.setContent {
+            PacksScreen(packs = listOf(shelved()), onMove = { id, up -> moves += id to up })
+        }
+        // One pack: it is both first and last, so neither direction is offered.
+        compose.onNodeWithContentDescription("Raise the priority of Emberlight SRD").performClick()
+        compose.onNodeWithContentDescription("Lower the priority of Emberlight SRD").performClick()
+        assertTrue(moves.isEmpty(), "a list of one has no order to change")
+    }
+
+    @Test
+    fun `storage is three figures, because they have three different remedies`() {
+        compose.setContent {
+            PacksScreen(
+                packs = listOf(shelved()),
+                storage = PacksViewModel.Storage(packs = 84_000_000, models = 3_100_000_000, appData = 240_000),
+            )
+        }
+        compose.onNodeWithText("packs 84 MB", substring = true).assertExists()
+        compose.onNodeWithText("models 3100 MB", substring = true).assertExists()
+        compose.onNodeWithText("app data 240 kB", substring = true).assertExists()
+    }
+
+    @Test
+    fun `uninstalling names the pack it would remove`() {
+        var uninstalled: Long? = null
+        compose.setContent {
+            PacksScreen(packs = listOf(shelved()), onUninstall = { uninstalled = it })
+        }
+        compose.onNodeWithContentDescription("Uninstall Emberlight SRD").performClick()
+        assertEquals(1L, uninstalled)
+    }
+
     // ---------------------------------------------------------------- the withdrawal question
 
     @Test

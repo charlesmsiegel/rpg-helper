@@ -1,5 +1,7 @@
 package dev.rpghelper.app
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -7,7 +9,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
@@ -36,14 +38,28 @@ import dev.rpghelper.state.SupersessionImpact
  */
 @Composable
 fun PacksScreen(model: PacksViewModel = viewModel()) {
+    // The system picker. No storage permission is requested: a document the user chose is a
+    // document the app may read, and asking for the whole filesystem to read one file is
+    // asking for something the app has no use for.
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let(model::install)
+    }
+
     PacksScreen(
         packs = model.packs,
         busy = model.busy,
         failure = model.failure,
         pending = model.pending,
+        replacing = model.replacing,
+        storage = model.storage,
+        onInstall = { picker.launch(arrayOf("application/octet-stream", "*/*")) },
         onSetActive = model::setActive,
         onConfirm = model::confirm,
         onDismiss = model::dismiss,
+        onConfirmReplace = model::confirmReplace,
+        onCancelReplace = model::cancelReplace,
+        onUninstall = model::uninstall,
+        onMove = model::move,
     )
 }
 
@@ -61,9 +77,16 @@ fun PacksScreen(
     busy: Boolean = false,
     failure: String? = null,
     pending: PacksViewModel.PendingActivation? = null,
+    replacing: PacksViewModel.PendingReplacement? = null,
+    storage: PacksViewModel.Storage = PacksViewModel.Storage(0, 0, 0),
+    onInstall: () -> Unit = {},
     onSetActive: (Long, Boolean) -> Unit = { _, _ -> },
     onConfirm: (PacksViewModel.PendingActivation) -> Unit = {},
     onDismiss: () -> Unit = {},
+    onConfirmReplace: (PacksViewModel.PendingReplacement) -> Unit = {},
+    onCancelReplace: () -> Unit = {},
+    onUninstall: (Long) -> Unit = {},
+    onMove: (Long, Boolean) -> Unit = { _, _ -> },
 ) {
     Column(Modifier.fillMaxSize()) {
         failure?.let {
@@ -73,6 +96,10 @@ fun PacksScreen(
                 color = MaterialTheme.colorScheme.error,
                 modifier = Modifier.padding(12.dp),
             )
+        }
+
+        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
+            TextButton(onClick = onInstall, enabled = !busy) { Text("Install from a file") }
         }
 
         if (packs.isEmpty()) {
@@ -90,11 +117,27 @@ fun PacksScreen(
             modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            items(packs, key = { it.pack.installId }) { shelved ->
+            itemsIndexed(packs, key = { _, it -> it.pack.installId }) { index, shelved ->
                 PackCard(
                     shelved = shelved,
                     enabled = !busy,
+                    first = index == 0,
+                    last = index == packs.lastIndex,
                     onSetActive = { onSetActive(shelved.pack.installId, it) },
+                    onUninstall = { onUninstall(shelved.pack.installId) },
+                    onMove = { up -> onMove(shelved.pack.installId, up) },
+                )
+            }
+
+            // Three figures, not one total: uninstalling a book, deleting a model, and
+            // clearing conversations are three different actions, and a single number tells
+            // a user which of them to take exactly never.
+            item(key = "storage") {
+                Text(
+                    "Storage — packs ${megabytes(storage.packs)}, models " +
+                        "${megabytes(storage.models)}, app data ${megabytes(storage.appData)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(vertical = 12.dp),
                 )
             }
         }
@@ -103,10 +146,35 @@ fun PacksScreen(
     pending?.let {
         WithdrawalDialog(it, onConfirm = { onConfirm(it) }, onDismiss = onDismiss)
     }
+
+    replacing?.let {
+        AlertDialog(
+            onDismissRequest = onCancelReplace,
+            title = { Text("Replace ${it.title}?") },
+            text = {
+                Text(
+                    "A pack with this identifier is already installed. Two files claiming " +
+                        "one identifier cannot both be active — everything downstream names " +
+                        "a passage by (pack, chunk), so the two would merge. Replacing keeps " +
+                        "your documents and their accepted violations.",
+                )
+            },
+            confirmButton = { TextButton(onClick = { onConfirmReplace(it) }) { Text("Replace") } },
+            dismissButton = { TextButton(onClick = onCancelReplace) { Text("Cancel") } },
+        )
+    }
 }
 
 @Composable
-private fun PackCard(shelved: ShelvedPack, enabled: Boolean, onSetActive: (Boolean) -> Unit) {
+private fun PackCard(
+    shelved: ShelvedPack,
+    enabled: Boolean,
+    first: Boolean = true,
+    last: Boolean = true,
+    onSetActive: (Boolean) -> Unit,
+    onUninstall: () -> Unit = {},
+    onMove: (Boolean) -> Unit = {},
+) {
     val pack = shelved.pack
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -169,6 +237,33 @@ private fun PackCard(shelved: ShelvedPack, enabled: Boolean, onSetActive: (Boole
                     notice.render() + if (notice.inEffect) "" else " (not in effect: that book is not active)",
                     style = MaterialTheme.typography.bodySmall,
                 )
+            }
+
+            Row {
+                // The order is total and visible: it decides which pack wins an exact tie
+                // in retrieval and which passage a shared violation cites, so a user who
+                // cannot change it cannot explain either outcome.
+                TextButton(
+                    onClick = { onMove(true) },
+                    enabled = enabled && !first,
+                    modifier = Modifier.semantics {
+                        contentDescription = "Raise the priority of ${pack.title}"
+                    },
+                ) { Text("Raise") }
+                TextButton(
+                    onClick = { onMove(false) },
+                    enabled = enabled && !last,
+                    modifier = Modifier.semantics {
+                        contentDescription = "Lower the priority of ${pack.title}"
+                    },
+                ) { Text("Lower") }
+                TextButton(
+                    onClick = onUninstall,
+                    enabled = enabled,
+                    modifier = Modifier.semantics {
+                        contentDescription = "Uninstall ${pack.title}"
+                    },
+                ) { Text("Uninstall") }
             }
         }
     }
