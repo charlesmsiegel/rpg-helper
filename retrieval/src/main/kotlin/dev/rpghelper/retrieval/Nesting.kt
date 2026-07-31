@@ -30,6 +30,14 @@ data class NestingCandidate(
 data class Survivor(
     val candidate: NestingCandidate,
     /**
+     * Children whose text this survivor already contains.
+     *
+     * Recorded rather than discarded because a dropped child can still *own* something the
+     * parent must carry — a roll capability keyed to the child's ref, whose table is now
+     * rendered inside the parent's quotation with no control attached to it.
+     */
+    val absorbed: List<ChunkRef> = emptyList(),
+    /**
      * Spans of [NestingCandidate.text] to excise, in UTF-8 bytes and ascending order — or
      * **null** when redaction cannot be performed safely and the chunk must be dropped
      * from the generation context entirely.
@@ -114,6 +122,7 @@ object Nesting {
         val redactions = candidates.associate { it.ref to redaction(it, nestedChildren, verbatimEligible) }
 
         val dropped = mutableSetOf<ChunkRef>()
+        val absorbed = mutableMapOf<ChunkRef, MutableList<ChunkRef>>()
         for (candidate in candidates) {
             val parentRef = candidate.parent ?: continue
             // The parent did not match: there is no overlap to resolve.
@@ -121,8 +130,11 @@ object Nesting {
 
             if (verbatimEligible(parent)) {
                 // A quote of the whole rule already contains the table, at the same
-                // citation. Keeping both would put the same text on screen twice.
+                // citation. Keeping both would put the same text on screen twice -- but the
+                // child is *absorbed*, not forgotten, because whatever the child owns is
+                // now inside the parent's card and has to be reachable from it.
                 dropped += candidate.ref
+                absorbed.getOrPut(parentRef) { mutableListOf() } += candidate.ref
             } else if (!matchesIndependently(parent, redactions[parentRef], queryTerms)) {
                 dropped += parent.ref
             }
@@ -130,7 +142,14 @@ object Nesting {
 
         return candidates
             .filter { it.ref !in dropped }
-            .map { Survivor(it, redactions.getValue(it.ref)?.spans, redactions.getValue(it.ref)?.text) }
+            .map {
+                Survivor(
+                    it,
+                    absorbed[it.ref].orEmpty(),
+                    redactions.getValue(it.ref)?.spans,
+                    redactions.getValue(it.ref)?.text,
+                )
+            }
     }
 
     /**

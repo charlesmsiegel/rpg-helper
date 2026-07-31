@@ -38,11 +38,13 @@ class RouterTest {
         redact: List<IntRange>? = emptyList(),
         headingPath: String? = "Somewhere",
         redactedText: String? = text,
+        absorbed: List<ChunkRef> = emptyList(),
     ) = Candidate(
         ref = ref(id), kind = kind, origin = origin, stableKey = "key:$id",
         sourceUid = "srd:emberlight:core", headingPath = headingPath, text = text,
         score = 1.0 / id, contributions = listOf("core"), entityHit = false,
         denseWindow = null, redact = redact, redactedText = redactedText,
+        absorbed = absorbed,
     )
 
     private fun retrieved(vararg candidates: Candidate, gatedOut: List<String> = emptyList()) =
@@ -581,5 +583,49 @@ class RouterTest {
         )
         assertTrue(answer.cards.any { it is Card.Verbatim })
         assertTrue(answer.diagnostics.any { "the model failed" in it }, "${answer.diagnostics}")
+    }
+
+    // ---------------------------------------------------------------- roll controls
+
+    @Test
+    fun `a table deduplicated into its parent quote keeps its roll control`() {
+        // Nesting drops the child so the table's text is not on screen twice -- but the
+        // capability stays keyed to the child's ref, so the surviving card contained a
+        // table and offered no way to roll on it. The control belongs to whichever card
+        // ended up holding the text.
+        val answer = router(rollable = RollableChunks { it == ref(2) }).route(
+            retrieved(candidate(1, "rules", absorbed = listOf(ref(2)))),
+            generator = null,
+            activePacks = listOf(pack),
+        )
+        val card = answer.cards.filterIsInstance<Card.Verbatim>().single()
+        assertEquals(listOf(ref(2)), card.rollableRefs)
+        assertTrue(card.rollable)
+    }
+
+    @Test
+    fun `a card with no rollable chunk offers nothing`() {
+        val answer = router().route(
+            retrieved(candidate(1, "rules")), generator = null, activePacks = listOf(pack),
+        )
+        assertTrue(answer.cards.filterIsInstance<Card.Verbatim>().single().rollableRefs.isEmpty())
+    }
+
+    @Test
+    fun `a heading path counts against the generation budget`() {
+        // The heading travels into the prompt with the body. A budget that measures a
+        // subset of what it is budgeting is not a budget: five chunks with one-line bodies
+        // and megabyte headings cleared 16 KiB and expanded the prompt by tens of MiB.
+        val fatHeading = "h".repeat(20_000)
+        val generator = CountingGenerator()
+        val answer = router().route(
+            retrieved(candidate(1, "setting", text = "short", headingPath = fatHeading)),
+            generator = generator,
+            activePacks = listOf(pack),
+        )
+        assertTrue(
+            answer.diagnostics.any { "bytes" in it && "capped" in it },
+            "the heading has to be charged: ${answer.diagnostics}",
+        )
     }
 }

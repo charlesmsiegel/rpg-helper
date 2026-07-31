@@ -153,6 +153,30 @@ class DerivedClaimTest {
     }
 
     @Test
+    fun `a summary that decomposes to no claim is dropped, not scored one`() {
+        // A summary of "." survives every earlier check, produces zero claims, and was
+        // handed a perfect support rate without the judge being asked anything -- so
+        // unchecked model prose shipped as attributed derived text with well-formed
+        // citation chips. `ClaimReport.vacuous` already answers this for live generation;
+        // the builder had its own copy of the arithmetic and not of the rule.
+        val outcome = PackBuilder(
+            withDerivedText(CorpusPack.spec, "."), CorpusPack.EMBEDDER, overlapJudge,
+        ).buildTo(directory.resolve("vacuous.rpgpack"))
+
+        val dropped = outcome.notes.single { it.validation == "claim-support" }
+        assertEquals("dropped", dropped.severity)
+        assertTrue(dropped.detail.contains("no claim"), dropped.detail)
+        JdbcDb.openReadOnly(outcome.path).use { db ->
+            assertEquals(
+                0L,
+                db.map("SELECT count(*) FROM chunks WHERE origin = 'derived'") { it.long(0) }
+                    .single(),
+                "the unchecked summary is not in the pack",
+            )
+        }
+    }
+
+    @Test
     fun `an operator can ship unadjudicated prose with their eyes open`() {
         // Honest rather than silent. A build that shipped unchecked summaries and said
         // nothing would be indistinguishable from one that checked them and found them
@@ -182,6 +206,19 @@ private fun withDerivedText(corpus: CorpusSpec, text: String): CorpusSpec {
     val patched = kotlinx.serialization.json.JsonObject(
         derived.single().jsonObject.toMutableMap().apply {
             put("text", kotlinx.serialization.json.JsonPrimitive(text))
+            // Claim anchors name sentences of the *old* text. Kept, they would fail on an
+            // anchor that no longer matches -- a different refusal, and one that would make
+            // a test about claim support pass for a reason that is not claim support.
+            put(
+                "cites",
+                kotlinx.serialization.json.JsonArray(
+                    (getValue("cites") as kotlinx.serialization.json.JsonArray).map { cite ->
+                        kotlinx.serialization.json.JsonObject(
+                            cite.jsonObject.filterKeys { it != "claim" },
+                        )
+                    },
+                ),
+            )
         },
     )
     return CorpusSpec(

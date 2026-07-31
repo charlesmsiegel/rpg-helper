@@ -38,9 +38,20 @@ sealed interface Card {
         val kind: String,
         val body: String,
         val citation: Citation,
-        /** True when the pack offers a roll control for this chunk. */
-        val rollable: Boolean,
+        /**
+         * Chunks this card offers a roll on — its own, **and any it absorbed**.
+         *
+         * A list rather than a flag, for two reasons that are really one. A pack may attach
+         * more than one roll table to a chunk; nothing in the schema makes `tables.chunk_id`
+         * unique, so a boolean silently picked whichever the database happened to return
+         * last. And when a nested rollable table is deduplicated into its parent quote, the
+         * table's text is on screen inside the parent while the capability stays keyed to
+         * the child — so the card contained a table and offered no way to roll on it.
+         */
+        val rollableRefs: List<ChunkRef> = emptyList(),
     ) : Card {
+        val rollable: Boolean get() = rollableRefs.isNotEmpty()
+
         /** Copy takes the citation with it: a quote in a group chat without its source is
          *  precisely the artifact this app exists to prevent. */
         fun copyText(): String = "$body\n\n— ${render(citation)}"

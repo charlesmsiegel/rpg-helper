@@ -265,6 +265,7 @@ class PackLibrary(
                         meta.rulesetId, meta.embedderId, size, digest,
                         active = false, priority = current?.priority ?: 0,
                     ),
+                    replacing = current?.installId,
                 )
                 if (current?.active == true) {
                     broadImpact = impact.filter { it.fraction > BROAD_SUPERSESSION }
@@ -404,7 +405,20 @@ class PackLibrary(
      * `stable_key` twice and because what the user cares about is how much of the book
      * goes dark — a number the target's own contents decide, not the errata's.
      */
-    fun supersessionImpact(candidate: InstalledPack): List<SupersessionImpact> {
+    fun supersessionImpact(
+        candidate: InstalledPack,
+        /**
+         * An installation that will **not** be there afterwards.
+         *
+         * The pack being replaced by a same-uid install is still an active row while the
+         * measurement runs and is deleted moments later in the same transaction. Counting
+         * it meant a replacement whose supersessions target passages in its own previous
+         * edition measured as broad, installed itself inactive for review, and then deleted
+         * the edition it was measured against — leaving the user with no active copy of a
+         * book, over a withdrawal that the swap itself had already made moot.
+         */
+        replacing: Long? = null,
+    ): List<SupersessionImpact> {
         val targets = runCatching {
             Sqlite.openReadOnly(fileOf(candidate.installId)).use { db ->
                 db.map("SELECT target_source_uid, target_stable_key FROM supersessions") {
@@ -419,6 +433,7 @@ class PackLibrary(
 
         for (other in active()) {
             if (other.installId == candidate.installId) continue
+            if (other.installId == replacing) continue
             runCatching {
                 Sqlite.openReadOnly(fileOf(other.installId)).use { db ->
                     val sources = db.map("SELECT source_id, source_uid, title FROM sources") {

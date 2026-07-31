@@ -97,6 +97,18 @@ class Library private constructor(
         }
     }
 
+    /**
+     * How much checking a pack still needs at open.
+     *
+     * Not a performance switch — a statement about **where the file came from**. A path a
+     * user typed has been checked by nobody, so it gets the whole gate. A file in the app's
+     * own directory, opened under a lease, was gated at install, is re-hashed by the
+     * background pass, and had the open-time check run by `borrow` moments ago; putting the
+     * full gate in front of every question means scanning every chunk and decoding every
+     * vector of a large rulebook before the app answers anything.
+     */
+    private enum class Gate { FULL, ALREADY_INSTALLED }
+
     companion object {
 
         /**
@@ -125,7 +137,7 @@ class Library private constructor(
                 val staged = paths.mapIndexed { index, path ->
                     Files.copy(path, staging.resolve("$index.rpgpack"))
                 }
-                openLeased(staged.map { it to null }, emptyMap(), staging)
+                openLeased(staged.map { it to null }, emptyMap(), Gate.FULL, staging)
             } catch (e: Throwable) {
                 runCatching {
                     Files.list(staging).use { it.forEach { entry -> Files.deleteIfExists(entry) } }
@@ -164,7 +176,15 @@ class Library private constructor(
                 // gives and one query short of the answer it would otherwise give.
                 library.borrow(pack.installId)?.let { lease -> lease.file to lease }
             }
-            return openLeased(leased, digests)
+            // **The full gate does not run here.** `install` ran it over these exact
+            // bytes, `verify` re-hashes them in the background, and `borrow` just ran the
+            // open-time check on every one of them. Running it again means scanning every
+            // chunk's text and decoding every vector in a large rulebook -- before each
+            // question a user asks. That is the bargain `01-app-state-spec.md` strikes,
+            // and re-validating here was not caution, it was the direct-file path's rule
+            // applied to a case it was not written for: these files came from the app's own
+            // private directory under a lease, not from wherever somebody typed.
+            return openLeased(leased, digests, gate = Gate.ALREADY_INSTALLED)
         }
 
         /**
@@ -178,6 +198,7 @@ class Library private constructor(
         private fun openLeased(
             sources: List<Pair<Path, AutoCloseable?>>,
             digests: Map<String, String> = emptyMap(),
+            gate: Gate = Gate.FULL,
             staging: Path? = null,
         ): Library {
             val opened = mutableListOf<ActivePack>()
@@ -195,8 +216,10 @@ class Library private constructor(
                     error(message)
                 }
 
-                val report = Packs.validate(db, BUNDLED.bundled)
-                if (!report.isValid) bail("$path would not activate:\n$report")
+                if (gate == Gate.FULL) {
+                    val report = Packs.validate(db, BUNDLED.bundled)
+                    if (!report.isValid) bail("$path would not activate:\n$report")
+                }
 
                 val meta = Packs.readMeta(db)
                 // Two files claiming one uid cannot both be active. Everything downstream

@@ -626,6 +626,30 @@ class PackLibraryTest {
     }
 
     @Test
+    fun `a replacement is not measured against the edition it replaces`() {
+        // The pack being replaced is still an active row while the measurement runs and is
+        // deleted moments later in the same transaction. Counting it meant a new edition
+        // whose supersessions target passages in its own previous edition measured as
+        // broad, installed itself inactive for review, and then deleted the very copy it
+        // had been measured against -- leaving no active edition of the book at all, over
+        // a withdrawal the swap had already made moot.
+        val core = installed(library.install(forge()))
+        library.setActive(core.installId, true)
+
+        val replacement = library.install(
+            errata(PackForge.PACK_UID, "core:grapple", "core:underdark", "core:ogre"),
+            confirmReplacing = PackForge.PACK_UID,
+        )
+        assertTrue(replacement is InstallResult.Installed, "got $replacement")
+        assertTrue(
+            replacement.deactivatedForReview.isEmpty(),
+            "the only book it withdraws from is the one it is replacing: " +
+                "${replacement.deactivatedForReview}",
+        )
+        assertTrue(replacement.pack.active, "so the replacement stays live")
+    }
+
+    @Test
     fun `deactivating never asks`() {
         // Switching a pack off can only ever restore reachability.
         val core = installed(library.install(forge()))

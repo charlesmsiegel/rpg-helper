@@ -65,7 +65,7 @@ class RenderTest {
         val body = "Difficulty 7 is ordinary — 13 is at the edge of what a person can do."
         val card = Card.Verbatim(
             ref = ChunkRef("srd:emberlight", 1), kind = "rules", body = body,
-            citation = citation(1, "Emberlight"), rollable = false,
+            citation = citation(1, "Emberlight"),
         )
         val quoted = rendered(card).lineSequence()
             .filter { it.startsWith("  \" ") }

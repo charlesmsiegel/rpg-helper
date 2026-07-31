@@ -58,9 +58,16 @@ object Capabilities {
         val rows = mutableMapOf<Long, List<TableRow>>()
         fun rowsOf(tableId: Long): List<TableRow> =
             rows.getOrPut(tableId) { loadRowsOf(db, tableId) }
-        val kinds = db.map("SELECT chunk_id, kind, origin FROM chunks") {
-            it.long(0) to (it.string(1) to it.string(2))
-        }.toMap()
+        // Classifications are fetched **per chunk a capability actually names**, for the
+        // same reason the rows are. `Library.openActive` runs this on every question the
+        // app answers, and a pack near the 500,000-chunk ceiling with no roll tables at all
+        // was allocating a half-million nested pairs to classify targets that do not exist.
+        val kinds = mutableMapOf<Long, Pair<String, String>?>()
+        fun classify(chunkId: Long): Pair<String, String>? = kinds.getOrPut(chunkId) {
+            db.map(
+                "SELECT kind, origin FROM chunks WHERE chunk_id = $chunkId",
+            ) { it.string(0) to it.string(1) }.firstOrNull()
+        }
 
         val loaded = mutableListOf<RollableTable>()
         val dropped = mutableListOf<DroppedCapability>()
@@ -127,7 +134,7 @@ object Capabilities {
             // the quotation rule, so attaching validated rows to a `setting` or derived
             // chunk would launder non-verbatim prose into quote styling beneath a real
             // citation -- past the routing partition that exists to stop exactly that.
-            val classification = kinds[chunkId]
+            val classification = classify(chunkId)
             if (classification != ("table" to "source")) {
                 dropped += DroppedCapability(
                     id,

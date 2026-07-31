@@ -96,7 +96,7 @@ class DiceConformanceTest {
 
     // ---------------------------------------------------------------- parsing helpers
 
-    private fun forEachVector(body: (String, Int, Int, Map<Int, Rational>) -> Unit) {
+    private fun forEachVector(body: (String, Long, Long, Map<Long, Rational>) -> Unit) {
         val block = vectors.substringAfter("\"vectors\": [").substringBefore("\n  ],")
         // Objects are separated at brace depth 0; each is one expression's vector.
         var depth = 0
@@ -116,14 +116,16 @@ class DiceConformanceTest {
 
     private fun parseVector(
         text: String,
-        body: (String, Int, Int, Map<Int, Rational>) -> Unit,
+        body: (String, Long, Long, Map<Long, Rational>) -> Unit,
     ) {
         val expr = Regex("\"expr\":\\s*\"([^\"]*)\"").find(text)!!.groupValues[1]
-        val min = Regex("\"min\":\\s*(-?\\d+)").find(text)!!.groupValues[1].toInt()
-        val max = Regex("\"max\":\\s*(-?\\d+)").find(text)!!.groupValues[1].toInt()
+        // Long, as `min`/`max` and every table bound are: the conformance vectors describe
+        // the same outcomes the roller and the coverage check reason about.
+        val min = Regex("\"min\":\\s*(-?\\d+)").find(text)!!.groupValues[1].toLong()
+        val max = Regex("\"max\":\\s*(-?\\d+)").find(text)!!.groupValues[1].toLong()
         val pmf = Regex("\\[\\s*\"(-?\\d+)\",\\s*\"(\\d+/\\d+)\"\\s*]")
             .findAll(text)
-            .associate { it.groupValues[1].toInt() to Rational.parse(it.groupValues[2]) }
+            .associate { it.groupValues[1].toLong() to Rational.parse(it.groupValues[2]) }
         body(expr, min, max, pmf)
     }
 

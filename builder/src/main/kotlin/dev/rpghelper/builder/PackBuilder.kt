@@ -517,7 +517,20 @@ class PackBuilder(
             }
         }
 
-        val rate = if (claims == 0) 1.0 else (claims - unsupported.size).toDouble() / claims
+        // **Zero claims is a failure, not a perfect score.** A summary that decomposes to
+        // nothing -- a single "." survives every earlier check -- was scored 1.0 without
+        // the judge being asked anything, so unchecked text shipped as attributed derived
+        // prose with well-formed citation chips. `ClaimReport.vacuous` already answers this
+        // for live generation; the builder had its own copy of the arithmetic and not of
+        // the rule.
+        if (claims == 0) {
+            notes += BuildNote(
+                "dropped", "chunk", null, "claim-support",
+                "summary dropped: it decomposed to no claim the judge could be asked about",
+            )
+            return false
+        }
+        val rate = (claims - unsupported.size).toDouble() / claims
         if (rate < claimThreshold) {
             notes += BuildNote(
                 "dropped", "chunk", null, "claim-support",

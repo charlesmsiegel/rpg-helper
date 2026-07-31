@@ -31,7 +31,6 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.rpghelper.routing.Answer
-import dev.rpghelper.routing.Card
 
 /**
  * The Ask surface, which is the app.
@@ -78,6 +77,11 @@ data class Turn(val query: String, val answer: Answer?, val rendered: String)
 fun AskScreen(model: AskViewModel = viewModel()) {
     var question by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
+    val controls = RollControls(
+        tablesFor = model::tablesFor,
+        resultFor = model::rollOf,
+        onRoll = model::roll,
+    )
 
     // The newest turn is the one being read. Scrolling on answer rather than on every
     // recomposition leaves the user's own scroll position alone while they read back.
@@ -121,11 +125,7 @@ fun AskScreen(model: AskViewModel = viewModel()) {
                         val answer = turn.answer
                         if (answer != null) {
                             answer.cards.forEach { card ->
-                                AnswerCard(
-                                    card = card,
-                                    onRoll = model::roll,
-                                    rolled = (card as? Card.Verbatim)?.let { model.rolls[it.ref] },
-                                )
+                                AnswerCard(card = card, rolls = controls)
                             }
                         } else {
                             HistoryCard(turn.rendered)

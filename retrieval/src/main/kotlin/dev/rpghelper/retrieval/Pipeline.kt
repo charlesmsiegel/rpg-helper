@@ -70,6 +70,13 @@ data class Candidate(
      * different bytes or insert a different marker.
      */
     val redactedText: String?,
+    /**
+     * Children whose text this candidate already contains, deduplicated into it.
+     *
+     * Carried so routing can attach what they own — a roll capability keyed to a nested
+     * table's ref — to the card that ended up holding their text.
+     */
+    val absorbed: List<ChunkRef> = emptyList(),
 ) {
     /** Whether this renders as a quotation: verbatim-eligible kind *and* source origin. */
     val verbatim: Boolean
@@ -267,6 +274,7 @@ object Pipeline {
                     denseWindow = windows[fusedCandidate.ref],
                     redact = survivors.getValue(fusedCandidate.ref).redact,
                     redactedText = survivors.getValue(fusedCandidate.ref).redactedText,
+                    absorbed = survivors.getValue(fusedCandidate.ref).absorbed,
                 )
             }
             .take(MAX_CANDIDATES)

@@ -11,6 +11,7 @@ import dev.rpghelper.capabilities.RollableTable
 import dev.rpghelper.capabilities.Roller
 import dev.rpghelper.capabilities.SecureDiceSource
 import dev.rpghelper.pack.ChunkRef
+import dev.rpghelper.routing.asPlainText
 import dev.rpghelper.session.AskService
 import dev.rpghelper.session.Library
 import dev.rpghelper.session.Store
@@ -70,7 +71,7 @@ class AskViewModel(application: Application) : AndroidViewModel(application) {
      * Per chunk rather than per card, because the same table can appear in two answers and
      * a roll belongs to the table the user tapped.
      */
-    var rolls by mutableStateOf<Map<ChunkRef, RollResult>>(emptyMap())
+    var rolls by mutableStateOf<Map<Pair<ChunkRef, Long>, RollResult>>(emptyMap())
         private set
 
     /**
@@ -83,7 +84,7 @@ class AskViewModel(application: Application) : AndroidViewModel(application) {
      * connection would mean re-opening the pack on a tap, which is both slower and a
      * different pack from the one the card was built from.
      */
-    private var tables: Map<ChunkRef, RollableTable> = emptyMap()
+    private var tables: Map<ChunkRef, List<RollableTable>> = emptyMap()
 
     private val roller = Roller(SecureDiceSource())
 
@@ -104,9 +105,14 @@ class AskViewModel(application: Application) : AndroidViewModel(application) {
                 runCatching {
                     // Reconciled and reopened per question; closed before the next one.
                     Library.openActive(store.library).use { library ->
+                        // Grouped, not mapped. Nothing in the schema makes `tables.chunk_id`
+                        // unique, so a pack may attach several roll tables to one chunk --
+                        // and `toMap` silently kept whichever the database returned last,
+                        // making one control unreachable and the surviving one a function of
+                        // iteration order.
                         val loadable = library.rollables.flatMap { (uid, tables) ->
                             tables.map { ChunkRef(uid, it.chunkId) to it }
-                        }.toMap()
+                        }.groupBy({ it.first }, { it.second })
                         service.ask(
                             question = question,
                             library = library,
@@ -117,6 +123,15 @@ class AskViewModel(application: Application) : AndroidViewModel(application) {
                             // cache is never consulted because there is no generated card
                             // to keep.
                             generator = null,
+                            // **Not the default.** `AskService`'s fallback render is
+                            // `cards.joinToString`, which is Kotlin's data-class toString --
+                            // so a feed restored after process death read
+                            // `Verbatim(ref=ChunkRef(...), citation=Citation(...))`, and the
+                            // same text would become the context a follow-up resolves
+                            // against once a generator is wired. The plain-text rendering
+                            // keeps the quote gutter, which is what makes a stored answer
+                            // still say which lines were the book's own words.
+                            render = { it.asPlainText() },
                             hasInactivePacks = store.library.installed().any { !it.active },
                         ) to loadable
                     }
@@ -139,15 +154,16 @@ class AskViewModel(application: Application) : AndroidViewModel(application) {
      * passed activation, and showing nothing at all would read as a control that does not
      * work rather than as a pack that is wrong.
      */
-    fun roll(ref: ChunkRef) {
-        val table = tables[ref] ?: run {
-            failure = "no loadable table for that passage"
-            return
-        }
+    fun roll(ref: ChunkRef, table: RollableTable) {
         roller.roll(table)
-            .onSuccess { rolls = rolls + (ref to it) }
+            .onSuccess { rolls = rolls + ((ref to table.tableId) to it) }
             .onFailure { failure = "the roll produced nothing: ${it.message}" }
     }
+
+    /** The tables a card may offer a control for, in the order the pack loaded them. */
+    fun tablesFor(ref: ChunkRef): List<RollableTable> = tables[ref].orEmpty()
+
+    fun rollOf(ref: ChunkRef, tableId: Long): RollResult? = rolls[ref to tableId]
 
     /**
      * Clears the feed **and** the conversational window, which are the same thing.

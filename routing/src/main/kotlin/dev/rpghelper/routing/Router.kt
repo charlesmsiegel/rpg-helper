@@ -150,7 +150,11 @@ class Router(
             kind = candidate.kind,
             body = candidate.text,
             citation = citation,
-            rollable = candidate.ref in rollable,
+            // The card's own chunk and every chunk it absorbed. A nested rollable table
+            // deduplicated into its parent quote leaves its text on screen under the
+            // parent's citation while the capability stays keyed to the child; without
+            // this the card contained a table and offered no way to roll on it.
+            rollableRefs = (listOf(candidate.ref) + candidate.absorbed).filter { it in rollable },
         )
     }
 
@@ -243,7 +247,14 @@ class Router(
                 unredactable++
                 continue
             }
-            val cost = chunk.redactedText.toByteArray(Charsets.UTF_8).size
+            // **Every field the chunk hands the generator, not only the body.** The heading
+            // path travels into the prompt too, and the format's per-cell ceiling is
+            // several megabytes -- so five chunks with one-line bodies and enormous headings
+            // cleared a 16 KiB budget while expanding the actual prompt by tens of
+            // megabytes. A budget that measures a subset of what it is budgeting is not a
+            // budget; it is a number that happens to be checked.
+            val cost = chunk.redactedText.toByteArray(Charsets.UTF_8).size +
+                (chunk.headingPath?.toByteArray(Charsets.UTF_8)?.size ?: 0)
             if (spent + cost > maxContextBytes) {
                 droppedForBytes = settings.size - considered + 1
                 break

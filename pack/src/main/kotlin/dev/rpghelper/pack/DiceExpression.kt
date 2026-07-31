@@ -41,10 +41,14 @@ data class DiceExpression(
      * distinguishable by equality rather than by a confidence interval: they share the
      * range 2–12 and differ in every interior probability.
      */
-    fun distribution(): Map<Int, Rational> {
-        var dist = mapOf(0 to Rational.ONE)
+    fun distribution(): Map<Long, Rational> {
+        // Long throughout, because `min`, `max` and every table row bound already are. The
+        // grammar admits a modifier up to `Int.MAX_VALUE`, so `d6+2147483647` summed in Int
+        // produced wrapped negative keys -- an exact-PMF API disagreeing with the roller and
+        // the coverage logic about what the very same expression can produce.
+        var dist = mapOf(0L to Rational.ONE)
         repeat(count) {
-            val next = HashMap<Int, Rational>()
+            val next = HashMap<Long, Rational>()
             for ((total, probability) in dist) {
                 for (face in 1..sides) {
                     val outcome = total + face

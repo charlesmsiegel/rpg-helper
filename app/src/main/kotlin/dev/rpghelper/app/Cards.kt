@@ -24,6 +24,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import dev.rpghelper.capabilities.RollResult
+import dev.rpghelper.capabilities.RollableTable
 import dev.rpghelper.pack.ChunkRef
 import dev.rpghelper.routing.Card
 import dev.rpghelper.routing.Chip
@@ -53,13 +54,11 @@ import dev.rpghelper.routing.render
 fun AnswerCard(
     card: Card,
     modifier: Modifier = Modifier,
-    /** Invoked when the user taps a roll control. Null offers no control at all. */
-    onRoll: ((ChunkRef) -> Unit)? = null,
-    /** The last roll on this card's table, if there has been one. */
-    rolled: RollResult? = null,
+    rolls: RollControls = RollControls.None,
+    onSearchInactive: (() -> Unit)? = null,
 ) {
     when (card) {
-        is Card.Verbatim -> VerbatimCard(card, modifier, onRoll, rolled)
+        is Card.Verbatim -> VerbatimCard(card, modifier, rolls)
         is Card.Derived -> ProseCard(
             label = "Summary — written by this pack's builder, not quoted",
             body = card.body,
@@ -75,7 +74,7 @@ fun AnswerCard(
             modifier = modifier,
         )
         is Card.ModelUnavailable -> StatementCard(card.statement, card.wouldHaveUsed, modifier)
-        is Card.Empty -> StatementCard(card.statement, emptyList(), modifier)
+        is Card.Empty -> EmptyCard(card, onSearchInactive, modifier)
     }
 }
 
@@ -83,8 +82,7 @@ fun AnswerCard(
 private fun VerbatimCard(
     card: Card.Verbatim,
     modifier: Modifier,
-    onRoll: ((ChunkRef) -> Unit)? = null,
-    rolled: RollResult? = null,
+    rolls: RollControls = RollControls.None,
 ) {
     // **Provenance is announced before content, and as one node.** Sighted readers get the
     // rule down the left edge and the monospaced face; a screen-reader user got a `RULES`
@@ -134,14 +132,18 @@ private fun VerbatimCard(
             }
             Spacer(Modifier.height(8.dp))
             CitationLine(card.citation)
-            // **An actionable control, not a label that looks like one.** This rendered
-            // as plain text with no click handler and no callback to reach the roller, so
-            // the app announced a capability -- to sighted users and, via the accessibility
-            // description, to TalkBack users -- that tapping could never deliver.
-            if (card.rollable && onRoll != null) {
-                Spacer(Modifier.height(8.dp))
-                TextButton(onClick = { onRoll(card.ref) }) { Text("Roll on this table") }
-                rolled?.let { RolledOutcome(it, card.citation) }
+            // **An actionable control, not a label that looks like one** -- and one per
+            // table, because a chunk may carry several and a nested table deduplicated into
+            // this quote brought its own. Labelled by the table so two controls on one card
+            // are distinguishable, which a repeated "Roll on this table" would not be.
+            for (ref in card.rollableRefs) {
+                for (table in rolls.tablesFor(ref)) {
+                    Spacer(Modifier.height(8.dp))
+                    TextButton(onClick = { rolls.onRoll(ref, table) }) {
+                        Text("Roll: ${table.label}")
+                    }
+                    rolls.resultFor(ref, table.tableId)?.let { RolledOutcome(it, card.citation) }
+                }
             }
         }
     }
@@ -339,5 +341,67 @@ private fun RolledOutcome(result: RollResult, citation: Citation, modifier: Modi
         }
         Spacer(Modifier.height(4.dp))
         CitationLine(citation)
+    }
+}
+
+/**
+ * Everything a card needs to offer a roll, in one object.
+ *
+ * A struct rather than three parameters threaded through every composable, and a struct
+ * rather than a `RollableTable` handed in directly: the tables are per chunk and a card can
+ * carry several chunks' worth, so the card asks rather than being told.
+ */
+class RollControls(
+    val tablesFor: (ChunkRef) -> List<RollableTable>,
+    val resultFor: (ChunkRef, Long) -> RollResult?,
+    val onRoll: (ChunkRef, RollableTable) -> Unit,
+) {
+    companion object {
+        /** No packs loaded, or a surface with no roller. Offers nothing rather than a stub. */
+        val None = RollControls({ emptyList() }, { _, _ -> null }, { _, _ -> })
+    }
+}
+
+/**
+ * *Not found in your active packs* — **with the remedy the card model already carries.**
+ *
+ * `Card.Empty` holds which packs were searched and whether inactive ones exist, and this
+ * rendered the sentence and discarded both. A refusal is load-bearing here: it is how a
+ * user learns that silence means silence, and a user who cannot see *what was searched*
+ * has no way to tell a real absence from a book they forgot to activate. The inactive
+ * search is offered and never performed, because activating changes every future answer.
+ */
+@Composable
+private fun EmptyCard(
+    card: Card.Empty,
+    onSearchInactive: (() -> Unit)?,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+    ) {
+        Column(Modifier.padding(12.dp)) {
+            Text(text = card.statement, style = MaterialTheme.typography.bodyMedium)
+            if (card.activePacks.isNotEmpty()) {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = "Searched: ${card.activePacks.joinToString(", ")}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (card.canSearchInactive) {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = "You have installed packs that are not active. They were not searched.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                onSearchInactive?.let {
+                    TextButton(onClick = it) { Text("Search inactive packs too") }
+                }
+            }
+        }
     }
 }
