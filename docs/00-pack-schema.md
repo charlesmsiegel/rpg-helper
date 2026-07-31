@@ -489,6 +489,10 @@ N, S     := positive integers
   is exactly the sort of gap that produces two implementations disagreeing politely.
 - `d%` is exactly 1–100. Books printing `00` map to 100 at build time, and the mapping
   is recorded rather than assumed.
+- **`d%` is a literal form, not `NdS` with a `%` for `S`.** `2d%` does not parse. The
+  production writes `'d%'` quoted for that reason, but it is the kind of detail a reader
+  supplies a count to out of symmetry, so it is stated: a table rolling two percentile
+  dice is `2d100`, which carries none of the `00` mapping.
 - **`d100` is a separate, legal expression**, being `dS` with `S = 100`. It is not a
   spelling of `d%` and carries none of its `00` mapping; the two coincide only in their
   outcome range.

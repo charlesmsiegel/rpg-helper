@@ -308,6 +308,16 @@ class PackValidatorHardeningTest {
     }
 
     @Test
+    fun `rejects a rollable table with no rows at all`() {
+        // The empty table reaches no row, so a coverage check keyed off the rows that
+        // exist never looks at it -- and it activates as a table the app offers to roll
+        // on where every result has no outcome.
+        assertRejects(ViolationCode.TABLE_ROWS_INCOMPLETE) {
+            it.exec("DELETE FROM table_rows WHERE table_id = 1")
+        }
+    }
+
+    @Test
     fun `rejects a table whose rows stop short of its range`() {
         assertRejects(ViolationCode.TABLE_ROWS_INCOMPLETE) {
             it.exec("DELETE FROM table_rows WHERE seq = 5")

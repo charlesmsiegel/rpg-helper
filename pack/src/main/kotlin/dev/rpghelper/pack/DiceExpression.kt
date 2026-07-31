@@ -96,7 +96,13 @@ data class DiceExpression(
             }
 
             if (rest == "%") {
-                return DiceExpression(count, PERCENTILE_SIDES, modifier, percentile = true)
+                // The grammar admits the literal `d%`, not `Nd%`. Accepting `2d%` here
+                // would be this parser quietly speaking a larger language than the
+                // builder that rejects it -- the cross-implementation disagreement a
+                // shared parser exists to prevent. A table rolling two percentile dice
+                // is `2d100`, which carries none of `d%`'s 00-to-100 mapping.
+                if (countPart.isNotEmpty()) return null
+                return DiceExpression(1, PERCENTILE_SIDES, modifier, percentile = true)
             }
             val sides = positiveInt(rest) ?: return null
             return DiceExpression(count, sides, modifier, percentile = false)

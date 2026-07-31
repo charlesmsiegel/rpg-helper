@@ -206,7 +206,14 @@ internal fun checkTableRows(db: Db, chunks: Map<Long, ChunkRow>, out: MutableLis
                 )
             }
         }
-        expressions[tableId]?.let { checkCoverage(tableId, it, sorted, out) }
+    }
+
+    // Coverage is driven by the *declared* tables, not by the rows that happen to exist.
+    // A rollable table with no rows never appears in `ranges` at all, so keying the check
+    // off the rows would let it activate -- a table the app offers to roll on and for
+    // which every result has no outcome.
+    for ((tableId, expression) in expressions) {
+        checkCoverage(tableId, expression, ranges[tableId]?.sortedBy { it.first }.orEmpty(), out)
     }
 }
 
