@@ -65,7 +65,7 @@
           "heading_path": "How to Play > Difficulty",
           "page_label_start": "2", "page_label_end": "2",
           "from": "Difficulty. The Warden sets",
-          "to": "the answer is simply no."
+          "to": "answer is simply no."
         },
         {
           "stable_key": "srd:core:seizing",
@@ -107,7 +107,7 @@
           "heading_path": "How to Play > Boons",
           "page_label_start": "4", "page_label_end": "4",
           "from": "Boons. A character may take",
-          "to": "one size larger than yourself."
+          "to": "yourself."
         },
         {
           "stable_key": "srd:core:marches",
@@ -149,7 +149,7 @@
           "heading_path": "Bestiary > Cinder Hound",
           "page_label_start": "18", "page_label_end": "18",
           "from": "Cinder Hound. Might 3",
-          "to": "Burning on a Bright Success."
+          "to": "Bright Success."
         },
         {
           "stable_key": "srd:core:ash-warden",
@@ -157,7 +157,7 @@
           "heading_path": "Bestiary > Ash Warden",
           "page_label_start": "18", "page_label_end": "19",
           "from": "Ash Warden. Might 2",
-          "to": "in the last forty years."
+          "to": "last forty years."
         }
       ]
     },
@@ -197,7 +197,7 @@
           "heading_path": "Part Two > What Follows",
           "page_label_start": "4", "page_label_end": "4",
           "from": "Two cinder hounds have been tracking",
-          "to": "They wait for the cord to come off."
+          "to": "the cord to come off."
         },
         {
           "stable_key": "srd:door:held",
@@ -213,7 +213,7 @@
           "heading_path": "Appendix > Conditions > Shaken",
           "page_label_start": "11", "page_label_end": "11",
           "from": "Shaken. A Shaken creature",
-          "to": "a turn doing nothing else."
+          "to": "nothing else."
         }
       ]
     }

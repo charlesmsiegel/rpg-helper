@@ -16,6 +16,16 @@ data class RewrittenQuery(
     val entityHits: Set<Pair<String, Long>>,
     /** Which aliases fired, for diagnostics. */
     val matched: List<Alias>,
+    /**
+     * The query's concepts, each with every wording that counts as it.
+     *
+     * The information gate scores a chunk by the share of the query's content it holds,
+     * and an alias-expanded concept has to count once. Scored as independent terms, the
+     * rare word the user typed goes unmatched and dominates, while the canonical that did
+     * match is common enough to contribute nothing — so the rewrite would make a query
+     * score *worse*.
+     */
+    val groups: List<TermGroup>,
 )
 
 /**
@@ -43,6 +53,7 @@ class AliasRewriter(aliases: List<Alias>) {
         val matched = mutableListOf<Alias>()
         val entityHits = mutableSetOf<Pair<String, Long>>()
         val canonicals = mutableListOf<String>()
+        val groups = mutableListOf<TermGroup>()
 
         // Greedy, longest-first, non-overlapping. Without the non-overlap rule
         // "blade of the fallen" fires as itself, as "the fallen", and as "fallen",
@@ -53,19 +64,24 @@ class AliasRewriter(aliases: List<Alias>) {
             for (length in minOf(maxPhrase, tokens.size - index) downTo 1) {
                 val phrase = tokens.subList(index, index + length).joinToString(" ")
                 val hits = byAlias[phrase] ?: continue
+                val wordings = tokens.subList(index, index + length).toMutableList()
                 for (hit in hits) {
                     matched += hit
-                    canonicals += Tokenizer.tokenize(hit.canonical)
+                    val canonical = Tokenizer.tokenize(hit.canonical)
+                    canonicals += canonical
+                    wordings += canonical
                     hit.chunkId?.let { entityHits += hit.packUid to it }
                 }
+                groups += TermGroup(wordings.distinct())
                 consumed = length
                 break
             }
+            if (consumed == 0) groups += TermGroup(listOf(tokens[index]))
             index += if (consumed > 0) consumed else 1
         }
 
         // The user's own tokens are never dropped. An alias that fires wrongly costs some
         // precision; a rewrite that replaces the user's wording costs the query.
-        return RewrittenQuery(tokens + canonicals, entityHits, matched)
+        return RewrittenQuery(tokens + canonicals, entityHits, matched, groups)
     }
 }
