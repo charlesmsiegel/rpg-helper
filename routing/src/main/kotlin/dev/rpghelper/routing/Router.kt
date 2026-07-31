@@ -284,7 +284,18 @@ class Router(
         val residual = if (covered.isEmpty()) {
             normalizedQuery
         } else {
-            generator!!.residualIntent(normalizedQuery, covered) ?: return null
+            // **Blank means the quotes answered everything**, and spec 05 section 2.3 says
+            // so explicitly -- so a compliant generator returning "" was being handed
+            // straight to `answer`, which then produced prose about whatever was left in
+            // the context and appended it to an already-complete answer. Null and blank are
+            // the same statement made two ways; both end route 3 here, and neither is a
+            // failure.
+            val split = generator!!.residualIntent(normalizedQuery, covered)
+            if (split.isNullOrBlank()) {
+                diagnostics += "route 3 dropped: the quote cards answered the whole question"
+                return null
+            }
+            split
         }
 
         val answer = generator!!.answer(residual, context)

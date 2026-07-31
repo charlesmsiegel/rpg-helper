@@ -5,6 +5,7 @@ import dev.rpghelper.pack.JdbcDb
 import dev.rpghelper.pack.map
 import dev.rpghelper.pack.PackMeta
 import dev.rpghelper.pack.Packs
+import dev.rpghelper.pack.Preflight
 import dev.rpghelper.pack.ValidationReport
 import java.nio.file.Files
 import java.nio.file.Path
@@ -63,7 +64,16 @@ sealed interface ActivationResult {
 
 /** Why an install did not happen. */
 sealed interface InstallResult {
-    data class Installed(val pack: InstalledPack) : InstallResult
+    /**
+     * @param deactivatedForReview non-empty when the pack **inherited an activation it was
+     * not allowed to keep**: a same-uid replacement that newly withdraws a large share of
+     * another active book. It installs, and it installs inactive, because activation is the
+     * step that requires acknowledgement and a replacement must not be a way around it.
+     */
+    data class Installed(
+        val pack: InstalledPack,
+        val deactivatedForReview: List<SupersessionImpact> = emptyList(),
+    ) : InstallResult
     data class Rejected(val report: ValidationReport) : InstallResult
     data class TooLarge(val limit: String) : InstallResult
 
@@ -124,16 +134,18 @@ class PackLibrary(
      * as an out-of-memory kill rather than as a refusal.
      */
     data class PackLimits(
+        /** Install's own bound: how many bytes will be copied before giving up. */
         val maxFileBytes: Long = 2L * 1024 * 1024 * 1024,
-        val maxChunks: Long = 500_000,
-        val maxVectors: Long = 5_000_000,
-        val maxEntities: Long = 500_000,
-        val maxTableRows: Long = 1_000_000,
-        /** One chunk's text. A book's longest chapter is far below this. */
-        val maxTextBytes: Long = 4L * 1024 * 1024,
-        /** One embedding. A 4096-dimension binary16 vector is 8 KiB. */
-        val maxBlobBytes: Long = 64 * 1024,
-    )
+        /** The format's bounds, shared with every other validation entry point. */
+        val content: dev.rpghelper.pack.PackLimits = dev.rpghelper.pack.PackLimits(),
+    ) {
+        val maxChunks: Long get() = content.maxChunks
+        val maxVectors: Long get() = content.maxVectors
+        val maxEntities: Long get() = content.maxEntities
+        val maxTableRows: Long get() = content.maxTableRows
+        val maxTextBytes: Long get() = content.maxTextBytes
+        val maxBlobBytes: Long get() = content.maxBlobBytes
+    }
 
     /**
      * Validates [source] and installs it.
@@ -170,6 +182,7 @@ class PackLibrary(
         }
 
         val staged = packsDir.resolve("$installId.rpgpack")
+        var broadImpact: List<SupersessionImpact> = emptyList()
         val existing: InstalledPack?
         val meta: PackMeta
         val size: Long
@@ -217,6 +230,19 @@ class PackLibrary(
                             "nothing was installed",
                     )
                 }
+                // Measured while the pack being replaced is still active and this one is
+                // not, which is exactly the comparison the user would be shown: how much
+                // of somebody *else's* active book this new file would withdraw.
+                if (current?.active == true) {
+                    broadImpact = supersessionImpact(
+                        InstalledPack(
+                            installId, meta.packUid, meta.packVersion, meta.title,
+                            meta.rulesetId, meta.embedderId, size, digest,
+                            active = false, priority = current.priority,
+                        ),
+                    ).filter { it.fraction > BROAD_SUPERSESSION }
+                }
+
                 db.execute(
                     "DELETE FROM installed_packs WHERE install_id = ?",
                     current?.installId ?: -1L,
@@ -231,7 +257,13 @@ class PackLibrary(
                     // is never active on arrival: a pack can claim any uid it likes, so
                     // inheriting activation would let an imported file become live content
                     // without the user ever deciding to activate it.
-                    current?.active ?: false,
+                    //
+                    // And an *active* pack's replacement keeps that activation only if it
+                    // would not newly hollow out another active book. `setActive` gates
+                    // that; inheriting the flag here walked straight past the gate, so a
+                    // same-uid replacement was a way to make a broad supersession live
+                    // with no acknowledgement at all.
+                    (current?.active ?: false) && broadImpact.isEmpty(),
                     current?.priority ?: nextPriority(), installId,
                 )
             }
@@ -247,7 +279,7 @@ class PackLibrary(
         //    installed. `reconcile` sweeps files with no row.
         if (existing != null) deleteWhenUnread(existing.installId)
 
-        return InstallResult.Installed(requireNotNull(byId(installId)))
+        return InstallResult.Installed(requireNotNull(byId(installId)), broadImpact)
     }
 
     /**
@@ -537,50 +569,13 @@ class PackLibrary(
     )
 
     /**
-     * Row counts and the largest single values, or null when everything is in bounds.
+     * Delegates to `:pack`, which owns the ceilings because they are the format's.
      *
-     * Read with `count(*)` and `max(length(...))`, which SQLite answers without
-     * materializing the values — the whole point, since materializing them is the failure
-     * being prevented.
+     * Kept as a method so the install path reads the same as it did; the logic moved so
+     * that `Packs.validateFile` -- reached directly by the command-line tool and by every
+     * `Library.open` -- gets the same protection this call site used to have alone.
      */
-    private fun preflight(path: Path): String? = runCatching {
-        java.sql.DriverManager.getConnection("jdbc:sqlite:${path.toAbsolutePath()}").use { c ->
-            fun scalar(sql: String): Long = c.createStatement().use { s ->
-                s.executeQuery(sql).use { if (it.next()) it.getLong(1) else 0L }
-            }
-            val checks = listOf(
-                Triple("chunks", "SELECT count(*) FROM chunks", limits.maxChunks),
-                Triple("vectors", "SELECT count(*) FROM vectors", limits.maxVectors),
-                Triple("entities", "SELECT count(*) FROM entities", limits.maxEntities),
-                Triple("table rows", "SELECT count(*) FROM table_rows", limits.maxTableRows),
-                Triple(
-                    "a chunk's text",
-                    // Cast to BLOB, because `length()` on TEXT counts *characters*. The
-                    // limit and its message are stated in bytes, and every game book that
-                    // is not English prose gets its ceiling silently raised otherwise --
-                    // by three for CJK, four for emoji -- so the exact packs this bound
-                    // exists to catch are the ones that pass it.
-                    "SELECT COALESCE(max(length(CAST(text AS BLOB))), 0) FROM chunks",
-                    limits.maxTextBytes,
-                ),
-                Triple(
-                    "an embedding",
-                    "SELECT COALESCE(max(length(embedding)), 0) FROM vectors",
-                    limits.maxBlobBytes,
-                ),
-            )
-            for ((what, sql, ceiling) in checks) {
-                val actual = scalar(sql)
-                if (actual > ceiling) return@use "$what: $actual exceeds the limit of $ceiling"
-            }
-            null
-        }
-    }.getOrElse {
-        // A file that cannot be queried at all is not *too large*, it is not a pack --
-        // and the validator says so precisely, where this could only guess. Falling
-        // through keeps "too large" meaning too large.
-        null
-    }
+    private fun preflight(path: Path): String? = Preflight.check(path, limits.content)
 
     /**
      * Copies [source] to [target], stopping if more than [limit] bytes arrive.

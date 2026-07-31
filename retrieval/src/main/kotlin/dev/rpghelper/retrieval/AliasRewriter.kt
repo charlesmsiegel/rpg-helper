@@ -84,12 +84,15 @@ class AliasRewriter(aliases: List<Alias>) {
                     alternatives += canonical
                     hit.chunkId?.let { entityHits += hit.packUid to it }
                 }
-                if (matched.isEmpty() && alternatives.size == 1 && hits.isNotEmpty()) {
-                    // Every alias at this position was unusable; the user's own tokens
-                    // still stand for themselves.
-                    groups += TermGroup(alternatives.distinct())
-                    consumed = length
-                    break
+                if (alternatives.size == 1 && hits.isNotEmpty()) {
+                    // **Every alias at this position was unusable, so this position was
+                    // never rewritten** -- and consuming the phrase anyway turned two
+                    // ordinary concepts into one conjunction. An unusable `red dragon`
+                    // alias made a chunk holding only `dragon` score zero coverage and be
+                    // gated out, which is the alias affecting the query after being
+                    // dropped. Fall through to a shorter phrase, and failing that to the
+                    // per-token groups the loop's tail produces.
+                    continue
                 }
                 groups += TermGroup(alternatives.distinct())
                 consumed = length

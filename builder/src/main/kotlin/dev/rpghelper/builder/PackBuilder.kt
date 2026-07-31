@@ -712,8 +712,8 @@ class PackBuilder(
                 ) {
                     it.setLong(1, tableId)
                     it.setInt(2, seq)
-                    it.setInt(3, row.lo)
-                    it.setInt(4, row.hi)
+                    it.setLong(3, row.lo)
+                    it.setLong(4, row.hi)
                     it.setInt(5, base + relative.start)
                     it.setInt(6, base + relative.end)
                     it.setString(7, row.text)
@@ -739,22 +739,33 @@ class PackBuilder(
         // look contiguous": a gap is a roll with no outcome and an overlap is a roll with
         // two, and the roller fails closed on both -- so the control would appear and then
         // refuse, which is worse than never appearing.
-        val covered = sortedMapOf<Long, Int>()
-        for (row in table.rows) {
+        // **Compared as intervals, never enumerated.** A malformed row reading
+        // `-2000000000..2000000000` is one row and two billion iterations, so the loop that
+        // was going to report it out of range hung the builder first -- and a table this
+        // method exists to *drop* took the whole build with it.
+        val sorted = table.rows.sortedBy { it.lo }
+        for (row in sorted) {
             if (row.lo > row.hi) return "row ${row.lo}-${row.hi} is inverted"
-            for (value in row.lo..row.hi) {
-                covered[value.toLong()] = (covered[value.toLong()] ?: 0) + 1
+            if (row.lo < expression.min || row.hi > expression.max) {
+                return "row ${row.lo}-${row.hi} lies outside what '${table.diceExpr}' can roll " +
+                    "(${expression.min}-${expression.max})"
             }
         }
-        for (value in expression.min..expression.max) {
-            when (covered[value]) {
-                null -> return "'${table.diceExpr}' can roll $value, which no row covers"
-                1 -> Unit
-                else -> return "$value is covered by ${covered[value]} rows"
+        // Contiguous from the first result to the last, with no overlap: each row must
+        // start exactly where the previous one ended.
+        var expected = expression.min
+        for (row in sorted) {
+            if (row.lo > expected) {
+                return "'${table.diceExpr}' can roll $expected, which no row covers"
             }
+            if (row.lo < expected) {
+                return "$expected is covered by more than one row"
+            }
+            expected = row.hi + 1
         }
-        val extra = covered.keys.filter { it < expression.min || it > expression.max }
-        if (extra.isNotEmpty()) return "rows cover ${extra.first()}, which '${table.diceExpr}' cannot roll"
+        if (expected != expression.max + 1) {
+            return "'${table.diceExpr}' can roll $expected, which no row covers"
+        }
 
         // And each outcome is where it says it is. A row whose text is not in the chunk is
         // a row the app would render as a quotation of something the book does not say.

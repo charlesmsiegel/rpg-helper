@@ -19,6 +19,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import dev.rpghelper.routing.Card
 import dev.rpghelper.routing.Chip
@@ -69,8 +71,21 @@ fun AnswerCard(card: Card, modifier: Modifier = Modifier) {
 
 @Composable
 private fun VerbatimCard(card: Card.Verbatim, modifier: Modifier) {
+    // **Provenance is announced before content, and as one node.** Sighted readers get the
+    // rule down the left edge and the monospaced face; a screen-reader user got a `RULES`
+    // label, then the body, then a citation three nodes later -- so the fact that this was
+    // the book's own words arrived after the words, if it arrived at all. Merging the
+    // card's semantics and stating the quotation first is the same signal in the channel
+    // TalkBack actually reads (`06-ui-spec.md` section 1.3).
+    val spoken = "Quotation from ${card.citation.sourceTitle}" +
+        (card.citation.headingPath?.let { ", $it" } ?: "") +
+        ". ${card.kind}. ${card.body}. Cited as ${render(card.citation)}." +
+        if (card.rollable) " A roll control is available." else ""
+
     Surface(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .semantics(mergeDescendants = true) { contentDescription = spoken },
         color = MaterialTheme.colorScheme.surfaceVariant,
         tonalElevation = 2.dp,
     ) {

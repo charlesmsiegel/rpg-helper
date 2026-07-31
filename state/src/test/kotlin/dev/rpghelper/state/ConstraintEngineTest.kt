@@ -361,6 +361,21 @@ class ConstraintEngineTest {
     }
 
     @Test
+    fun `a range with neither bound is dropped, because it can never fire`() {
+        // Not a permissive rule -- a rule that does nothing. Unlike a capability, whose
+        // absence shows as a control that never appears, it leaves the document displaying
+        // as validated against a constraint incapable of failing.
+        for (form in listOf("range", "sum_range", "count_range")) {
+            val result = ConstraintParser.parse(1, ruleset, form, """{"selector":"a.*"}""", 1)
+            assertTrue(result.isFailure, "$form accepted a bound-less range")
+            assertTrue(
+                result.exceptionOrNull()!!.message!!.contains("never fire"),
+                result.exceptionOrNull()!!.message!!,
+            )
+        }
+    }
+
+    @Test
     fun `malformed JSON is dropped rather than crashing the load`() {
         assertTrue(ConstraintParser.parse(1, ruleset, "range", "{not json", 1).isFailure)
         assertTrue(ConstraintParser.parse(1, ruleset, "range", """{"min":1}""", 1).isFailure)

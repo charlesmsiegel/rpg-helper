@@ -194,6 +194,21 @@ class PackValidatorHardeningTest {
     }
 
     @Test
+    fun `canary is not fooled by a supplementary-plane letter`() {
+        // A UTF-16 Char scan reads both halves of a surrogate pair as separators, so it
+        // picked `abc` while the index stored the single token `\uD800\uDF00abc` -- the probe then
+        // found nothing and refused a correctly populated pack.
+        assertEquals("rounds", asciiWord("\uD800\uDF00abc rounds"))
+    }
+
+    @Test
+    fun `canary skips a token unicode61 would keep whole`() {
+        // `\u2163` is a letter number and a token character to the index, so `iv` is not a
+        // token that exists in it.
+        assertEquals("rounds", asciiWord("\u2163iv rounds"))
+    }
+
+    @Test
     fun `canary skips tokens containing non-ASCII letters`() {
         // The indexed token is "cafe" after diacritic folding; the ASCII run "Caf" is not
         // a token at all.

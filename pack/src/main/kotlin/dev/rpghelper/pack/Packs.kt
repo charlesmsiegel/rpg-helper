@@ -10,8 +10,24 @@ object Packs {
      *
      * @param supportedEmbedders contracts whose weights the calling build bundles.
      */
-    fun validateFile(path: Path, supportedEmbedders: Set<EmbedderContract>): ValidationReport =
-        JdbcDb.openReadOnly(path).use { PackValidator(supportedEmbedders).validate(it) }
+    fun validateFile(
+        path: Path,
+        supportedEmbedders: Set<EmbedderContract>,
+        limits: PackLimits = PackLimits(),
+    ): ValidationReport {
+        // **The preflight runs here, not only where a pack is installed.** The validator
+        // materializes chunk metadata and reads every text value, so a malformed file well
+        // under any file-size ceiling can hold millions of rows or one enormous cell and
+        // exhaust the heap *before* it can be refused -- an out-of-memory kill rather than
+        // a refusal. `PackLibrary.install` ran this first; `verify`, `build` and every
+        // direct `Library.open` reached the validator without it, which made the protection
+        // a property of one call site rather than of the gate.
+        val fault = Preflight.check(path, limits)
+        if (fault != null) {
+            return ValidationReport(listOf(Violation(ViolationCode.PACK_EXCEEDS_LIMITS, fault)))
+        }
+        return JdbcDb.openReadOnly(path).use { PackValidator(supportedEmbedders).validate(it) }
+    }
 
     /**
      * Reads `pack_meta` from [path].

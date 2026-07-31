@@ -38,13 +38,26 @@ data class ClaimReport(
 ) {
     val supported: Int get() = verdicts.count { it.second.entailed }
 
+    /**
+     * Share of claims the judge upheld — and **zero claims is a failure, not a pass**.
+     *
+     * An answer that decomposes to nothing is not an answer nobody could fault; it is an
+     * answer with nothing in it to check. A single `.` survives the blank check in
+     * `Attributions.validate`, decomposes to no claim, and scored a clean 1.0 — so output
+     * containing no assertion at all cleared the grounding gate and still rendered as a
+     * generated card. The empty case is the one a rate cannot express, so it is answered
+     * separately.
+     */
     val supportRate: Double
-        get() = if (verdicts.isEmpty()) 1.0 else supported.toDouble() / verdicts.size
+        get() = if (verdicts.isEmpty()) 0.0 else supported.toDouble() / verdicts.size
+
+    /** True when the answer held nothing the harness could check. */
+    val vacuous: Boolean get() = verdicts.isEmpty()
 
     /** The judge failed its own check, so its opinion on everything else is not counted. */
     val judgeRejected: Boolean get() = judgeAgreement < judgeAgreementFloor
 
-    val passed: Boolean get() = !judgeRejected && supportRate >= threshold
+    val passed: Boolean get() = !judgeRejected && !vacuous && supportRate >= threshold
 
     override fun toString(): String = buildString {
         if (judgeRejected) {
@@ -53,6 +66,9 @@ data class ClaimReport(
                     .format(judgeAgreement * 100, judgeAgreementFloor * 100),
             )
             appendLine("No verdict below is counted.")
+        }
+        if (vacuous) {
+            appendLine("NO CLAIMS: the answer decomposed to nothing the judge could be asked about.")
         }
         appendLine("support %.3f (threshold %.3f)".format(supportRate, threshold))
         for ((claim, verdict) in verdicts.filterNot { it.second.entailed }) {

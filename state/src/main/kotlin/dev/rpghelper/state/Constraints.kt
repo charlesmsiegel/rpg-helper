@@ -278,6 +278,14 @@ object ConstraintParser {
      * easy authoring mistake and a silent one, so it is a drop rather than a warning.
      */
     private fun requireUsableBounds(selector: Selector, min: Bound?, max: Bound?) {
+        // A range form with neither bound can never produce a violation. It is not a
+        // permissive rule, it is a rule that does nothing -- and unlike a capability, whose
+        // absence shows as a control that never appears, it leaves the document displaying
+        // as validated against a constraint that was never capable of failing. The
+        // dropped-constraint report is where that belongs.
+        if (min == null && max == null) {
+            error("a range over '$selector' declares neither a min nor a max, so it can never fire")
+        }
         for (bound in listOfNotNull(min, max)) {
             if (bound is Bound.TrackerRef && selector.matches(bound.key)) {
                 error("selector '$selector' matches its own bound tracker '${bound.key}'")

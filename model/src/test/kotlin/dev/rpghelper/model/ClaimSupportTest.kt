@@ -119,6 +119,23 @@ class ClaimSupportTest {
         assertEquals(listOf(ashfall), claims[1].cited)
     }
 
+    @Test
+    fun `an answer with nothing to check fails rather than scoring one`() {
+        // A single "." survives the blank check in `Attributions.validate`, decomposes to
+        // no claim, and used to score a clean 1.0 -- so output containing no assertion at
+        // all cleared the grounding gate and still rendered as a generated card. Zero
+        // claims is the case a rate cannot express, so it is answered separately.
+        val answer = validated(".")
+        val report = ClaimSupport.run(
+            ClaimSupport.decompose(answer), evidence::get, literalJudge,
+            gold = emptyList(), threshold = 0.9,
+        )
+        assertTrue(report.vacuous)
+        assertFalse(report.passed, "$report")
+        assertEquals(0.0, report.supportRate)
+        assertTrue(report.toString().contains("NO CLAIMS"))
+    }
+
     // ---------------------------------------------------------------- support
 
     @Test

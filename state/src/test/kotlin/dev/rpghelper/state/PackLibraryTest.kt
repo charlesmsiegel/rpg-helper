@@ -257,7 +257,7 @@ class PackLibraryTest {
         // arrive as an out-of-memory kill rather than as a refusal.
         val strict = PackLibrary(
             db, root, setOf(PackForge.EMBEDDER),
-            PackLibrary.PackLimits(maxChunks = 2),
+            PackLibrary.PackLimits(content = dev.rpghelper.pack.PackLimits(maxChunks = 2)),
         )
         val result = strict.install(forge())
         assertTrue(result is InstallResult.TooLarge, "got $result")
@@ -269,7 +269,7 @@ class PackLibraryTest {
     fun `a single oversized value is refused without being loaded`() {
         val strict = PackLibrary(
             db, root, setOf(PackForge.EMBEDDER),
-            PackLibrary.PackLimits(maxTextBytes = 16),
+            PackLibrary.PackLimits(content = dev.rpghelper.pack.PackLimits(maxTextBytes = 16)),
         )
         val result = strict.install(forge())
         assertTrue(result is InstallResult.TooLarge, "got $result")
@@ -459,7 +459,7 @@ class PackLibraryTest {
         // bound exists to catch are exactly the ones that pass it.
         val small = PackLibrary(
             db, root, setOf(PackForge.EMBEDDER),
-            PackLibrary.PackLimits(maxTextBytes = 400),
+            PackLibrary.PackLimits(content = dev.rpghelper.pack.PackLimits(maxTextBytes = 400)),
         )
         // Each of these is one character and four UTF-8 bytes; 150 of them is 600 bytes
         // and 150 characters, so it passes a character count and fails a byte count.

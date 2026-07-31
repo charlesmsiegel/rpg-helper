@@ -113,15 +113,29 @@ internal fun readTextPass(db: Db): TextPass {
  * perfectly valid pack.
  */
 internal fun asciiWord(text: String): String? {
+    // **Token runs are found by code point, using the index's own token rule**, and only
+    // then filtered to the all-ASCII-letter ones. Scanning UTF-16 `Char`s with
+    // `isLetterOrDigit` disagreed with `unicode61` twice over: it rejects `Ⅳ` and every
+    // private-use glyph, which the index treats as token characters, and it reads *both*
+    // halves of a surrogate pair as separators. Given `𐌀abc` that picked `abc` as the
+    // canary while the index had stored the single token `𐌀abc` -- so the probe found
+    // nothing and refused a correctly populated pack.
     var i = 0
     while (i < text.length) {
-        if (!text[i].isLetterOrDigit()) {
-            i++
+        val start = text.codePointAt(i)
+        if (!Tokenizer.isTokenCharacter(start)) {
+            i += Character.charCount(start)
             continue
         }
         var end = i
-        while (end < text.length && text[end].isLetterOrDigit()) end++
+        while (end < text.length) {
+            val codePoint = text.codePointAt(end)
+            if (!Tokenizer.isTokenCharacter(codePoint)) break
+            end += Character.charCount(codePoint)
+        }
         val token = text.substring(i, end)
+        // Plain ASCII letters only, so the token is its own folded form: anything the
+        // tokenizer would rewrite is a token whose stored spelling this cannot predict.
         val plainAscii = token.all { it in 'a'..'z' || it in 'A'..'Z' }
         if (plainAscii && token.length in 3..20) return token.lowercase()
         i = end

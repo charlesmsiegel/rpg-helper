@@ -106,8 +106,12 @@ class CorpusSpec(val root: Path, private val json: JsonObject) {
     }
 
     class RowSpec(json: JsonObject) {
-        val lo = json.number("lo").toInt()
-        val hi = json.number("hi").toInt()
+        // Long, because `DiceExpression.min`/`max` and the `table_rows` columns are. An
+        // endpoint past Int wrapped silently, so a correctly declared row for a legal
+        // expression like `d6+2147483647` -- whose first result is 2147483648 -- parsed as
+        // a negative range and took its table and roll control down with it.
+        val lo = json.number("lo").toLong()
+        val hi = json.number("hi").toLong()
         val text = json.text("text")
     }
 

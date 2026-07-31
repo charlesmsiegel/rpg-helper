@@ -58,7 +58,7 @@ object Tokenizer {
      * them tokenized to nothing and was refused, against text the index demonstrably
      * holds. Verified against the bundled SQLite rather than inferred, in `TokenizerTest`.
      */
-    private fun isTokenCharacter(codePoint: Int): Boolean = when (Character.getType(codePoint)) {
+    internal fun isTokenCharacter(codePoint: Int): Boolean = when (Character.getType(codePoint)) {
         Character.UPPERCASE_LETTER.toInt(),
         Character.LOWERCASE_LETTER.toInt(),
         Character.TITLECASE_LETTER.toInt(),

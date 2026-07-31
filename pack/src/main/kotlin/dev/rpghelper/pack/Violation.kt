@@ -10,6 +10,16 @@ package dev.rpghelper.pack
  */
 enum class ViolationCode {
     // --- File and format ---------------------------------------------------------
+    /**
+     * The pack holds more rows, or a larger single value, than this build will read.
+     *
+     * Not a statement that the pack is malformed -- a legitimate 300-page book is far below
+     * every one of these -- but that reading it far enough to find out would cost more
+     * memory than refusing it. Raised before any content is materialized, which is the only
+     * point at which the refusal is cheaper than the failure.
+     */
+    PACK_EXCEEDS_LIMITS,
+
     MISSING_TABLE,
     PACK_META_NOT_SINGLETON,
     UNSUPPORTED_SCHEMA_VERSION,
