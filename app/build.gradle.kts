@@ -40,10 +40,23 @@ android {
     }
 }
 
+configurations.all {
+    // `sqlite-jdbc` ships native libraries for three desktop platforms and cannot load on
+    // Android at all. Left in, it adds five megabytes of Mac and Windows binaries to the
+    // APK for a class the device never touches -- `BundledDb` is what runs here. Excluding
+    // it makes that a build-time fact rather than a convention, and it has to be excluded
+    // across every configuration because more than one module below depends on it.
+    exclude(group = "org.xerial", module = "sqlite-jdbc")
+}
+
 dependencies {
     // Every module below is Android-free Kotlin/JVM. That they compose into an app
     // without any of them knowing about Android is the point of the layering, not a
     // coincidence -- and `:app` depending on all of them is what proves it.
+    // `sqlite-jdbc` ships native libraries for three desktop platforms and cannot load on
+    // Android at all. Left in, it added five megabytes of Mac and Windows binaries to the
+    // APK -- for a class the device never touches, since `BundledDb` is what runs here.
+    // Excluding it also makes that a build-time fact rather than a convention.
     implementation(project(":pack"))
     implementation(project(":state"))
     implementation(project(":retrieval"))

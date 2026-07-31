@@ -7,6 +7,8 @@ plugins {
 
 repositories {
     mavenCentral()
+    // `:pack` exposes androidx.sqlite, which is published to Google's Maven.
+    google()
 }
 
 dependencies {

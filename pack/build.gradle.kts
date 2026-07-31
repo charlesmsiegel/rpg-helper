@@ -9,10 +9,22 @@ plugins {
 
 repositories {
     mavenCentral()
+    google()
 }
 
 dependencies {
     implementation(libs.sqlite.jdbc)
+
+    // SQLite **bundled**, not the platform's. `00-pack-schema.md` names the reason: the
+    // pack format's whole lexical half is an FTS5 virtual table, and Android's own SQLite
+    // is not built with FTS5 across every version and vendor image -- a book that opens on
+    // one phone and not another is not a format. `api` because `Db` implementations are
+    // constructed by callers on both platforms.
+    //
+    // One coordinate serves both: Gradle resolves the JVM variant here and the Android
+    // variant in `:app`, so the binding below is the *same code* on the device and on the
+    // desktop rather than two implementations that agree until they do not.
+    api("androidx.sqlite:sqlite-bundled:2.7.0")
     testFixturesImplementation(libs.sqlite.jdbc)
     testImplementation(kotlin("test"))
 }
