@@ -761,11 +761,17 @@ ships in which release and nothing above it.
 - Relevance floor for triggering the refusal card. Too low and it never fires; too
   high and it fires on good queries. Needs the labelled query sets from §8 before it
   can be set with any honesty.
-- Whether generated setting answers are cached, and what invalidates the cache when
-  pack activation or priority changes.
+- ~~Whether generated setting answers are cached, and what invalidates the cache when
+  pack activation or priority changes.~~ **Settled** in `app-state-spec.md` §4: cached,
+  keyed by the normalized query plus an active-set fingerprint plus model identity — so
+  there is no invalidation logic at all, because anything that would change the answer
+  changes the key.
 - Pack distribution and entitlement: install-from-file is settled, a catalog is not.
   Depends on the signing scheme, which is open on the builder side too.
-- Whether the conversational window is user-visible and clearable, or purely internal.
+- ~~Whether the conversational window is user-visible and clearable, or purely
+  internal.~~ **Settled** in `app-state-spec.md` §3: the window *is* the answer feed.
+  One control clears both, and there is no hidden context that could change what a
+  question means without the user being able to see it.
 
 ### Settled: camera queries never answer from the image
 
