@@ -551,9 +551,12 @@ The rule underneath: a character sheet outlives the software that checks it. Los
 validator is an inconvenience; losing or silently rewriting a character is not
 recoverable.
 
-**Still to pin: the exact five predicate forms and their arguments.** These go in the
-schema spec alongside the DDL, since the builder and the app must agree on them
-byte-for-byte. Everything above constrains what they may be.
+**The five predicate forms are pinned** in `documents-and-constraints-spec.md` §4:
+`range`, `sum_range`, `count_range`, `requires`, and `excludes`, over a two-shape
+selector grammar, with bounds that may reference another tracker rather than only a
+literal. That last detail is what lets one tracker constrain another -- current against
+maximum, spent against budget -- which every game in this genre needs and which no
+composition-free set of five forms could otherwise express.
 
 ---
 
@@ -753,8 +756,8 @@ ships in which release and nothing above it.
 
 ## 10. Open Questions
 
-- The five constraint predicate forms and their arguments (§6) — blocks the schema
-  spec.
+- ~~The five constraint predicate forms and their arguments (§6).~~ **Settled** in
+  `documents-and-constraints-spec.md`; the schema spec is no longer blocked.
 - Relevance floor for triggering the refusal card. Too low and it never fires; too
   high and it fires on good queries. Needs the labelled query sets from §8 before it
   can be set with any honesty.

@@ -368,7 +368,10 @@ form's arguments. Packs instantiate forms and never compose expressions; no code
 eval, no callbacks. `chunk_id` cites the passage stating the rule, so a flagged
 violation can link to the text behind it.
 
-**The vocabulary itself is not yet pinned** — see §8.
+The vocabulary is pinned in `documents-and-constraints-spec.md` §4: five forms, a
+two-shape selector grammar, and bounds that may reference another tracker. The app
+validates a row's `chunk_id` reference at activation and its `form`/`args` when the
+constraint engine loads it.
 
 ---
 
@@ -575,11 +578,11 @@ the two lists above merge into one suite run on both sides.
 
 Deliberately deferred, with what unblocks each:
 
-- **The constraint predicate vocabulary.** The `constraints` row shape is pinned so
-  packs are writable, but the closed set of `form` values and their `args` is not.
-  Blocked on the design question in `android-app-design.md` §10; lands with the
-  constraint engine. Until then a pack may ship `constraints` rows and the app will
-  validate their references and ignore their semantics.
+- ~~The constraint predicate vocabulary.~~ **Closed.** The five forms — `range`,
+  `sum_range`, `count_range`, `requires`, `excludes` — their selector and bound grammars,
+  and their evaluation semantics are pinned in `documents-and-constraints-spec.md` §4.
+  The `constraints` row shape here is unchanged; `form` and `args` now have a defined
+  vocabulary rather than an open one.
 - **The derivation rule for `stable_key`.** The column is pinned and required; how a
   builder computes a value that survives a rebuild is open. The app only ever compares
   values, so this can be settled without a schema change.
