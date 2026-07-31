@@ -31,7 +31,7 @@ dependencies {
 }
 
 application {
-    mainClass = "dev.rpghelper.cli.MainKt"
+    mainClass = "dev.ludex.cli.MainKt"
 }
 
 java {

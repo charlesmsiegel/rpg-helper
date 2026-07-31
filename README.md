@@ -1,4 +1,4 @@
-# rpg-helper
+# Ludex RPG
 
 An offline reference and play assistant for tabletop roleplaying games: answers rules
 questions by quoting your books exactly, answers setting questions in generated prose
@@ -125,7 +125,7 @@ refusal is only tenable if filling the field in is easy:
 ```sh
 $CLI make-manifest gemma-3n-e2b "Gemma 3n E2B" gemma-terms \
     https://your-host/gemma ./weights > gemma.json
-$CLI fetch-model gemma.json ~/.rpg-helper/models
+$CLI fetch-model gemma.json ~/.ludex-rpg/models
 ```
 
 `make-manifest` digests the files you already have and writes a manifest pinned to those
