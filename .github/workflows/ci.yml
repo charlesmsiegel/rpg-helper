@@ -1,0 +1,41 @@
+name: CI
+
+# Manual-only for now. This repository is private, and Actions here is not currently
+# provisioned with runner minutes -- the first run was assigned no runner and consumed
+# zero billable time, so an automatic trigger produces a check that fails in four
+# seconds on every pull request. A permanently-red check is worse than no check: it
+# trains reviewers to ignore CI and would block branch protection later.
+#
+# To turn it back on once Actions is available, replace this block with:
+#
+#   push:
+#     branches: [main]
+#   pull_request:
+#
+# The job below is unchanged and known-good; only the trigger is holding it back.
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          # 21 to build, 17 to emit. Float16Test checks the hand-written codec against
+          # java.lang.Float.float16ToFloat, which arrived in JDK 20 -- while the module
+          # itself targets 17 bytecode so it stays loadable on Android.
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - run: ./gradlew :pack:test
+
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-report
+          path: pack/build/reports/tests/test

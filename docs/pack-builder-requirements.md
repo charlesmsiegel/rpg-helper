@@ -7,7 +7,9 @@ packs, so the builder can be specified without re-deriving it.
 The builder runs on a desktop. It may use frontier models and may include
 hand-authoring tools. It is not resource-constrained.
 
-Status: accumulating. Nothing here is implemented.
+Status: accumulating. Nothing here is implemented — but the format it targets now is:
+see `pack-schema.md` for the pinned DDL, vector layout, probe constant, and dice
+grammar, and the app's `:pack` module for the checks a pack must survive at activation.
 
 ---
 
@@ -199,8 +201,14 @@ flagged violation can link to the passage it came from. Without this table the a
 constraint engine has nothing to load and every game's rules would have to be built
 into the binary.
 
-Exact DDL is pinned by the app's schema spec. The builder targets a
-`schema_version` and the app refuses packs it does not recognize.
+Exact DDL is pinned by the app's schema spec, `pack-schema.md`, which is now written
+and implemented. The builder targets a `schema_version` and the app refuses packs it
+does not recognize.
+
+Two columns that document assumes and this one did not previously name:
+`chunks.stable_key`, required on every source chunk because supersession targets
+`(source_uid, stable_key)` and a chunk without one can never be amended; and
+`pack_meta.ruleset_id`, which is what a document's ruleset binding binds *to*.
 
 ### `chunks` columns introduced by this document
 
