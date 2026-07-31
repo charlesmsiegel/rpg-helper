@@ -76,7 +76,10 @@ class ModelDownloader(
 
         for (file in manifest.files) {
             val target = fileOf(file.name)
-            if (Files.isRegularFile(target) && sha256(target) == file.sha256) {
+            // A file that cannot be read is a file that cannot be trusted, and it fails
+            // the same way a mismatch does. Letting the read throw would crash the model
+            // lifecycle mid-check instead of moving it to an unavailable state.
+            if (Files.isRegularFile(target) && digestOrNull(target) == file.sha256) {
                 // Already here and already trustworthy. Re-fetching it would be the app
                 // spending a user's data to reach a state it is in.
                 done[file.name] = target
@@ -97,7 +100,7 @@ class ModelDownloader(
                 return DownloadResult.Failed(outcome)
             }
 
-            val actual = sha256(partial)
+            val actual = digestOrNull(partial)
             if (actual != file.sha256) {
                 // Deleted, not kept for inspection. A file that failed its digest is of
                 // unknown provenance, and leaving several gigabytes of it on the device
@@ -131,7 +134,7 @@ class ModelDownloader(
     /** Re-verifies what is on disk, so a bit-rotted file is caught before it is loaded. */
     fun verify(manifest: ModelManifest): Boolean = manifest.files.all { file ->
         val path = fileOf(file.name)
-        Files.isRegularFile(path) && sha256(path) == file.sha256
+        Files.isRegularFile(path) && digestOrNull(path) == file.sha256
     }
 
     private fun discard(path: Path) {
@@ -202,6 +205,9 @@ class ModelDownloader(
             "'${file.name}' could not be fetched: ${e.message ?: e::class.simpleName}"
         }
     }
+
+    /** The digest, or null when the bytes cannot be read at all. */
+    private fun digestOrNull(path: Path): String? = runCatching { sha256(path) }.getOrNull()
 
     private fun sha256(path: Path): String {
         val digest = MessageDigest.getInstance("SHA-256")

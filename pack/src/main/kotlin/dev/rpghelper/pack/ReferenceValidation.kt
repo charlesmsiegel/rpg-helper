@@ -153,7 +153,10 @@ internal fun checkSourceUids(db: Db, out: MutableList<Violation>) {
 internal fun checkAliasNormalization(db: Db, out: MutableList<Violation>) {
     db.forEachRow("SELECT entity_id, alias FROM entities") { row ->
         val alias = row.string(1)
-        val folded = Utf8.foldForIndex(alias)
+        // The *index* form, not merely the folded one. Folding is idempotent on
+        // `fast-cast` and `D&D`, so a fold-only check passes an alias the rewriter can
+        // never look up: it joins query tokens with single spaces, and those do not.
+        val folded = Tokenizer.indexForm(alias)
         if (alias != folded) {
             out += Violation(
                 ALIAS_NOT_NORMALIZED,

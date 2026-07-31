@@ -1,5 +1,6 @@
 package dev.rpghelper.retrieval
 
+import dev.rpghelper.pack.Tokenizer
 import dev.rpghelper.pack.ChunkRef
 
 import dev.rpghelper.pack.Utf8

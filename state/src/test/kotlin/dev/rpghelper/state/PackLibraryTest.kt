@@ -250,6 +250,41 @@ class PackLibraryTest {
         assertFalse(library.installed().single().active, "and the row is deactivated")
     }
 
+    @Test
+    fun `a pack under the size ceiling is still refused for its row counts`() {
+        // A file-size limit alone is not a bound. The validator scans and materializes
+        // everything before any check could reject it, so the refusal would otherwise
+        // arrive as an out-of-memory kill rather than as a refusal.
+        val strict = PackLibrary(
+            db, root, setOf(PackForge.EMBEDDER),
+            PackLibrary.PackLimits(maxChunks = 2),
+        )
+        val result = strict.install(forge())
+        assertTrue(result is InstallResult.TooLarge, "got $result")
+        assertTrue(result.limit.contains("chunks"), result.limit)
+        assertEquals(0, packFiles().size)
+    }
+
+    @Test
+    fun `a single oversized value is refused without being loaded`() {
+        val strict = PackLibrary(
+            db, root, setOf(PackForge.EMBEDDER),
+            PackLibrary.PackLimits(maxTextBytes = 16),
+        )
+        val result = strict.install(forge())
+        assertTrue(result is InstallResult.TooLarge, "got $result")
+        assertTrue(result.limit.contains("text"), result.limit)
+    }
+
+    @Test
+    fun `an unreadable file is rejected as malformed, not as too large`() {
+        // Preflight reports limit breaches only. A file that cannot be queried at all is
+        // not too large, it is not a pack -- and the validator says which.
+        val bogus = incoming.resolve("garbage.rpgpack")
+        Files.writeString(bogus, "not a database")
+        assertTrue(library.install(bogus) is InstallResult.Rejected)
+    }
+
     // ------------------------------------------------------------------ reconciliation
 
     @Test

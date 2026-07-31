@@ -4,6 +4,7 @@ import dev.rpghelper.model.Embedder
 import dev.rpghelper.pack.Float16
 import dev.rpghelper.pack.PackSchema
 import dev.rpghelper.pack.ProbeVector
+import dev.rpghelper.pack.Tokenizer
 import dev.rpghelper.pack.Utf8
 import java.nio.file.Files
 import java.nio.file.Path
@@ -60,7 +61,17 @@ class PackBuilder(
     /** chunk id, assigned in document order so a pack diffs stably across rebuilds. */
     private var nextChunkId = 1L
 
+    /**
+     * Stable key to chunk id — and a record of any key used by more than one source.
+     *
+     * `stable_key` is unique **within a source**, not globally, so two books may legally
+     * reuse one. Indexing by the bare string lets the later chunk replace the earlier
+     * entry, after which a derived citation, table, capability, entity, or constraint
+     * naming that key attaches to the wrong book — in a pack that still activates, because
+     * every reference it holds resolves to a real chunk.
+     */
     private val chunkIdByStableKey = mutableMapOf<String, Long>()
+    private val ambiguousStableKeys = mutableSetOf<String>()
     private val chunkTexts = mutableMapOf<Long, String>()
     private val chunkKinds = mutableMapOf<Long, Pair<String, String>>()
     private val chunkSpans = mutableMapOf<Long, Anchors.Span>()
@@ -184,7 +195,59 @@ class PackBuilder(
                 }
             }
 
-            for (chunk in source.chunks) writeChunk(c, sourceId, text, chunk, parent = null)
+            val covered = mutableListOf<Anchors.Span>()
+            source.gaps.forEach { covered += Anchors.resolve(text, it.from, it.to) }
+            for (chunk in source.chunks) {
+                covered += writeChunk(c, sourceId, text, chunk, parent = null)
+            }
+            requireTiled(source, text, covered)
+        }
+    }
+
+    /**
+     * Every top-level chunk and declared gap must tile the source exactly.
+     *
+     * A corpus edit that leaves a paragraph outside every declared span builds cleanly and
+     * ships a pack with that content absent from the index, the vectors, and every
+     * quotation. **Activation cannot discover it** — the source bytes are not in the pack,
+     * so nothing downstream can tell a passage that was deliberately skipped from one that
+     * was lost. The builder is the only place this is knowable.
+     */
+    private fun requireTiled(
+        source: CorpusSpec.SourceSpec,
+        document: String,
+        covered: List<Anchors.Span>,
+    ) {
+        val total = document.utf8Length()
+        val sorted = covered.sortedBy { it.start }
+        var cursor = 0
+        val holes = mutableListOf<Anchors.Span>()
+        for (span in sorted) {
+            if (span.start > cursor) holes += Anchors.Span(cursor, span.start)
+            if (span.start < cursor) {
+                error(
+                    "${source.sourceUid}: spans overlap at byte ${span.start}; a byte in two " +
+                        "chunks is a byte quoted twice under two citations",
+                )
+            }
+            cursor = maxOf(cursor, span.end)
+        }
+        if (cursor < total) holes += Anchors.Span(cursor, total)
+
+        // Whitespace between spans is the ordinary case and is not content.
+        val bytes = document.toByteArray(Charsets.UTF_8)
+        val real = holes.filter { hole ->
+            String(bytes, hole.start, hole.length, Charsets.UTF_8).isNotBlank()
+        }
+        if (real.isNotEmpty()) {
+            val sample = real.first().let {
+                String(bytes, it.start, minOf(it.length, 60), Charsets.UTF_8).trim()
+            }
+            error(
+                "${source.sourceUid}: ${real.size} region(s) of the source are in no chunk " +
+                    "and no declared gap, so they would ship missing and unnoticeable -- " +
+                    "first at byte ${real.first().start}: \"$sample...\"",
+            )
         }
     }
 
@@ -194,7 +257,7 @@ class PackBuilder(
         document: String,
         chunk: CorpusSpec.ChunkSpec,
         parent: Pair<Long, Anchors.Span>?,
-    ) {
+    ): Anchors.Span {
         val span = Anchors.resolve(document, chunk.from, chunk.to, parent?.second)
         val bytes = document.toByteArray(Charsets.UTF_8)
         val text = String(bytes, span.start, span.length, Charsets.UTF_8)
@@ -221,12 +284,32 @@ class PackBuilder(
             if (parent == null) it.setNull(11, Types.INTEGER) else it.setLong(11, parent.first)
         }
 
-        chunkIdByStableKey[chunk.stableKey] = id
+        if (chunkIdByStableKey.put(chunk.stableKey, id) != null) {
+            ambiguousStableKeys += chunk.stableKey
+        }
         chunkTexts[id] = text
         chunkKinds[id] = chunk.kind to "source"
         chunkSpans[id] = span
 
         for (child in chunk.children) writeChunk(c, sourceId, document, child, id to span)
+        return span
+    }
+
+    /**
+     * The chunk a corpus entry names, or a build failure.
+     *
+     * Refuses an ambiguous key rather than picking one: "whichever source was read last"
+     * is how enrichment silently attaches to the wrong book.
+     */
+    private fun chunkFor(stableKey: String, what: String): Long {
+        if (stableKey in ambiguousStableKeys) {
+            error(
+                "$what names stable key '$stableKey', which more than one source uses. " +
+                    "Stable keys are unique within a source, not across the pack.",
+            )
+        }
+        return chunkIdByStableKey[stableKey]
+            ?: error("$what names '$stableKey', which is not in the pack")
     }
 
     // ------------------------------------------------------------------ derived prose
@@ -247,8 +330,7 @@ class PackBuilder(
             chunkKinds[id] = derived.kind to "derived"
 
             for (citation in derived.cites) {
-                val target = chunkIdByStableKey[citation.stableKey]
-                    ?: error("derived chunk cites '${citation.stableKey}', which is not in the pack")
+                val target = chunkFor(citation.stableKey, "a derived chunk's citation")
                 // A claim span anchors an inline chip to one sentence; its absence puts the
                 // citation in the footer instead. Both shapes are legal and the app renders
                 // them differently, so which one a builder emits is a real decision.
@@ -284,12 +366,6 @@ class PackBuilder(
      * citation, which is the one thing the app must never do.
      */
     private fun supported(derived: CorpusSpec.DerivedSpec): Boolean {
-        val evidence = derived.cites.map { citation ->
-            val target = chunkIdByStableKey[citation.stableKey]
-                ?: error("derived chunk cites '${citation.stableKey}', which is not in the pack")
-            chunkTexts.getValue(target)
-        }
-
         if (judge == null) {
             notes += BuildNote(
                 "unchecked", "chunk", null, "claim-support",
@@ -298,22 +374,53 @@ class PackBuilder(
             return true
         }
 
-        val claims = derived.text.split(Regex("(?<=[.!?])\\s+"))
-            .map { it.trim() }.filter { it.length > 1 }
-        val unsupported = claims.filterNot { judge.judge(it, evidence).entailed }
-        val rate = if (claims.isEmpty()) 1.0 else {
-            (claims.size - unsupported.size).toDouble() / claims.size
+        // Each region is judged against the chunks *that region* cites -- not against the
+        // union of every citation on the summary. Pooling them lets a sentence whose chip
+        // points at source A pass because unrelated source B happens to support it, after
+        // which the card renders that sentence with an authoritative and wrong chip.
+        val wholeChunk = derived.cites.filter { it.claim == null }
+            .map { chunkTexts.getValue(chunkFor(it.stableKey, "a derived chunk's citation")) }
+
+        val regions = mutableListOf<Pair<String, List<String>>>()
+        for (citation in derived.cites) {
+            val claim = citation.claim ?: continue
+            regions += claim to listOf(
+                chunkTexts.getValue(chunkFor(citation.stableKey, "a derived chunk's citation")),
+            )
         }
+        // Whatever no claim span covers falls back to the whole-chunk citations, which is
+        // the same rule generated answers follow: weaker, and defined.
+        val covered = regions.map { it.first }
+        val remainder = derived.text.let { text ->
+            covered.fold(text) { acc, claim -> acc.replace(claim, " ") }
+        }
+        for (sentence in sentences(remainder)) regions += sentence to wholeChunk
+
+        val unsupported = mutableListOf<String>()
+        var claims = 0
+        for ((region, evidence) in regions) {
+            for (sentence in sentences(region)) {
+                claims++
+                if (evidence.isEmpty() || !judge.judge(sentence, evidence).entailed) {
+                    unsupported += sentence
+                }
+            }
+        }
+
+        val rate = if (claims == 0) 1.0 else (claims - unsupported.size).toDouble() / claims
         if (rate < claimThreshold) {
             notes += BuildNote(
                 "dropped", "chunk", null, "claim-support",
-                "summary dropped: ${unsupported.size} of ${claims.size} claims are not " +
-                    "supported by the chunks it cites -- ${unsupported.firstOrNull()}",
+                "summary dropped: ${unsupported.size} of $claims claims are not supported " +
+                    "by the chunks that cite them -- ${unsupported.firstOrNull()}",
             )
             return false
         }
         return true
     }
+
+    private fun sentences(text: String): List<String> =
+        text.split(Regex("(?<=[.!?])\\s+")).map { it.trim() }.filter { it.length > 1 }
 
     // ------------------------------------------------------------------ index and vectors
 
@@ -416,7 +523,19 @@ class PackBuilder(
             // Stored in the form a query is tokenized into, because matching is an indexed
             // lookup rather than a fold-on-the-fly comparison. An alias holding capitals
             // could never match anything, silently, for the life of the pack.
-            val folded = Utf8.foldForIndex(entity.alias)
+            // Stored as the rewriter will look it up: tokenized and joined by single
+            // spaces. Folding alone leaves `fast-cast` and `D&D` intact, while the
+            // rewriter compares against n-grams joined from tokens -- so those aliases
+            // could never match anything, on a pack that passed alias-normalization
+            // validation because folding is idempotent on them.
+            val folded = Tokenizer.indexForm(entity.alias)
+            if (folded.isEmpty()) {
+                notes += BuildNote(
+                    "dropped", "entity", entity.alias, "alias-form",
+                    "tokenizes to nothing, so it could never match a query",
+                )
+                return@forEachIndexed
+            }
             if (folded != entity.alias) {
                 notes += BuildNote(
                     "normalized", "entity", entity.alias, "alias-form",
@@ -431,7 +550,7 @@ class PackBuilder(
                 it.setString(2, entity.canonical)
                 it.setString(3, folded)
                 it.setString(4, entity.kind)
-                val chunk = entity.chunk?.let { key -> chunkIdByStableKey[key] }
+                val chunk = entity.chunk?.let { key -> chunkFor(key, "an entity") }
                 if (chunk == null) it.setNull(5, Types.INTEGER) else it.setLong(5, chunk)
             }
         }
@@ -440,8 +559,7 @@ class PackBuilder(
     private fun writeTables(c: Connection) {
         spec.tables.forEachIndexed { index, table ->
             val tableId = (index + 1).toLong()
-            val chunkId = chunkIdByStableKey[table.chunk]
-                ?: error("table names chunk '${table.chunk}', which is not in the pack")
+            val chunkId = chunkFor(table.chunk, "a table")
             c.prepare("INSERT INTO tables (table_id, chunk_id, dice_expr) VALUES (?, ?, ?)") {
                 it.setLong(1, tableId)
                 it.setLong(2, chunkId)
@@ -480,8 +598,7 @@ class PackBuilder(
             table.chunk to (index + 1).toLong()
         }
         spec.capabilities.forEachIndexed { index, capability ->
-            val chunkId = chunkIdByStableKey[capability.chunk]
-                ?: error("capability names chunk '${capability.chunk}', which is not in the pack")
+            val chunkId = chunkFor(capability.chunk, "a capability")
             // A roll-table manifest must target its own chunk, or superseding the table
             // leaves a capability rooted elsewhere still offering to roll on it.
             val tableId = tableIdByChunk[capability.chunk]
@@ -493,15 +610,20 @@ class PackBuilder(
                 it.setLong(1, (index + 1).toLong())
                 it.setString(2, capability.kind)
                 it.setLong(3, chunkId)
-                it.setString(4, """{"table_id":$tableId,"label":${quote(capability.label)}}""")
+                it.setString(
+                    4,
+                    kotlinx.serialization.json.buildJsonObject {
+                        put("table_id", kotlinx.serialization.json.JsonPrimitive(tableId))
+                        put("label", kotlinx.serialization.json.JsonPrimitive(capability.label))
+                    }.toString(),
+                )
             }
         }
     }
 
     private fun writeConstraints(c: Connection) {
         spec.constraints.forEachIndexed { index, constraint ->
-            val chunkId = chunkIdByStableKey[constraint.chunk]
-                ?: error("constraint names chunk '${constraint.chunk}', which is not in the pack")
+            val chunkId = chunkFor(constraint.chunk, "a constraint")
             c.prepare(
                 "INSERT INTO constraints (constraint_id, form, args, chunk_id) VALUES (?, ?, ?, ?)",
             ) {
@@ -527,7 +649,13 @@ class PackBuilder(
                 it.setLong(1, (index + 1).toLong())
                 it.setString(2, supersession.targetSourceUid)
                 it.setString(3, supersession.targetStableKey)
-                val chunk = supersession.supersedingChunk?.let { key -> chunkIdByStableKey[key] }
+                // Only an *absent* field is NULL. A misspelled one would otherwise write a
+                // withdrawal-only supersession: activating that pack removes the original
+                // passage everywhere and supplies nothing in its place, with neither
+                // activation nor the build report mentioning the typo.
+                val chunk = supersession.supersedingChunk?.let { key ->
+                    chunkFor(key, "a supersession's superseding chunk")
+                }
                 if (chunk == null) it.setNull(4, Types.INTEGER) else it.setLong(4, chunk)
                 it.setString(5, supersession.targetTitle)
                 it.setNullableString(6, supersession.targetEdition)
@@ -556,8 +684,6 @@ class PackBuilder(
             }
         }
     }
-
-    private fun quote(text: String) = "\"" + text.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
     private fun sha256(text: String): String =
         MessageDigest.getInstance("SHA-256").digest(text.toByteArray(Charsets.UTF_8))

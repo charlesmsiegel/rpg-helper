@@ -34,37 +34,49 @@ object DenseSearch {
         val queryNorm = norm(query)
         if (queryNorm < 1e-12) return emptyList()
 
-        pack.db.map(
+        // Streamed, not materialized. `map` would build the whole vector corpus -- every
+        // embedding ByteArray of a 300-page book -- in heap before scoring any of it, for
+        // every query, to keep fifty. Scoring row by row keeps only the best hit per chunk
+        // and lets each BLOB be collected immediately.
+        val best = HashMap<Long, VectorHit>()
+        pack.db.forEachRow(
             "SELECT chunk_id, role, subchunk_index, embedding, window_start, window_end " +
                 "FROM vectors",
         ) { row ->
-            listOf(
-                row.long(0), row.string(1), row.long(2), row.bytes(3),
-                row.longOrNull(4), row.longOrNull(5),
-            )
-        }.forEach { fields ->
-            val ref = ChunkRef(pack.packUid, fields[0] as Long)
+            val chunkId = row.long(0)
+            val ref = ChunkRef(pack.packUid, chunkId)
             // Superseded chunks are filtered before scoring, not after: a correction
             // removes what it corrects everywhere, and a filter applied to a ranked list
             // is a filter that already let the withdrawn text win.
-            if (ref in superseded) return@forEach
+            if (ref in superseded) return@forEachRow
 
-            val embedding = Float16.decodeVector(fields[3] as ByteArray)
-            if (embedding.size != query.size) return@forEach
+            val embedding = Float16.decodeVector(row.bytes(3))
+            if (embedding.size != query.size) return@forEachRow
 
-            val start = fields[4] as Long?
-            val end = fields[5] as Long?
-            hits += VectorHit(
+            val role = row.string(1)
+            val start = row.longOrNull(4)
+            val end = row.longOrNull(5)
+            val hit = VectorHit(
                 ref = ref,
-                role = fields[1] as String,
+                role = role,
                 score = cosine(query, queryNorm, embedding),
-                window = if (start == null || end == null) null else {
-                    start.toInt() until end.toInt()
-                },
+                window = if (start == null || end == null) null else start.toInt() until end.toInt(),
             )
+            // Same survivor rule as `Fusion.collapseToChunks`, applied as we go: best
+            // score, then content over expansion, then the earliest window.
+            val incumbent = best[chunkId]
+            if (incumbent == null || betterThan(hit, incumbent)) best[chunkId] = hit
         }
+        hits += best.values
 
         return Fusion.collapseToChunks(hits).take(depth)
+    }
+
+    /** The collapse rule, applied incrementally so no chunk keeps more than one hit. */
+    private fun betterThan(candidate: VectorHit, incumbent: VectorHit): Boolean = when {
+        candidate.score != incumbent.score -> candidate.score > incumbent.score
+        candidate.role != incumbent.role -> candidate.role < incumbent.role
+        else -> (candidate.window?.first ?: -1) < (incumbent.window?.first ?: -1)
     }
 
     private fun cosine(query: FloatArray, queryNorm: Double, other: FloatArray): Double {

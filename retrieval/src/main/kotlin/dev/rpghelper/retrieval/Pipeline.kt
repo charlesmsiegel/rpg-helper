@@ -114,12 +114,23 @@ object Pipeline {
     ): Retrieved {
         val normalized = QueryNormalizer.normalize(rawQuery)
         val rewritten = AliasRewriter(loadAliases(active)).rewrite(normalized)
-        val expression = LexicalQuery.build(rewritten.terms)
-        // The gate is measured over the same concepts the MATCH searched for. Measuring
-        // every group while searching only the first MAX_TERMS lets trailing text add
-        // unmatched information to the denominator and gate out a chunk that strongly
-        // matches the part actually searched.
-        val groups = rewritten.groups.take(LexicalQuery.MAX_TERMS)
+
+        // **One capped representation drives both.** Capping the groups and capping the
+        // flattened terms independently lets the two disagree: a multi-word alias can put
+        // the term cap partway through a concept while the group cap keeps that whole
+        // concept and the ones after it, so terms the MATCH never searched for still add
+        // unmatched information to the gate's denominator and can gate out a strong hit.
+        // Whole concepts are taken until the term budget is spent, and the expression is
+        // built from exactly those.
+        val groups = mutableListOf<TermGroup>()
+        var budget = LexicalQuery.MAX_TERMS
+        for (group in rewritten.groups) {
+            val cost = group.terms.size
+            if (cost > budget) break
+            groups += group
+            budget -= cost
+        }
+        val expression = LexicalQuery.build(groups.flatMap { it.terms })
         val gatedOut = mutableListOf<String>()
         val lists = mutableListOf<RetrievalList>()
 

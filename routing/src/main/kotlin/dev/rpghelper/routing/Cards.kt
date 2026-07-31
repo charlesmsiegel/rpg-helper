@@ -91,7 +91,16 @@ sealed interface Card {
          * one door the fail-closed rule left open.
          */
         val wouldHaveUsed: List<Citation>,
+        /** Non-null only when a download is what would fix it. */
         val downloadBytes: Long?,
+        /**
+         * Which state produced this card.
+         *
+         * Carried so the surface can offer the right remedy: a download, a progress
+         * indicator, or a retry. Collapsing them into one sentence tells a user whose
+         * download already finished that it never started.
+         */
+        val availability: dev.rpghelper.model.Availability,
     ) : Card
 
     /**

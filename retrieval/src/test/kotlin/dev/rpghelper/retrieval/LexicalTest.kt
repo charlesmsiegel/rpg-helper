@@ -1,5 +1,6 @@
 package dev.rpghelper.retrieval
 
+import dev.rpghelper.pack.Tokenizer
 import dev.rpghelper.pack.PackForge
 import dev.rpghelper.pack.exec
 import java.nio.file.Files
@@ -9,6 +10,7 @@ import java.sql.DriverManager
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -226,6 +228,24 @@ class LexicalTest {
             group.alternatives.none { it.size == 1 && it.single() == "the" },
             "and no single stopword stands for the concept",
         )
+    }
+
+    @Test
+    fun `an alias whose canonical tokenizes to nothing is dropped`() {
+        // Added as an alternative it would be satisfied by `all` on every chunk, matching
+        // vacuously and awarding the concept's full weight to unrelated lexical hits.
+        val broken = aliases + Alias("core", "wrestle", "!!!", 9L)
+        val result = AliasRewriter(broken).rewrite("wrestle")
+
+        assertTrue(result.unusable.any { it.canonical == "!!!" }, "reported, not silent")
+        assertTrue(result.groups.all { g -> g.alternatives.none { it.isEmpty() } })
+        assertTrue(result.entityHits.none { it.second == 9L }, "and it contributes no hit")
+    }
+
+    @Test
+    fun `a term group cannot be constructed with an empty wording`() {
+        assertFailsWith<IllegalArgumentException> { TermGroup(emptyList<List<String>>()) }
+        assertFailsWith<IllegalArgumentException> { TermGroup(listOf(emptyList())) }
     }
 
     @Test

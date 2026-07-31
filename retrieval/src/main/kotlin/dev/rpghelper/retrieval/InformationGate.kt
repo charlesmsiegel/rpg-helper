@@ -24,6 +24,15 @@ data class TermGroup(
      */
     val alternatives: List<List<String>>,
 ) {
+    init {
+        // An empty alternative is satisfied by `all` on any chunk, so it would match
+        // everything vacuously and hand this group's full weight -- including a rare
+        // canonical's -- to unrelated lexical hits. A concept with no wordings is not a
+        // concept.
+        require(alternatives.isNotEmpty() && alternatives.none { it.isEmpty() }) {
+            "a term group needs at least one non-empty wording, got $alternatives"
+        }
+    }
     constructor(vararg wordings: List<String>) : this(wordings.toList())
 
     /** Every term mentioned anywhere in the group, for the posting-list query. */

@@ -161,17 +161,30 @@ class Router(
     ): Card? {
         if (settings.isEmpty()) return null
 
-        val available = generator != null && generator.availability is Availability.Ready
-        if (!available) {
+        val availability = generator?.availability ?: Availability.NotDownloaded
+        if (availability !is Availability.Ready) {
             // Citations only. Mixed results degrade rather than fail: quote and derived
             // cards render exactly as they always do, because they never needed the model.
-            val listed = settings.mapNotNull { citations.resolve(it.ref) }
-            if (listed.isEmpty()) return null
+            val listed = resolveAll(settings.map { it.ref }, diagnostics) ?: return null
+            // The three states are different statements with different remedies, and a
+            // user who already chose to download must not be asked to choose again.
+            val statement = when (availability) {
+                is Availability.NotDownloaded ->
+                    "These passages answer your question, but the model that would phrase " +
+                        "them has not been downloaded."
+                is Availability.Downloading ->
+                    "These passages answer your question. The model that would phrase them " +
+                        "is still downloading (${availability.fetched} of ${availability.total} bytes)."
+                is Availability.Failed ->
+                    "These passages answer your question, but the model that would phrase " +
+                        "them could not be loaded: ${availability.reason}"
+                is Availability.Ready -> error("unreachable")
+            }
             return Card.ModelUnavailable(
-                statement = "These passages answer your question, but the model that would " +
-                    "phrase them has not been downloaded.",
+                statement = statement,
                 wouldHaveUsed = listed,
-                downloadBytes = downloadBytes,
+                downloadBytes = if (availability is Availability.NotDownloaded) downloadBytes else null,
+                availability = availability,
             )
         }
 
@@ -196,13 +209,13 @@ class Router(
         // the generated card's styling.
         if (context.isEmpty()) {
             diagnostics += "route 3 fired but every chunk redacted to nothing or unsafely"
-            val listed = settings.mapNotNull { citations.resolve(it.ref) }
-            if (listed.isEmpty()) return null
+            val listed = resolveAll(settings.map { it.ref }, diagnostics) ?: return null
             return Card.ModelUnavailable(
                 statement = "These passages matched, but their quotable content cannot be " +
                     "separated from the rest, so they are listed rather than summarised.",
                 wouldHaveUsed = listed,
                 downloadBytes = null,
+                availability = Availability.Ready,
             )
         }
 
@@ -236,10 +249,31 @@ class Router(
                     chips += chipOf(region, citation)
                 }
                 is SupportedRegion.Contextual ->
-                    region.context.forEach { ref -> citations.resolve(ref)?.let { footer += it } }
+                    footer += resolveAll(region.context, diagnostics) ?: return null
             }
         }
         return Card.Generated(validated.text, chips, footer.toList())
+    }
+
+    /**
+     * Every citation, or null if any one of them fails.
+     *
+     * Citation failure is all-or-nothing. Dropping the unresolvable ones renders a card
+     * that lists *some* of the passages it found and says nothing about the rest — a
+     * partial attributed card, which is indistinguishable to a user from a complete one
+     * and is exactly what the no-placeholder-citations rule forbids.
+     */
+    private fun resolveAll(refs: List<ChunkRef>, diagnostics: MutableList<String>): List<Citation>? {
+        val resolved = mutableListOf<Citation>()
+        for (ref in refs) {
+            val citation = citations.resolve(ref)
+            if (citation == null) {
+                diagnostics += "$ref: citation unresolved, card suppressed"
+                return null
+            }
+            resolved += citation
+        }
+        return resolved
     }
 
     /**

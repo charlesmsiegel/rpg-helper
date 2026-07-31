@@ -198,6 +198,48 @@ class RouterTest {
     }
 
     @Test
+    fun `each unavailable state says what actually happened`() {
+        // Three states, three remedies. Telling a user whose download already finished
+        // that it never started is a false diagnosis with no way to act on it.
+        fun statement(availability: Availability): String {
+            val answer = router().route(
+                retrieved(candidate(8, "setting", text = "lore")),
+                CountingGenerator(availability = availability), listOf(pack),
+                downloadBytes = 1_000,
+            )
+            return (answer.cards.single() as Card.ModelUnavailable).statement
+        }
+        assertTrue("has not been downloaded" in statement(Availability.NotDownloaded))
+        assertTrue("still downloading" in statement(Availability.Downloading(30, 100)))
+        assertTrue("out of memory" in statement(Availability.Failed("out of memory")))
+    }
+
+    @Test
+    fun `only a not-downloaded state offers the download`() {
+        fun card(availability: Availability) = router().route(
+            retrieved(candidate(8, "setting", text = "lore")),
+            CountingGenerator(availability = availability), listOf(pack), downloadBytes = 1_000,
+        ).cards.single() as Card.ModelUnavailable
+
+        assertEquals(1_000L, card(Availability.NotDownloaded).downloadBytes)
+        assertEquals(null, card(Availability.Failed("boom")).downloadBytes, "retry, not download")
+    }
+
+    @Test
+    fun `one unresolved citation suppresses the whole listing`() {
+        // Dropping the unresolvable ones renders a card listing *some* of what was found
+        // and saying nothing about the rest -- a partial attributed card, which a user
+        // cannot tell from a complete one.
+        val partial = CitationResolver { if (it.chunkId == 8L) citation(8) else null }
+        val answer = Router(partial, { emptyList() }).route(
+            retrieved(candidate(8, "setting", text = "a"), candidate(9, "setting", text = "b")),
+            CountingGenerator(availability = Availability.NotDownloaded), listOf(pack),
+        )
+        assertTrue(answer.cards.none { it is Card.ModelUnavailable }, "got ${answer.cards}")
+        assertTrue(answer.diagnostics.any { "citation unresolved" in it })
+    }
+
+    @Test
     fun `quotes still render when the model is absent`() {
         // Mixed results degrade rather than fail. A user who declines the download
         // permanently still has a complete, quoting rules reference.

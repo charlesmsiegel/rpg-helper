@@ -15,7 +15,9 @@
     "published SRD. It is here because the corpus needs rules, lore, tables, statblocks,",
     "and a second book to exercise every route, and because it can be licensed freely",
     "without anyone's permission. Swapping in a real open-licensed SRD is a change to",
-    "this directory and nothing else."
+    "this directory and nothing else.",
+    "",
+    "Chapter headings are declared as gaps rather than chunked. They carry no rules and their text already reaches retrieval through every child chunk's heading_path, which chunks_fts indexes. Declaring them is what lets the builder assert that chunks and gaps tile each source exactly -- a paragraph outside every declared span would otherwise ship missing, and activation could never discover it because the source bytes are not in the pack."
   ],
   "pack_uid": "srd:emberlight",
   "pack_version": "2.0.0",
@@ -59,6 +61,24 @@
           "reason": "legal",
           "from": "OPEN LICENCE NOTICE",
           "to": "is not reproduced here."
+        },
+        {
+          "reason": "other",
+          "from": "CHAPTER ONE: HOW TO PLAY",
+          "to": "CHAPTER ONE: HOW TO PLAY",
+          "_note": "a chapter heading; its text is carried in every child chunk's heading_path"
+        },
+        {
+          "reason": "other",
+          "from": "CHAPTER TWO: THE CINDER MARCHES",
+          "to": "CHAPTER TWO: THE CINDER MARCHES",
+          "_note": "a chapter heading; its text is carried in every child chunk's heading_path"
+        },
+        {
+          "reason": "other",
+          "from": "CHAPTER THREE: BESTIARY",
+          "to": "CHAPTER THREE: BESTIARY",
+          "_note": "a chapter heading; its text is carried in every child chunk's heading_path"
         }
       ],
       "chunks": [
@@ -215,6 +235,24 @@
           "reason": "front-matter",
           "from": "THE DOOR IN THE EMBER",
           "to": "International licence."
+        },
+        {
+          "reason": "other",
+          "from": "PART ONE: THE ASCENT",
+          "to": "PART ONE: THE ASCENT",
+          "_note": "a chapter heading; its text is carried in every child chunk's heading_path"
+        },
+        {
+          "reason": "other",
+          "from": "PART TWO: WHAT FOLLOWS",
+          "to": "PART TWO: WHAT FOLLOWS",
+          "_note": "a chapter heading; its text is carried in every child chunk's heading_path"
+        },
+        {
+          "reason": "other",
+          "from": "APPENDIX: CONDITIONS",
+          "to": "APPENDIX: CONDITIONS",
+          "_note": "a chapter heading; its text is carried in every child chunk's heading_path"
         }
       ],
       "chunks": [

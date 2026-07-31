@@ -1,4 +1,4 @@
-package dev.rpghelper.retrieval
+package dev.rpghelper.pack
 
 import java.text.Normalizer
 
@@ -14,6 +14,16 @@ import java.text.Normalizer
  * `2d6damage` is one token rather than a number beside a word.
  */
 object Tokenizer {
+
+    /**
+     * The form an alias must be stored in: tokenized, then joined by single spaces.
+     *
+     * The rewriter looks an alias up by joining query tokens that way, so `fast-cast` and
+     * `D&D` stored as written can never match anything — on a pack that passes a
+     * fold-only normalization check, because folding is idempotent on them.
+     */
+    fun indexForm(text: String): String = tokenize(text).joinToString(" ")
+
 
     /** Splits [text] into the tokens the index would have produced. */
     fun tokenize(text: String): List<String> {

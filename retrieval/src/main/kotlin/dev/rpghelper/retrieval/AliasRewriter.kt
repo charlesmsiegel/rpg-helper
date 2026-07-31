@@ -1,5 +1,7 @@
 package dev.rpghelper.retrieval
 
+import dev.rpghelper.pack.Tokenizer
+
 /** An alias row from a pack's `entities`. */
 data class Alias(
     val packUid: String,
@@ -16,6 +18,8 @@ data class RewrittenQuery(
     val entityHits: Set<Pair<String, Long>>,
     /** Which aliases fired, for diagnostics. */
     val matched: List<Alias>,
+    /** Aliases skipped because their canonical tokenizes to nothing, for the same view. */
+    val unusable: List<Alias>,
     /**
      * The query's concepts, each with every wording that counts as it.
      *
@@ -54,6 +58,7 @@ class AliasRewriter(aliases: List<Alias>) {
         val entityHits = mutableSetOf<Pair<String, Long>>()
         val canonicals = mutableListOf<String>()
         val groups = mutableListOf<TermGroup>()
+        val unusable = mutableListOf<Alias>()
 
         // Greedy, longest-first, non-overlapping. Without the non-overlap rule
         // "blade of the fallen" fires as itself, as "the fallen", and as "fallen",
@@ -70,11 +75,25 @@ class AliasRewriter(aliases: List<Alias>) {
                 // it the weight of the rare canonical the alias expands to.
                 val alternatives = mutableListOf(tokens.subList(index, index + length).toList())
                 for (hit in hits) {
-                    matched += hit
                     val canonical = Tokenizer.tokenize(hit.canonical)
+                    // A canonical of pure punctuation tokenizes to nothing. Added as an
+                    // alternative it would be satisfied by every chunk and award the whole
+                    // concept's weight to unrelated hits, so the alias is dropped instead.
+                    if (canonical.isEmpty()) {
+                        unusable += hit
+                        continue
+                    }
+                    matched += hit
                     canonicals += canonical
                     alternatives += canonical
                     hit.chunkId?.let { entityHits += hit.packUid to it }
+                }
+                if (matched.isEmpty() && alternatives.size == 1 && hits.isNotEmpty()) {
+                    // Every alias at this position was unusable; the user's own tokens
+                    // still stand for themselves.
+                    groups += TermGroup(alternatives.distinct())
+                    consumed = length
+                    break
                 }
                 groups += TermGroup(alternatives.distinct())
                 consumed = length
@@ -86,6 +105,6 @@ class AliasRewriter(aliases: List<Alias>) {
 
         // The user's own tokens are never dropped. An alias that fires wrongly costs some
         // precision; a rewrite that replaces the user's wording costs the query.
-        return RewrittenQuery(tokens + canonicals, entityHits, matched, groups)
+        return RewrittenQuery(tokens + canonicals, entityHits, matched, unusable, groups)
     }
 }

@@ -67,8 +67,25 @@ class PackLibrary(
         Files.createDirectories(packsDir)
     }
 
-    /** Ceilings that bound what a malformed or hostile pack can do to responsiveness. */
-    data class PackLimits(val maxFileBytes: Long = 2L * 1024 * 1024 * 1024)
+    /**
+     * Ceilings that bound what a malformed or hostile pack can do to responsiveness.
+     *
+     * A file-size limit alone is not one. A pack well under 2 GiB can hold millions of
+     * chunks or aliases, or one text value of a gigabyte, and the validator scans and
+     * materializes all of it *before* any check could reject it — so the refusal arrives
+     * as an out-of-memory kill rather than as a refusal.
+     */
+    data class PackLimits(
+        val maxFileBytes: Long = 2L * 1024 * 1024 * 1024,
+        val maxChunks: Long = 500_000,
+        val maxVectors: Long = 5_000_000,
+        val maxEntities: Long = 500_000,
+        val maxTableRows: Long = 1_000_000,
+        /** One chunk's text. A book's longest chapter is far below this. */
+        val maxTextBytes: Long = 4L * 1024 * 1024,
+        /** One embedding. A 4096-dimension binary16 vector is 8 KiB. */
+        val maxBlobBytes: Long = 64 * 1024,
+    )
 
     /**
      * Validates [source] and installs it.
@@ -116,6 +133,13 @@ class PackLibrary(
             }
             size = Files.size(staged)
 
+            // Counts and value sizes before the full passes, using SQL aggregates so
+            // nothing large is loaded to discover it is too large.
+            preflight(staged)?.let {
+                abandon(installId, staged)
+                return InstallResult.TooLarge(it)
+            }
+
             val report = Packs.validateFile(staged, supportedEmbedders)
             if (!report.isValid) {
                 abandon(installId, staged)
@@ -132,9 +156,22 @@ class PackLibrary(
 
             // 2. Swap: the previous ready row and the new one change together.
             db.transaction {
+                // Re-read inside the transaction. `existing` was read before the file was
+                // hashed, and the user can uninstall or deactivate the old pack in that
+                // window: acting on the stale snapshot would reinstate something they
+                // explicitly removed, or hand the replacement an activation they had just
+                // turned off.
+                val current = findReady(meta.packUid)
+                if (current?.installId != existing?.installId) {
+                    abandon(installId, staged)
+                    error(
+                        "the pack being replaced changed while this one was being verified; " +
+                            "nothing was installed",
+                    )
+                }
                 db.execute(
                     "DELETE FROM installed_packs WHERE install_id = ?",
-                    existing?.installId ?: -1L,
+                    current?.installId ?: -1L,
                 )
                 db.execute(
                     "UPDATE installed_packs SET pack_uid = ?, pack_version = ?, title = ?, " +
@@ -146,8 +183,8 @@ class PackLibrary(
                     // is never active on arrival: a pack can claim any uid it likes, so
                     // inheriting activation would let an imported file become live content
                     // without the user ever deciding to activate it.
-                    existing?.active ?: false,
-                    existing?.priority ?: nextPriority(), installId,
+                    current?.active ?: false,
+                    current?.priority ?: nextPriority(), installId,
                 )
             }
         } catch (e: Exception) {
@@ -356,6 +393,47 @@ class PackLibrary(
         active = boolean(8),
         priority = int(9),
     )
+
+    /**
+     * Row counts and the largest single values, or null when everything is in bounds.
+     *
+     * Read with `count(*)` and `max(length(...))`, which SQLite answers without
+     * materializing the values — the whole point, since materializing them is the failure
+     * being prevented.
+     */
+    private fun preflight(path: Path): String? = runCatching {
+        java.sql.DriverManager.getConnection("jdbc:sqlite:${path.toAbsolutePath()}").use { c ->
+            fun scalar(sql: String): Long = c.createStatement().use { s ->
+                s.executeQuery(sql).use { if (it.next()) it.getLong(1) else 0L }
+            }
+            val checks = listOf(
+                Triple("chunks", "SELECT count(*) FROM chunks", limits.maxChunks),
+                Triple("vectors", "SELECT count(*) FROM vectors", limits.maxVectors),
+                Triple("entities", "SELECT count(*) FROM entities", limits.maxEntities),
+                Triple("table rows", "SELECT count(*) FROM table_rows", limits.maxTableRows),
+                Triple(
+                    "a chunk's text",
+                    "SELECT COALESCE(max(length(text)), 0) FROM chunks",
+                    limits.maxTextBytes,
+                ),
+                Triple(
+                    "an embedding",
+                    "SELECT COALESCE(max(length(embedding)), 0) FROM vectors",
+                    limits.maxBlobBytes,
+                ),
+            )
+            for ((what, sql, ceiling) in checks) {
+                val actual = scalar(sql)
+                if (actual > ceiling) return@use "$what: $actual exceeds the limit of $ceiling"
+            }
+            null
+        }
+    }.getOrElse {
+        // A file that cannot be queried at all is not *too large*, it is not a pack --
+        // and the validator says so precisely, where this could only guess. Falling
+        // through keeps "too large" meaning too large.
+        null
+    }
 
     /**
      * Copies [source] to [target], stopping if more than [limit] bytes arrive.

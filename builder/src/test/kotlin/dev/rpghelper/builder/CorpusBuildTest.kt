@@ -5,6 +5,8 @@ import dev.rpghelper.pack.Packs
 import dev.rpghelper.pack.map
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlinx.serialization.json.jsonObject
+import java.nio.file.Files
 import kotlin.test.assertTrue
 
 /**
@@ -186,6 +188,48 @@ class CorpusBuildTest {
     }
 
     @Test
+    fun `a paragraph in no chunk and no gap fails the build`() {
+        // Activation can never discover this: the source bytes are not in the pack, so
+        // nothing downstream can tell a passage deliberately skipped from one lost. The
+        // builder is the only place it is knowable.
+        val corpus = CorpusSpec.load(CorpusPack.directory)
+        val trimmed = trimLastGap(corpus)
+        val failure = kotlin.runCatching {
+            PackBuilder(trimmed, CorpusPack.EMBEDDER)
+                .buildTo(Files.createTempDirectory("holes").resolve("x.rpgpack"))
+        }.exceptionOrNull()
+        assertTrue(failure != null, "a hole must fail the build")
+        assertTrue(failure.message!!.contains("in no chunk and no declared gap"), failure.message!!)
+    }
+
+    @Test
+    fun `every alias is stored in the form the rewriter looks it up by`() {
+        // Folding alone leaves `fast-cast` and `D&D` intact, while the rewriter joins query
+        // tokens with single spaces -- so those could never match, on a pack that passed a
+        // fold-only normalization check because folding is idempotent on them.
+        db().use { database ->
+            for (alias in database.map("SELECT alias FROM entities") { it.string(0) }) {
+                assertEquals(dev.rpghelper.pack.Tokenizer.indexForm(alias), alias)
+            }
+        }
+    }
+
+    @Test
+    fun `capability manifests are encoded, not concatenated`() {
+        // A label carrying a newline or a tab produces invalid JSON under hand-written
+        // quoting; the pack still activates and the roll control silently disappears.
+        db().use { database ->
+            val manifests = database.map("SELECT manifest FROM capabilities") { it.string(0) }
+            assertTrue(manifests.isNotEmpty())
+            for (manifest in manifests) {
+                val parsed = kotlinx.serialization.json.Json
+                    .parseToJsonElement(manifest).jsonObject
+                assertTrue("table_id" in parsed && "label" in parsed, manifest)
+            }
+        }
+    }
+
+    @Test
     fun `an anchor that is not unique fails the build rather than picking one`() {
         // "First match" is exactly how a fixture starts pointing somewhere plausible and
         // wrong, so ambiguity is refused instead of resolved.
@@ -204,4 +248,28 @@ class CorpusBuildTest {
         }.exceptionOrNull()
         assertTrue(failure is Anchors.UnresolvedAnchorException, "got $failure")
     }
+}
+
+/** The corpus with one source's last gap removed, leaving a real hole. */
+private fun trimLastGap(corpus: CorpusSpec): CorpusSpec {
+    val json = kotlinx.serialization.json.Json.parseToJsonElement(
+        java.nio.file.Files.readString(corpus.root.resolve("pack.json")),
+    ).jsonObject
+    val sources = json.getValue("sources").let { it as kotlinx.serialization.json.JsonArray }
+    val first = sources.first().jsonObject
+    val gaps = first.getValue("gaps").let { it as kotlinx.serialization.json.JsonArray }
+    val trimmedSource = kotlinx.serialization.json.JsonObject(
+        first.toMutableMap().apply {
+            put("gaps", kotlinx.serialization.json.JsonArray(gaps.dropLast(1)))
+        },
+    )
+    val trimmed = kotlinx.serialization.json.JsonObject(
+        json.toMutableMap().apply {
+            put(
+                "sources",
+                kotlinx.serialization.json.JsonArray(listOf(trimmedSource) + sources.drop(1)),
+            )
+        },
+    )
+    return CorpusSpec(corpus.root, trimmed)
 }
