@@ -19,6 +19,7 @@ import dev.rpghelper.state.ActivationResult
 import dev.rpghelper.state.AnswerCache
 import dev.rpghelper.state.Conversation
 import dev.rpghelper.state.DocumentStore
+import dev.rpghelper.state.DocumentTransfer
 import dev.rpghelper.state.InstallResult
 import dev.rpghelper.state.SupersessionImpact
 import dev.rpghelper.state.TrackerValue
@@ -55,6 +56,8 @@ rpg-helper — build packs, and answer questions out of them.
   sheet <dir> ready <id>                     leave draft: minimums start being checked
   sheet <dir> accept <id> <fingerprint> [note]
                                      keep a deliberate deviation from the book
+  sheet <dir> export <id> <file.rpgdoc> | import <file.rpgdoc>
+                                     a document as a file, which is how it moves
   fetch-model <manifest.json> <dir>  download a model and verify it against its digests
   make-manifest <id> <name> <license> <base-url> <dir>
                                      pin a manifest to weights you already have
@@ -536,6 +539,30 @@ private fun sheet(arguments: List<String>): Int {
                 0
             }
 
+            "export" -> {
+                require(rest.size == 2) { "usage: sheet <dir> export <document-id> <file.rpgdoc>" }
+                val id = documentId(rest[0])
+                val target = Path.of(rest[1])
+                // Round-tripped through the file being replaced, if there is one: a document
+                // exported by a later build and re-imported by this one must not lose the
+                // fields this build does not know about.
+                val previous = runCatching { Files.readString(target) }.getOrNull()
+                Files.writeString(target, DocumentTransfer.export(documents, id, previous))
+                println("wrote $target")
+                0
+            }
+
+            "import" -> {
+                require(rest.size == 1) { "usage: sheet <dir> import <file.rpgdoc>" }
+                val imported = DocumentTransfer.import(documents, Files.readString(Path.of(rest[0])))
+                // Dropped rulings are named. An acceptance that quietly failed to arrive is
+                // found by seeing a flag the user thought they had settled.
+                imported.droppedAcceptances.forEach { System.err.println("note: $it") }
+                println("imported as #${imported.documentId}")
+                printCheck(store, documents, imported.documentId)
+                0
+            }
+
             "show" -> {
                 require(rest.size == 1) { "usage: sheet <dir> show <document-id>" }
                 val id = documentId(rest[0])
@@ -559,7 +586,9 @@ private const val SHEET_USAGE = """usage:
   sheet <dir> set <document-id> <key> <value>
   sheet <dir> clear <document-id> <key>
   sheet <dir> ready <document-id>
-  sheet <dir> accept <document-id> <fingerprint> [note]"""
+  sheet <dir> accept <document-id> <fingerprint> [note]
+  sheet <dir> export <document-id> <file.rpgdoc>
+  sheet <dir> import <file.rpgdoc>"""
 
 private fun documentId(argument: String): Long =
     argument.toLongOrNull() ?: error("'$argument' is not a document id")

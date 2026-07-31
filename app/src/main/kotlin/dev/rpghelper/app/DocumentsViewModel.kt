@@ -1,6 +1,7 @@
 package dev.rpghelper.app
 
 import android.app.Application
+import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.compose.runtime.getValue
@@ -14,6 +15,7 @@ import dev.rpghelper.session.SheetState
 import dev.rpghelper.session.Store
 import dev.rpghelper.state.Document
 import dev.rpghelper.state.DocumentStore
+import dev.rpghelper.state.DocumentTransfer
 import dev.rpghelper.state.InvalidTrackerKeyException
 import dev.rpghelper.state.Tracker
 import dev.rpghelper.state.TrackerValue
@@ -217,6 +219,63 @@ class DocumentsViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun dismissPassage() {
         passage = null
+    }
+
+    /**
+     * Writes one document to a file the user chose.
+     *
+     * A file is how a document moves between devices, because there is no sync — local is
+     * the premise. What the app must not do is lose what it cannot read: if the target
+     * already holds a `.rpgdoc`, its unknown top-level keys are carried into the new one,
+     * so a document exported by a later build and re-exported by this one keeps the fields
+     * this build does not understand.
+     */
+    fun export(documentId: Long, uri: Uri) {
+        viewModelScope.launch {
+            busy = true
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    val resolver = getApplication<Application>().contentResolver
+                    val previous = runCatching {
+                        resolver.openInputStream(uri)?.use { it.readBytes().decodeToString() }
+                    }.getOrNull()
+                    val text = DocumentTransfer.export(documents, documentId, previous)
+                    // "wt" truncates. Without it a shorter export leaves the tail of the
+                    // longer file it replaced, and the result is a document that parses and
+                    // is not the one that was written.
+                    resolver.openOutputStream(uri, "wt")?.use { it.write(text.encodeToByteArray()) }
+                        ?: error("could not write that file")
+                }
+            }
+                .onSuccess { failure = null }
+                .onFailure { failure = it.message ?: "could not export that document" }
+            busy = false
+        }
+    }
+
+    /** Reads a `.rpgdoc`. A file it cannot read is refused whole, never imported partially. */
+    fun import(uri: Uri) {
+        viewModelScope.launch {
+            busy = true
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    val text = getApplication<Application>().contentResolver
+                        .openInputStream(uri)
+                        ?.use { it.readBytes().decodeToString() }
+                        ?: error("could not read that file")
+                    DocumentTransfer.import(documents, text)
+                }
+            }
+                .onSuccess { imported ->
+                    // Named, not swallowed. A ruling that quietly failed to arrive is found
+                    // by seeing a flag the user thought they had settled.
+                    failure = imported.droppedAcceptances.takeIf { it.isNotEmpty() }
+                        ?.joinToString("; ", prefix = "Imported, but: ")
+                    refresh()
+                }
+                .onFailure { failure = it.message ?: "could not import that file" }
+            busy = false
+        }
     }
 
     fun delete(documentId: Long) {

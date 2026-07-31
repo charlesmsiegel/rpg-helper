@@ -1,5 +1,7 @@
 package dev.rpghelper.app
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -53,6 +55,18 @@ import dev.rpghelper.routing.render
 @Composable
 fun DocumentsScreen(model: DocumentsViewModel = viewModel()) {
     val open = model.open
+    // The system picker, for both directions. A document is a file, and this is how it
+    // moves; no storage permission is asked for, because the app only ever wants the one
+    // document the user pointed at.
+    val importer = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let(model::import)
+    }
+    val exporter = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json"),
+    ) { uri ->
+        val documentId = open?.document?.documentId
+        if (uri != null && documentId != null) model.export(documentId, uri)
+    }
     if (open != null) {
         SheetScreen(
             sheet = open,
@@ -67,6 +81,8 @@ fun DocumentsScreen(model: DocumentsViewModel = viewModel()) {
             onUnaccept = { model.unaccept(open.document.documentId, it) },
             onShowPassage = model::showPassage,
             onDismissPassage = model::dismissPassage,
+            onExport = { exporter.launch("${open.document.title}.rpgdoc") },
+            onDelete = { model.delete(open.document.documentId) },
         )
         return
     }
@@ -76,6 +92,7 @@ fun DocumentsScreen(model: DocumentsViewModel = viewModel()) {
         failure = model.failure,
         onOpen = model::openSheet,
         onCreate = model::create,
+        onImport = { importer.launch(arrayOf("application/json", "*/*")) },
     )
 }
 
@@ -85,6 +102,7 @@ fun DocumentList(
     failure: String? = null,
     onOpen: (Long) -> Unit = {},
     onCreate: (String, String?, String?) -> Unit = { _, _, _ -> },
+    onImport: () -> Unit = {},
 ) {
     var creating by remember { mutableStateOf(false) }
 
@@ -99,6 +117,7 @@ fun DocumentList(
         }
         Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
             TextButton(onClick = { creating = true }) { Text("New document") }
+            TextButton(onClick = onImport) { Text("Import a file") }
         }
 
         if (sheets.isEmpty()) {
@@ -246,6 +265,8 @@ fun SheetScreen(
     onUnaccept: (Violation) -> Unit = {},
     onShowPassage: (Violation) -> Unit = {},
     onDismissPassage: () -> Unit = {},
+    onExport: () -> Unit = {},
+    onDelete: () -> Unit = {},
 ) {
     var key by remember { mutableStateOf("") }
     var value by remember { mutableStateOf("") }
@@ -253,7 +274,13 @@ fun SheetScreen(
     Column(Modifier.fillMaxSize().padding(horizontal = 8.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             TextButton(onClick = onBack) { Text("Documents") }
-            Text(sheet.document.title, style = MaterialTheme.typography.titleMedium)
+            Text(
+                sheet.document.title,
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = onExport) { Text("Export") }
+            TextButton(onClick = onDelete) { Text("Delete") }
         }
 
         Text(headline(sheet.check), style = MaterialTheme.typography.bodySmall)

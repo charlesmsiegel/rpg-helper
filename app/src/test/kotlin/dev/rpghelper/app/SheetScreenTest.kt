@@ -244,6 +244,24 @@ class SheetScreenTest {
     }
 
     @Test
+    fun `a document can be exported, because a file is how it moves`() {
+        // There is no sync -- local is the premise -- so the file *is* the transfer, and a
+        // surface that cannot write one is a surface that traps the user's character in it.
+        var exported = false
+        compose.setContent { SheetScreen(sheet(check = check()), onExport = { exported = true }) }
+        compose.onNodeWithText("Export").performClick()
+        assertTrue(exported)
+    }
+
+    @Test
+    fun `the list offers import beside creation`() {
+        var imported = false
+        compose.setContent { DocumentList(sheets = emptyList(), onImport = { imported = true }) }
+        compose.onNodeWithText("Import a file").performClick()
+        assertTrue(imported)
+    }
+
+    @Test
     fun `an empty list explains what a document is for`() {
         compose.setContent { DocumentList(sheets = emptyList()) }
         compose.onNodeWithText("No documents yet", substring = true).assertExists()
