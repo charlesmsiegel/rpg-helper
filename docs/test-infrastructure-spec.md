@@ -9,6 +9,8 @@ query sets, the claim-support judge, the shared conformance vectors, and what ga
 
 `android-app-design.md` §8 establishes the strategy. This document pins how it runs.
 
+Implementation order: **2 of 8** — see the README for the full sequence and why it runs in this order.
+
 Status: specified, partially implemented — the pack rejection corpus and the schema-drift
 gate exist in `:pack`.
 

@@ -10,6 +10,8 @@ contain.
 It does not specify an aesthetic. Colours, spacing, and motion are implementation
 choices; the requirements below constrain them without picking them.
 
+Implementation order: **6 of 8** — see the README for the full sequence and why it runs in this order.
+
 Status: specified, unimplemented.
 
 ---

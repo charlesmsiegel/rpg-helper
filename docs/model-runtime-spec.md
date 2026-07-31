@@ -7,6 +7,8 @@ one is missing.
 bundling the small models. This document pins the interfaces, the availability states,
 the download contract, and the degradation behaviour each absence produces.
 
+Implementation order: **3 of 8** — see the README for the full sequence and why it runs in this order.
+
 Status: specified, unimplemented.
 
 ---

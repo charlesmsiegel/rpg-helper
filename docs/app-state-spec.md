@@ -7,6 +7,8 @@ app writes to: which packs are installed and active, the documents and trackers 
 `documents-and-constraints-spec.md`, model download state, and the conversational
 window.
 
+Implementation order: **1 of 8** — see the README for the full sequence and why it runs in this order.
+
 Status: specified, unimplemented.
 
 ---

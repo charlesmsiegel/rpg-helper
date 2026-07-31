@@ -11,6 +11,8 @@ What leaves this pipeline is a ranked list of `(pack_uid, chunk_id)` with enough
 attached evidence for `routing-and-cards-spec.md` to decide how each one renders.
 Retrieval never decides whether something is quoted.
 
+Implementation order: **4 of 8** — see the README for the full sequence and why it runs in this order.
+
 Status: specified, unimplemented.
 
 ---

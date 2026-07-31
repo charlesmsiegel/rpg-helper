@@ -10,6 +10,8 @@ vocabulary. This is that document.
 It is owned by the app, as those documents assume: the app is what refuses a pack it
 cannot read, so the app is where the definition of readable lives.
 
+Implementation order: **done** — this is the contract the rest builds on.
+
 Status: `schema_version = 1`. Implemented by `:pack`; the DDL below is generated from
 `PackSchema.DDL` and `SchemaDocSyncTest` fails the build if they drift.
 

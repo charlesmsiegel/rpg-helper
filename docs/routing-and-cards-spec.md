@@ -10,6 +10,8 @@ The pack contract exists to make byte-exact quotation possible and `retrieval-sp
 delivers candidates without deciding anything about them. Everything in this document is
 about not squandering that between the database and the screen.
 
+Implementation order: **5 of 8** — see the README for the full sequence and why it runs in this order.
+
 Status: specified, unimplemented.
 
 ---

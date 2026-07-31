@@ -11,6 +11,8 @@ Storage is `app-state-spec.md`'s concern; this document defines the model and th
 semantics. Where the two touch, this one is normative about *meaning* and that one is
 normative about *columns*.
 
+Implementation order: **7 of 8** — see the README for the full sequence and why it runs in this order.
+
 Status: specified, unimplemented.
 
 ---

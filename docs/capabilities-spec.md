@@ -9,6 +9,8 @@ is how to roll it*, and it certainly does not ship code.
 manifest schemas, the roller's semantics, and the conformance vectors that keep the app's
 executor and the builder's validator agreeing about what an expression means.
 
+Implementation order: **8 of 8** — see the README for the full sequence and why it runs in this order.
+
 Status: specified, unimplemented. The dice **grammar** is already pinned in
 `pack-schema.md` §6; this document specifies its **executor**.
 
