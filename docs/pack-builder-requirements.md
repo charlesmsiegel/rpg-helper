@@ -151,8 +151,14 @@ survives depends on the parent's class**, not on the nesting alone:
 
 - **Verbatim-class parent** → the parent wins. The user sees the complete rule rather
   than a table torn out of the middle of it.
-- **Non-verbatim parent** (a `setting` chapter containing a rollable rumor table, or a
-  statblock inside a lore passage) → the **child** wins.
+- **Non-verbatim parent matching only through its child** → the **child** wins.
+- **Non-verbatim parent that also matches independently** → **both survive**, and each
+  takes its own route: the lore is explained and the table is quoted, from one query.
+
+The third case is why `content` vectors carry `window_start`/`window_end` at all. Deciding
+whether a parent matched independently needs evidence, and those offsets are half of it —
+`04-retrieval-spec.md` §9.1 states the criteria the app applies. An earlier version of this
+section gave only the first two cases, which made the offsets look like bookkeeping.
 
 The second case is not symmetry for its own sake. A `setting` parent's text contains
 its child's text, so any lexical search that finds the table also finds the enclosing
@@ -161,9 +167,11 @@ table and deliver it as generated prose — the app paraphrasing content it was 
 a byte-exact copy of. Class-aware dedup is what keeps a verbatim child from being
 swallowed by a parent that cannot be quoted.
 
-A capability may also target a child directly by kind — this is how the roller reaches
-a table embedded in a rule without the app ever quoting the table stripped of its
-surrounding rule.
+A capability targets a chunk **by `chunk_id`**, so the roller reaches a table embedded in
+a rule by naming that table's own chunk. There is no addressing by `kind`; an earlier
+version of this section described one, and no table in the format supports it. A
+`roll-table` capability must name the same chunk as the `tables` row it invokes
+(`08-capabilities-spec.md` §1.2).
 
 `setting` chunks are also stored as sliced source text (generation happens on-device
 from them), but drift there degrades quality rather than breaking a guarantee.
@@ -869,11 +877,17 @@ fabricated one costs the guarantee.
 - Incremental rebuild when a source is re-tagged, without invalidating installed packs
 - The exact form of `stable_key`, which decides whether supersession survives a
   rebuild of the pack being amended
-- Whether the normalized source text ships in the pack (enables span re-validation
-  on-device, roughly doubles text size) or stays builder-side with only the hash.
-  **Until this is settled, span validation is builder-only by definition** — boundary,
-  containment, overlap, and slice-equality checks all need the bytes, and the app has
-  only the hash. The app's own checks are limited to what a pack can prove about
-  itself: blob length, the probe vector, declared dimensions, and `span_end -
-  span_start` matching the UTF-8 byte length of `text`. Shipping the source would let
-  those merge into one suite run on both sides.
+- Whether the normalized source text ships in the pack (enables full span
+  re-validation on-device, roughly doubles text size) or stays builder-side with only the
+  hash.
+
+  **Only the checks that genuinely need the source bytes are builder-only**, and that is a
+  shorter list than this document once claimed. Boundary validation and slice equality
+  against the source need the bytes. Containment, sibling overlap, claim-span validity,
+  and the agreement between a nested child's text and its parent's text at the child's
+  offset do not — the first two are integer comparisons, and the last two index into
+  strings the pack already ships. All four are checked on the device today.
+
+  A builder should therefore expect the app to reject a pack for any of them, and should
+  not treat "the app cannot see this" as a reason to be lax. `00-pack-schema.md` §7 is the
+  authoritative list.
