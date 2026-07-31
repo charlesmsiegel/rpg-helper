@@ -26,6 +26,8 @@ rpg-helper — build packs, and answer questions out of them.
                                      retrieve, route, and print the cards
   roll <pack.rpgpack> <table-id>     roll on a validated table
   fetch-model <manifest.json> <dir>  download a model and verify it against its digests
+  make-manifest <id> <name> <license> <base-url> <dir>
+                                     pin a manifest to weights you already have
 
 This tool bundles no model weights, so `ask` runs the deterministic stand-in embedder and
 no generative model: setting questions answer as citations rather than prose. That is the
@@ -49,6 +51,7 @@ fun main(arguments: Array<String>) {
             "ask" -> ask(rest)
             "roll" -> roll(rest)
             "fetch-model" -> fetchModel(rest)
+            "make-manifest" -> makeManifest(rest)
             "help", "--help", "-h", null -> {
                 println(USAGE.trim())
                 0
@@ -204,4 +207,95 @@ private fun fetchModel(arguments: List<String>): Int {
             1
         }
     }
+}
+
+// ---------------------------------------------------------------------- make-manifest
+
+/**
+ * Writes a manifest pinned to weights already on disk.
+ *
+ * `ModelManifest` refuses a placeholder digest at parse, on purpose: a manifest is
+ * written before the artifact it describes exists, and tolerating the placeholder is how
+ * a build comes to download several gigabytes of executable behaviour and verify nothing.
+ * That refusal is only tenable if filling the field in is easy, and this is what makes it
+ * easy — fetch the weights however you like, point this at the directory, and get a
+ * manifest pinned to the exact bytes you looked at.
+ *
+ * The result is parsed back through `ModelManifest` before it is printed. A generator that
+ * can emit something its own parser rejects is a generator that will.
+ */
+private fun makeManifest(arguments: List<String>): Int {
+    require(arguments.size == 5) {
+        "usage: make-manifest <id> <display-name> <license> <base-url> <dir>"
+    }
+    print(manifestJson(arguments[0], arguments[1], arguments[2], arguments[3], Path.of(arguments[4])))
+    return 0
+}
+
+internal fun manifestJson(
+    id: String,
+    displayName: String,
+    license: String,
+    baseUrl: String,
+    directory: Path,
+): String {
+    require(Files.isDirectory(directory)) { "$directory is not a directory" }
+
+    val files = Files.list(directory).use { stream ->
+        stream.filter { Files.isRegularFile(it) }
+            .filter { !it.fileName.toString().startsWith(".") }
+            .sorted()
+            .toList()
+    }
+    require(files.isNotEmpty()) { "$directory holds no files to pin" }
+
+    val entries = files.joinToString(",\n") { file ->
+        val name = file.fileName.toString()
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+        Files.newInputStream(file).use { input ->
+            val buffer = ByteArray(1 shl 16)
+            while (true) {
+                val read = input.read(buffer)
+                if (read < 0) break
+                digest.update(buffer, 0, read)
+            }
+        }
+        val hex = digest.digest().joinToString("") { "%02x".format(it) }
+        """    {
+      "name": ${quote(name)},
+      "url": ${quote(baseUrl.trimEnd('/') + "/" + name)},
+      "bytes": ${Files.size(file)},
+      "sha256": "$hex"
+    }"""
+    }
+
+    val json = """{
+  "id": ${quote(id)},
+  "display_name": ${quote(displayName)},
+  "license": ${quote(license)},
+  "files": [
+$entries
+  ]
+}
+"""
+    // Round-tripped before it is returned: every rule the parser enforces -- HTTPS, real
+    // digests, a single safe leaf per file name -- is enforced on the way out too.
+    ModelManifest.parse(json)
+    return json
+}
+
+/** JSON string escaping. A file name holding a quote or a backslash is a valid file name. */
+private fun quote(value: String): String = buildString {
+    append('"')
+    for (character in value) {
+        when (character) {
+            '"' -> append("\\\"")
+            '\\' -> append("\\\\")
+            '\n' -> append("\\n")
+            '\r' -> append("\\r")
+            '\t' -> append("\\t")
+            else -> if (character < ' ') append("\\u%04x".format(character.code)) else append(character)
+        }
+    }
+    append('"')
 }

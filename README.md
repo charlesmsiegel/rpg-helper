@@ -107,6 +107,25 @@ has not been downloaded — which is the app's honest state before a download, n
 built for the command line. `--why` shows what each signal contributed and what was gated
 out.
 
+### Bringing your own weights
+
+`ModelManifest` refuses a placeholder digest at parse time. A manifest is written before
+the artifact it describes exists, so the digest field spends part of its life unfilled,
+and tolerating that is exactly how a build comes to download several gigabytes of
+executable behaviour and verify nothing — in the app's only network operation. The
+refusal is only tenable if filling the field in is easy:
+
+```sh
+$CLI make-manifest gemma-3n-e2b "Gemma 3n E2B" gemma-terms \
+    https://your-host/gemma ./weights > gemma.json
+$CLI fetch-model gemma.json ~/.rpg-helper/models
+```
+
+`make-manifest` digests the files you already have and writes a manifest pinned to those
+exact bytes; `fetch-model` is resumable across connectivity loss and verifies the whole
+assembled file rather than the newly-fetched tail, because a resume stitched onto a
+corrupt prefix would otherwise pass.
+
 ## Building
 
 Requires a JDK 21 to build — the float16 tests check the hand-written codec against
