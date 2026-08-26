@@ -201,7 +201,7 @@ records a design decision made and not yet acted on.
 
 ## License
 
-Apache-2.0
+[Apache-2.0](LICENSE).
 
 ## Related
 
